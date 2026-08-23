@@ -1,61 +1,75 @@
 # InstinctaZero Android
 
-A pure native Android companion for reviewing completed Lichess games with an
-InstinctaZero/Leela backend running on your PC. It intentionally has no game
-play, move input, browser view, Stockfish, or live-game analysis path.
+InstinctaZero Android 0.2 is an **offline local analysis board**. It opens
+directly to a compact, legacy-Lichess-inspired analysis surface: a legal,
+interactive board, move navigation, orientation and board-size controls, and
+small notation/book/lines/graph tabs populated by a static demonstration
+position.
 
-## Requirements and pairing
+This release deliberately has no account connection, pairing, game archive,
+synchronisation, PC service, remote engine, opening-book service, or Leela
+request path. It declares no `INTERNET` permission. Everything rendered by the
+app is packaged in the APK and loaded from an Android `WebViewAssetLoader`; the
+WebView is configured to block network, file, content, mixed-content, cookies,
+pop-ups, and external navigation.
 
-- An InstinctaZero PC server reachable from the phone through Tailscale or
-  another private, trusted HTTPS connection. The app rejects plain HTTP.
-- Completed games synchronized on the PC. The phone cannot submit arbitrary
-  positions or import ongoing games.
+## Current scope
 
-On the PC, use the same state database as the running server:
+The board uses the actual Chessground implementation from the 2018 legacy
+Lichess Android client, rather than a replacement board implementation. The
+local controller uses `chess.js` for legal moves, FEN, SAN, castling,
+en-passant, and promotion.
 
-```bash
-instinctazero mobile --state-db instinctazero_state.db sync
-instinctazero mobile --state-db instinctazero_state.db pair-code
-```
+The engine rows, opening-book panel, and graph are visual/static demo content
+for this UI-rebuild milestone. They do **not** run Leela, query a server, or
+represent live analysis. Account and completed-game integration are deferred
+until the offline board experience is accepted.
 
-The pairing code is single-use and expires after ten minutes. In the Android
-app, open **Pair device**, enter the private HTTPS PC URL, pairing code, and a
-device name, then tap **Pair securely**. The phone receives a revocable device
-credential and encrypts it with Android Keystore. It never receives, stores, or
-asks for your Lichess login or token.
+## Controls
 
-Paired devices can be reviewed or revoked from the PC:
+- Tap or drag a piece to make a legal move.
+- Tap a move in the notation or use the previous/next footer controls to
+  navigate the local line.
+- Use the footer controls for menu, settings, orientation, board size,
+  previous, and next. The row of small tabs switches the visible legacy-style
+  analysis panel.
 
-```bash
-instinctazero mobile --state-db instinctazero_state.db devices
-instinctazero mobile --state-db instinctazero_state.db revoke DEVICE_ID
-```
+## Build from source
 
-## Using the app
-
-- **Games** synchronizes and lists the completed-game archive, newest first.
-- **Analysis** provides a native board, move navigation, Leela principal
-  variations, evaluation graph, and Masters/Lichess opening-book views.
-- **Settings** controls automatic sync/open behavior, arrows, opening-book
-  visibility, analysis limits/profile, and pairing state.
-
-An unpaired demo mode lets you evaluate the native board and analysis UI
-without connecting to a backend.
-
-## Build
+Requirements: JDK 17, Android SDK (compile SDK 35), Node.js with npm for the
+checked-in browser bundles.
 
 ```bash
 export JAVA_HOME=/path/to/jdk17
 export ANDROID_HOME=/path/to/android-sdk
-./gradlew assembleDebug
+
+cd web
+npm ci
+npm run check
+cd ..
+
+./gradlew test assembleDebug
 ```
 
-Release builds are minified with R8. Signing credentials are intentionally kept
-outside this repository; see [`docs/release.md`](docs/release.md).
+`npm run check` type-checks and recreates/verifies both generated browser
+bundles. `legacy-chessground.js` is generated from the retained source snapshot
+in `web-src/legacy-chessground/`; `chess-rules.js` is generated from the pinned
+`chess.js` dependency. The remaining HTML, CSS, SVGs, fonts, and piece assets
+are source-controlled under `app/src/main/assets/analysis/`.
 
-## License and source
+For a release build, use the external signing properties described in
+[`docs/release.md`](docs/release.md). Signing credentials and keystores are
+never stored in this repository.
 
-InstinctaZero Android is free software distributed under GPL-3.0-or-later. The
-complete preferred source for the APK is this repository, including its Gradle
-wrapper and build instructions. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
-for the Cburnett/Chessground attribution.
+## Licensing and provenance
+
+InstinctaZero Android is GPL-3.0-or-later. The complete preferred source for
+the APK includes the Android project, the vendor source snapshot, locked npm
+dependencies, and browser build scripts.
+
+The legacy Chessground source, board/piece artwork, typefaces, and `chess.js`
+have their respective notices in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
+and `app/src/main/assets/licenses/`. See
+[`web-src/legacy-chessground/PROVENANCE.md`](web-src/legacy-chessground/PROVENANCE.md)
+and [`web-src/chess-rules-PROVENANCE.md`](web-src/chess-rules-PROVENANCE.md) for
+the exact upstream revisions and rebuild procedure.

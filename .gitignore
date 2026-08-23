@@ -4,6 +4,7 @@
 /local.properties
 **/build/
 /signing/
+/web/node_modules/
 *.jks
 *.keystore
 *.p12

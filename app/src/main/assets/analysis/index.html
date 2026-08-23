@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'">
+  <title>InstinctaZero analysis</title>
+  <link rel="stylesheet" href="analysis.css">
+</head>
+<body>
+  <main id="app" aria-label="Offline chess analysis">
+    <header class="top"><button class="back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M14.5 4 6.5 12l8 8"/></svg></button><div class="game-title"><strong><svg class="bolt" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 1 4 13h7l-1 10 10-13h-7z"/></svg>1+0 • Bullet • Classé</strong><small>IM BeepBeepl... (2602) <svg class="swords" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 4 14 14M19 4 5 18M4 3l2 2M18 3l2 2M4 21l3-1M20 21l-3-1"/></svg> B IV (1913)</small></div><button class="board-icon" aria-label="Board"><img src="game_icon_brown.svg" alt=""/></button></header>
+    <section id="board-wrap" class="board-wrap orientation-black cburnett" aria-label="Chess board"><div id="board" class="board" role="application"><svg id="arrows" viewBox="0 0 512 512" aria-hidden="true"><defs><marker id="arrow-green" markerWidth="4" markerHeight="8" refX="2.05" refY="2.01" orient="auto"><path d="M0,0 V4 L3,2 Z" fill="#15781b"/></marker><marker id="arrow-blue" markerWidth="4" markerHeight="8" refX="2.05" refY="2.01" orient="auto"><path d="M0,0 V4 L3,2 Z" fill="#003088"/></marker></defs><line class="analysis-arrow green" x1="224" y1="160" x2="110.14" y2="273.86" marker-end="url(#arrow-green)"/><line class="analysis-arrow blue" x1="224" y1="160" x2="174.14" y2="209.86" marker-end="url(#arrow-blue)"/></svg></div></section>
+    <section class="analysis">
+      <nav class="tabs" aria-label="Analysis tabs"><div id="tab-title" class="tab-title">Local Stockfish 8 analyzing <i class="fa spinner" aria-hidden="true">&#xf110;</i></div><button data-tab="info" class="fa" aria-label="Info">&#xf05a;</button><button data-tab="moves" class="fa" aria-label="Moves">&#xf022;</button><button data-tab="engine" class="fa selected" aria-label="Engine">&#xf085;</button><button data-tab="chart" class="fa" aria-label="Chart">&#xf1fe;</button><button data-tab="book" class="fa" aria-label="Book">&#xf02d;</button></nav>
+      <div id="panel" class="panel"></div>
+    </section>
+    <footer class="actions"><button data-action="menu" class="fa" aria-label="More">&#xf141;</button><button data-action="settings" class="fa" aria-label="Settings">&#xf013;</button><button data-action="flip" aria-label="Flip board"><svg viewBox="0 0 24 24"><path d="M7 7h7l-2-2m2 2-2 2M17 17h-7l2 2m-2-2 2-2M5 7a7 7 0 0 1 12-2M19 17A7 7 0 0 1 7 19"/></svg></button><button data-action="size" class="fa" aria-label="Expand board">&#xf066;</button><button data-action="prev" class="fa" aria-label="Previous move">&#xf04a;</button><button data-action="next" class="fa" aria-label="Next move">&#xf04e;</button></footer>
+  </main>
+  <script src="legacy-chessground.js"></script><script src="chess-rules.js"></script><script src="analysis.js"></script>
+</body>
+</html>

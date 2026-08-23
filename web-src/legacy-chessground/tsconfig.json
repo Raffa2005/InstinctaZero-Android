@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "module": "ESNext",
+    "lib": ["DOM", "ES2017"],
+    "strict": true,
+    "strictFunctionTypes": false,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "files": ["types/lichess.d.ts", "entry.ts"],
+  "include": ["src/**/*.ts"]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "instinctazero-web-vendor-build",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Reproducible browser bundles for the offline legacy analysis surface.",
+  "scripts": {
+    "build:legacy-chessground": "node build-legacy-chessground.mjs",
+    "build:chess-rules": "node build-chess-rules.mjs",
+    "build": "npm run build:legacy-chessground && npm run build:chess-rules",
+    "check:legacy-chessground": "tsc --project ../web-src/legacy-chessground/tsconfig.json --noEmit && node build-legacy-chessground.mjs --check",
+    "check:chess-rules": "node build-chess-rules.mjs --check",
+    "check": "npm run check:legacy-chessground && npm run check:chess-rules && npm run test:analysis-controller",
+    "test:analysis-controller": "node --test test/analysis-controller.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.0",
+    "typescript": "2.8.1"
+  },
+  "dependencies": {
+    "chess.js": "1.4.0"
+  }
+}

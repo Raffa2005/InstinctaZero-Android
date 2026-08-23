@@ -1,24 +1,43 @@
 # Third-party notices
 
-## Cburnett chess pieces / Chessground
+## Legacy Lichess mobile Chessground
 
-The native chess-piece geometry in:
+`web-src/legacy-chessground/` is a source-preserving snapshot of the
+Chessground implementation from
+[`lichess-org/lichobile`](https://github.com/lichess-org/lichobile), commit
+`063167dda7119386cf36708d004d4565203d449a` (2018-04-09). It is bundled into
+`app/src/main/assets/analysis/legacy-chessground.js` by
+`web/build-legacy-chessground.mjs`.
 
-- `app/src/main/java/com/instinctazero/android/ui/CburnettPieceData.kt`
-- `app/src/main/java/com/instinctazero/android/ui/CburnettPieceRenderer.kt`
+- Copyright: Lichess contributors and the lichobile contributors
+- License: GPL-3.0-or-later
+- Source, upstream notice, and license: `web-src/legacy-chessground/`
 
-is adapted from the Cburnett SVG piece theme distributed with Chessground 10.1.1.
+## Cburnett pieces and legacy board
 
-- Chessground copyright: Lichess contributors
-- Cburnett artwork: Colin M. L. Burnett
-- Upstream: <https://github.com/lichess-org/chessground>
-- Upstream package: `@lichess-org/chessground` 10.1.1
-- License: GNU GPL version 3 or any later version
+The included Cburnett SVG piece set and brown SVG board are byte-for-byte
+legacy lichobile assets from the same revision. Cburnett artwork is attributed
+to Colin M. L. Burnett and is GPL-2.0-or-later as recorded by the upstream
+`COPYING.md`. The board is retained with the legacy source notice.
 
-The original artwork is also published at
-<https://commons.wikimedia.org/wiki/Category:SVG_chess_pieces> under multiple
-licenses. This distribution uses the GPL option through GPL version 3.
+## chess.js
 
-The full GPL version 3 text is included in `LICENSE`. InstinctaZero Android is
-distributed under GPL-3.0-or-later so recipients can inspect, rebuild, modify,
-and redistribute the complete corresponding source.
+The local rules controller uses
+[`chess.js`](https://github.com/jhlywa/chess.js) 1.4.0 by Jeff Hlywa.
+
+- License: BSD-2-Clause
+- Pinned source and integrity: `web/package-lock.json`
+- Build/provenance: `web-src/chess-rules-PROVENANCE.md`
+- Full text: `app/src/main/assets/licenses/Chess.js-BSD-2-Clause.txt`
+
+## Fonts
+
+- Noto Sans and Cousine: Apache-2.0
+- Font Awesome webfont: SIL OFL-1.1
+
+Their complete license texts are shipped in `app/src/main/assets/licenses/`.
+The non-free legacy Lichess icon font (`lichess.ttf` and WOFF/WOFF2 variants)
+is deliberately not included or redistributed.
+
+InstinctaZero Android itself is distributed under GPL-3.0-or-later; the full
+GPL version 3 text is in [`LICENSE`](LICENSE).
