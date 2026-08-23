@@ -1,17 +1,21 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.2 is an **offline local analysis board**. It opens
-directly to a compact, legacy-Lichess-inspired analysis surface: a legal,
-interactive board, move navigation, orientation and board-size controls, and
-small notation/book/lines/graph tabs populated by a static demonstration
-position.
+InstinctaZero Android 0.3 is a compact, legacy-Lichess-inspired analysis board.
+It opens at the standard starting position and provides a legal interactive
+board, local variation tree, live Leela lines and arrows, opening-book results,
+and move navigation. The evaluation-chart tab is intentionally blank in this
+release.
 
-This release deliberately has no account connection, pairing, game archive,
-synchronisation, PC service, remote engine, opening-book service, or Leela
-request path. It declares no `INTERNET` permission. Everything rendered by the
-app is packaged in the APK and loaded from an Android `WebViewAssetLoader`; the
-WebView is configured to block network, file, content, mixed-content, cookies,
-pop-ups, and external navigation.
+The app pairs with one InstinctaZero PC using a short-lived code. It does not
+sign into Lichess, fetch games, synchronize an account, or contain a Lichess
+token. Before creating that pairing code, PC-side InstinctaZero must already be
+connected and configured for the user's Lichess account. An unconfigured,
+analysis-only PC cannot create a phone pairing code; the PC account configuration
+is what enables the active-game fair-play check. The app reaches the PC through
+a dedicated, path-limited InstinctaZero HTTPS gateway at
+`https://rafael-ms-7e34.tail273ae6.ts.net:8443`. It is a public HTTPS endpoint
+despite the hostname: the phone does not need the Tailscale app, Tailscale DNS,
+a VPN connection, or any manual network setup.
 
 ## Current scope
 
@@ -20,19 +24,34 @@ Lichess Android client, rather than a replacement board implementation. The
 local controller uses `chess.js` for legal moves, FEN, SAN, castling,
 en-passant, and promotion.
 
-The engine rows, opening-book panel, and graph are visual/static demo content
-for this UI-rebuild milestone. They do **not** run Leela, query a server, or
-represent live analysis. Account and completed-game integration are deferred
-until the offline board experience is accepted.
+The WebView still loads only APK-packaged files and is forbidden from making
+network requests. A narrow native bridge performs pairing, Leela, and book
+requests. The revocable bearer token is held in Android Keystore-backed
+encrypted storage and is never exposed to JavaScript. The native client accepts
+only the fixed HTTPS host and the pairing/study API routes; cookies, downloads,
+pop-ups, external navigation, cleartext traffic, and arbitrary WebView network
+access remain blocked.
+
+Leela uses the server-selected `mobile-cpu-int8` BT4 profile. It is an
+approximate CPU-only profile and never starts or uses a SYCL engine. Mobile and
+desktop analysis share the PC's InstinctaZero analysis session, however, so a
+phone request can replace a currently active desktop search. The phone cannot
+select an executable, backend, engine profile, arbitrary FEN, or server route.
+The service's fair-play gate refuses analysis while the configured Lichess
+account has an ongoing game.
 
 ## Controls
 
 - Tap or drag a piece to make a legal move.
-- Tap a move in the notation or use the previous/next footer controls to
-  navigate the local line.
-- Use the footer controls for menu, settings, orientation, board size,
-  previous, and next. The row of small tabs switches the visible legacy-style
-  analysis panel.
+- Tap a move in the notation, a Leela line, or a book move; use previous/next
+  (including press-and-hold) to navigate the local tree.
+- The back button first closes an open overlay or promotion picker; otherwise
+  it exits the Android activity. The checkerboard icon opens Appearance.
+- Menu, settings, board flip, board size, previous, and next are functional.
+  Settings remember nodes, line count, Leela, and arrow choices.
+- The tabs show study information, notation, live Leela analysis, the
+  intentionally blank evaluation chart, and the live opening book.
+- Pairing code entry and connection/error status are shown inside Settings.
 
 ## Build from source
 
@@ -48,7 +67,7 @@ npm ci
 npm run check
 cd ..
 
-./gradlew test assembleDebug
+./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
 `npm run check` type-checks and recreates/verifies both generated browser
