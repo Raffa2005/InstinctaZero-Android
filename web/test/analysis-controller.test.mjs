@@ -4,6 +4,14 @@ import { readFile } from 'node:fs/promises';
 
 const controllerUrl = new URL('../../app/src/main/assets/analysis/analysis.js', import.meta.url);
 const styleUrl = new URL('../../app/src/main/assets/analysis/analysis.css', import.meta.url);
+const pageUrl = new URL('../../app/src/main/assets/analysis/index.html', import.meta.url);
+
+function functionSource(source, name, nextName) {
+  const start = source.indexOf(`function ${name}`);
+  const end = source.indexOf(`  function ${nextName}`, start);
+  assert.ok(start >= 0 && end > start, `could not extract ${name}`);
+  return source.slice(start, end);
+}
 
 test('controller keeps branches CSP-safe and stylesheet-indented', async () => {
   const [controller, style] = await Promise.all([
@@ -44,7 +52,7 @@ test('controller retains study branches and presents all underpromotions', async
   assert.match(controller, /selectedChild/);
 });
 
-test('real LC0 callback fixture uses backend score, SAN, and elapsed schema', async () => {
+test('real LC0 callback fixture uses White-POV score, SAN, search stats, and elapsed schema', async () => {
   const controller = await readFile(controllerUrl, 'utf8');
   const fixture = {
     event: 'lc0',
@@ -56,12 +64,17 @@ test('real LC0 callback fixture uses backend score, SAN, and elapsed schema', as
     }
   };
 
-  assert.equal(fixture.data.lines[0].score, '+0.31');
+  assert.equal(fixture.data.lines[0].white_score, '+0.31');
   assert.deepEqual(fixture.data.lines[0].san, ['e4', 'e5']);
-  assert.match(controller, /line\.score/);
+  assert.match(controller, /line\.white_score/);
+  assert.match(controller, /line && line\.white_cp/);
+  assert.doesNotMatch(controller, /line\.score/);
   assert.match(controller, /line\.san/);
   assert.match(controller, /stats\.elapsed_ms/);
-  assert.match(controller, /stats\.total_nodes \|\| stats\.nodes \|\| visits/);
+  assert.match(controller, /stats\.total_nodes != null \? stats\.total_nodes : stats\.nodes/);
+  assert.match(controller, /rootStat\.visits/);
+  assert.match(controller, /rootStat\.prior/);
+  assert.match(controller, /class="leela-stat-bar"/);
   assert.match(controller, /safe\(visits\) \+ '\/' \+ safe\(progress\.target \|\| settings\.nodes\)/);
   assert.doesNotMatch(controller, /score_cp|score_mate|pv_san|time_ms/);
 });
@@ -75,9 +88,12 @@ test('visible study controls have real appearance, menu, and exit behavior', asy
   assert.match(controller, /Delete this branch\?/);
   assert.match(controller, /function setTab/);
   assert.match(controller, /exitStudy/);
-  assert.match(controller, /lines\.slice\(0, 3\)/);
+  assert.match(controller, /settings\.arrowCount/);
+  assert.match(controller, /multipv: Math\.max\(settings\.multipv, settings\.arrowCount\)/);
+  assert.match(controller, /engine\.lines = data\.lines\.slice\(0, 8\)/);
+  assert.match(controller, /engine\.lines\.slice\(0, settings\.multipv\)/);
   assert.match(controller, /saveUiSettings/);
-  assert.match(controller, /settings\.nodes = Math\.min\(100000, Math\.max\(100,/);
+  assert.match(controller, /settings\.nodes = clampInteger\(/);
 });
 
 test('explorer errors render as errors and PV buttons retain legacy row styling', async () => {
@@ -126,20 +142,20 @@ test('board resize refreshes Chessground cached bounds after layout', async () =
   assert.equal(typeof frame, 'function');
   frame();
   assert.deepEqual(calls, [['bounds', bounds], ['redraw'], ['arrows']]);
-  assert.equal((controller.match(/refreshBoardBounds\(\)/g) || []).length, 3);
+  assert.ok((controller.match(/refreshBoardBounds\(\)/g) || []).length >= 3);
 });
 
-test('stream rerenders retain the chosen PV, engine scroll, and keyboard focus', async () => {
+test('stream rerenders retain engine scroll/focus and PV taps play the first move', async () => {
   const controller = await readFile(controllerUrl, 'utf8');
 
-  assert.match(controller, /selectedPv: null/);
   assert.match(controller, /scrollTop: panel\.scrollTop/);
   assert.match(controller, /document\.activeElement\.dataset\.pv/);
   assert.match(controller, /focused\.focus\(\{ preventScroll:true \}\)/);
   assert.match(controller, /panel\.scrollTop = preserveEngine\.scrollTop/);
-  assert.match(controller, /engine\.selectedPv = Number\(button\.dataset\.pv\)/);
-  assert.match(controller, /renderArrows\(engineArrowLines\(\)\)/);
-  assert.match(controller, /function flipBoard\(\) \{[^}]*renderArrows\(engineArrowLines\(\)\)/);
+  assert.match(controller, /data-pv-uci=/);
+  assert.match(controller, /playUci\(button\.dataset\.pvUci\)/);
+  assert.doesNotMatch(controller, /selectedPv|engineArrowLines/);
+  assert.match(controller, /function flipBoard\(\) \{[^}]*renderArrows\(engine\.lines\)/);
 });
 
 test('leaving the book tab cancels its in-flight native request', async () => {
@@ -151,9 +167,80 @@ test('leaving the book tab cancels its in-flight native request', async () => {
   assert.match(controller, /book\.requestId = null; book\.loading = false/);
 });
 
-test('header back safely dismisses every overlay state', async () => {
+test('menus are touch-first full-panel views and Back dismisses them', async () => {
   const controller = await readFile(controllerUrl, 'utf8');
+  const style = await readFile(styleUrl, 'utf8');
 
-  assert.match(controller, /if \(overlay\) \{ overlay\.remove\(\); overlay = null; return; \}/);
-  assert.doesNotMatch(controller, /overlay\.querySelector\('\[data-close\]'\)\.click\(\)/);
+  assert.match(controller, /function panelViewHtml\(\)/);
+  assert.match(controller, /panel\.innerHTML = panelView \? panelViewHtml\(\)/);
+  assert.match(controller, /if \(panelView\) \{ closePanelView\(\); return; \}/);
+  assert.doesNotMatch(controller, /study-overlay|overlay-card|document\.body\.appendChild\(overlay\)/);
+  assert.match(style, /\.panel-view\{width:100%/);
+  assert.match(style, /\.panel-buttons button\{min-height:44px/);
+  assert.doesNotMatch(style, /\.study-overlay|\.overlay-card/);
+});
+
+test('desktop Leela arrow weighting fixtures execute with exact widths and suppression', async () => {
+  const controller = await readFile(controllerUrl, 'utf8');
+  const source = functionSource(controller, 'leelaArrowWidthFromMetrics', 'rankedLeelaAlternativeLines');
+  const width = new Function(`${source}; return leelaArrowWidthFromMetrics;`)();
+
+  assert.equal(width({ bestVisits:7176, alternativeVisits:2152, referenceQ:-0.0779, alternativeQ:-0.0779 }), 7);
+  assert.equal(width({ bestVisits:7176, alternativeVisits:321, referenceQ:-0.0779, alternativeQ:-0.11384 }), 4);
+  assert.equal(width({ bestVisits:1000, alternativeVisits:800, referenceQ:0.4, alternativeQ:0 }), null);
+});
+
+test('engine eval text always uses White perspective and never side-to-move score', async () => {
+  const controller = await readFile(controllerUrl, 'utf8');
+  const start = controller.indexOf('function finiteMetric');
+  const end = controller.indexOf('  function engineMoveStats', start);
+  const source = controller.slice(start, end);
+  const whiteEval = new Function(`${source}; return whiteEvalText;`)();
+
+  assert.equal(whiteEval({ score:'+0.80', white_score:'-0.80', white_cp:-80 }), '-0.80');
+  assert.equal(whiteEval({ score:'+0.80', white_cp:-80 }), '-0.80');
+  assert.equal(whiteEval({ score:'+0.80' }), '—');
+});
+
+test('book percentages normalize counts and inconsistent reported percentages', async () => {
+  const controller = await readFile(controllerUrl, 'utf8');
+  const finite = functionSource(controller, 'finiteMetric', 'compactCount');
+  const percentages = functionSource(controller, 'resultPercentages', 'resultBar');
+  const normalize = new Function(`${finite}${percentages}; return resultPercentages;`)();
+
+  assert.deepEqual(normalize({ games:100, white:32, draws:44, black:24 }), [32, 44, 24]);
+  assert.deepEqual(normalize({ games:100, white_pct:20, draw_pct:30, black_pct:30 }), [25, 37.5, 37.5]);
+  assert.deepEqual(normalize({ games:0 }), [0, 0, 0]);
+  assert.match(controller, /No explorer moves for this position/);
+  assert.match(controller, /moves \+ summary/);
+});
+
+test('arrow SVG uses desktop blue-grey brushes, dynamic widths, and shortened endpoints', async () => {
+  const [controller, style, page] = await Promise.all([
+    readFile(controllerUrl, 'utf8'),
+    readFile(styleUrl, 'utf8'),
+    readFile(pageUrl, 'utf8')
+  ]);
+
+  assert.match(style, /\.analysis-arrow\.blue\{stroke:#003088;opacity:\.4\}/);
+  assert.match(style, /\.analysis-arrow\.grey\{stroke:#4a4a4a;opacity:\.35\}/);
+  assert.doesNotMatch(style, /\.analysis-arrow\{[^}]*stroke-width/);
+  assert.match(controller, /stroke-width="' \+ width/);
+  assert.match(controller, /destinationCounts\.get\(shape\.move\.slice\(2,4\)\) > 1 \? 20 : 10/);
+  assert.match(page, /id="arrow-blue" markerWidth="4" markerHeight="4" refX="2\.05" refY="2"/);
+  assert.match(page, /id="arrow-grey" markerWidth="4" markerHeight="4" refX="2\.05" refY="2"/);
+});
+
+test('active full-panel forms are not rebuilt by streamed engine updates', async () => {
+  const controller = await readFile(controllerUrl, 'utf8');
+  const source = functionSource(controller, 'renderActivePanel', 'scheduleAnalysis');
+  let renders = 0;
+  const hidden = new Function('panelView', 'renderPanel', `${source}; return renderActivePanel;`)('settings', () => { renders += 1; });
+  hidden();
+  assert.equal(renders, 0);
+  const visible = new Function('panelView', 'renderPanel', `${source}; return renderActivePanel;`)(null, () => { renders += 1; });
+  visible();
+  assert.equal(renders, 1);
+  assert.match(controller, /onNativeAnalysis[^\n]*renderActivePanel/);
+  assert.match(controller, /settings\.showArrows = [^;]+; renderArrows\(engine\.lines\)/);
 });

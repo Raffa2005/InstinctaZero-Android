@@ -45,12 +45,15 @@ account has an ongoing game.
 - Tap or drag a piece to make a legal move.
 - Tap a move in the notation, a Leela line, or a book move; use previous/next
   (including press-and-hold) to navigate the local tree.
-- The back button first closes an open overlay or promotion picker; otherwise
-  it exits the Android activity. The checkerboard icon opens Appearance.
+- The back button first closes an open panel view or promotion picker; otherwise
+  it exits the Android activity. The checkerboard icon opens Appearance inside
+  the full-width analysis panel.
 - Menu, settings, board flip, board size, previous, and next are functional.
-  Settings remember nodes, line count, Leela, and arrow choices.
+  Settings remember nodes, line count, independent arrow count (1–8), Leela,
+  and arrow visibility.
 - The tabs show study information, notation, live Leela analysis, the
-  intentionally blank evaluation chart, and the live opening book.
+  intentionally blank evaluation chart, and the live opening book. Book rows
+  compactly show move share, game count, and White/draw/Black percentages.
 - Pairing code entry and connection/error status are shown inside Settings.
 
 ## Build from source
