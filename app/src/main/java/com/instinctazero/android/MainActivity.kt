@@ -263,7 +263,6 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         require(rawSettings != null && rawSettings.length <= MAX_SETTINGS_JSON) { "Invalid settings." }
         val requested = JSONObject(rawSettings)
         val nodes = requested.optInt("nodes", uiSettings().getInt("nodes")).coerceIn(100, 100_000)
-        val multipv = requested.optInt("multipv", uiSettings().getInt("multipv")).coerceIn(1, 8)
         val arrowCount = requested.optInt("arrowCount", uiSettings().getInt("arrowCount")).coerceIn(1, 8)
         val leelaEnabled = requested.optBoolean("leelaEnabled", uiSettings().getBoolean("leelaEnabled"))
         val arrowsEnabled = requested.optBoolean("arrowsEnabled", uiSettings().getBoolean("arrowsEnabled"))
@@ -271,7 +270,6 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         require(appearance in setOf("brown", "blue", "green", "grey")) { "Invalid board appearance." }
         check(uiPreferences.edit()
             .putInt("nodes", nodes)
-            .putInt("multipv", multipv)
             .putInt("arrowCount", arrowCount)
             .putBoolean("leelaEnabled", leelaEnabled)
             .putBoolean("arrowsEnabled", arrowsEnabled)
@@ -478,7 +476,6 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         JSONObject().put("history", normalizedHistory).apply {
             if (target == "analysis") {
                 put("nodes", parsed.optInt("nodes", 1000).coerceIn(1, 100_000))
-                put("multipv", parsed.optInt("multipv", 5).coerceIn(1, 8))
             } else {
                 val source = parsed.optString("source", "masters")
                 require(source == "masters" || source == "lichess") { "Invalid opening-book source." }
@@ -507,7 +504,6 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
 
     private fun uiSettings() = JSONObject()
         .put("nodes", uiPreferences.getInt("nodes", 1000))
-        .put("multipv", uiPreferences.getInt("multipv", 5))
         .put("arrowCount", uiPreferences.getInt("arrowCount", 8).coerceIn(1, 8))
         .put("leelaEnabled", uiPreferences.getBoolean("leelaEnabled", true))
         .put("arrowsEnabled", uiPreferences.getBoolean("arrowsEnabled", true))

@@ -49,8 +49,8 @@ account has an ongoing game.
   it exits the Android activity. The checkerboard icon opens Appearance inside
   the full-width analysis panel.
 - Menu, settings, board flip, board size, previous, and next are functional.
-  Settings remember nodes, line count, independent arrow count (1–8), Leela,
-  and arrow visibility.
+  Settings remember nodes, independent arrow count (1–8), Leela, and arrow
+  visibility. The engine panel scrolls through every returned line with visits.
 - The tabs show study information, notation, live Leela analysis, the
   intentionally blank evaluation chart, and the live opening book. Book rows
   compactly show move share, game count, and White/draw/Black percentages.

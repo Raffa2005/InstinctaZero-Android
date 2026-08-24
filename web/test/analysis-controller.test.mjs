@@ -13,18 +13,34 @@ function functionSource(source, name, nextName) {
   return source.slice(start, end);
 }
 
-test('controller keeps branches CSP-safe and stylesheet-indented', async () => {
+test('notation is an inline mainline and introduces structure only for real siblings', async () => {
   const [controller, style] = await Promise.all([
     readFile(controllerUrl, 'utf8'),
     readFile(styleUrl, 'utf8')
   ]);
 
   assert.doesNotMatch(controller, /style\s*=/i);
-  assert.match(controller, /<div class="branch">/);
-  assert.match(controller, /function renderMoves\(node\)/);
-  assert.match(controller, /renderMoves\(child\)/);
-  assert.match(style, /\.branch\{display:block;white-space:nowrap\}/);
-  assert.match(style, /\.branch \.branch\{margin-left:10px\}/);
+  const source = functionSource(controller, 'moveMarkup', 'movesPanel');
+  const root = { children: [] };
+  const e4 = { id:1, color:'w', number:1, san:'e4', children:[] };
+  const e5 = { id:2, color:'b', number:1, san:'e5', children:[] };
+  const nf3 = { id:3, color:'w', number:2, san:'Nf3', children:[] };
+  root.children = [e4]; e4.children = [e5]; e5.children = [nf3];
+  const render = new Function('safe', 'cursor', `${source}; return renderMoves;`)(String, nf3);
+  const mainline = render(root);
+  assert.doesNotMatch(mainline, /class="variations"/);
+  assert.match(mainline, />1\.<\/span>e4/);
+  assert.match(mainline, />e5<\/button>/);
+  assert.doesNotMatch(mainline, /1\.\.\./);
+  assert.match(mainline, />2\.<\/span>Nf3/);
+
+  const c5 = { id:4, color:'b', number:1, san:'c5', children:[] };
+  e4.children = [e5, c5];
+  const branches = render(root);
+  assert.equal((branches.match(/class="variation"/g) || []).length, 2);
+  assert.equal((branches.match(/1\.\.\./g) || []).length, 2);
+  assert.match(style, /\.variations\{display:block;/);
+  assert.match(style, /\.variation\{display:block\}/);
 });
 
 test('controller uses the narrow native study bridge without credentials or direct network', async () => {
@@ -89,9 +105,14 @@ test('visible study controls have real appearance, menu, and exit behavior', asy
   assert.match(controller, /function setTab/);
   assert.match(controller, /exitStudy/);
   assert.match(controller, /settings\.arrowCount/);
-  assert.match(controller, /multipv: Math\.max\(settings\.multipv, settings\.arrowCount\)/);
-  assert.match(controller, /engine\.lines = data\.lines\.slice\(0, 8\)/);
-  assert.match(controller, /engine\.lines\.slice\(0, settings\.multipv\)/);
+  assert.doesNotMatch(controller, /settings\.multipv|data-multipv/);
+  assert.doesNotMatch(controller, /engine\.lines\.slice/);
+  const requestSource = functionSource(controller, 'studyRequest', 'renderActivePanel');
+  const requests = new Function('history', 'settings', `${requestSource}; return [studyRequest(), explorerRequest()];`)(() => ['e2e4'], { nodes:4321 });
+  assert.deepEqual(requests, [
+    { history:['e2e4'], nodes:4321 },
+    { history:['e2e4'], source:'lichess' }
+  ]);
   assert.match(controller, /saveUiSettings/);
   assert.match(controller, /settings\.nodes = clampInteger\(/);
 });
@@ -203,7 +224,7 @@ test('engine eval text always uses White perspective and never side-to-move scor
 });
 
 test('book percentages normalize counts and inconsistent reported percentages', async () => {
-  const controller = await readFile(controllerUrl, 'utf8');
+  const [controller, style] = await Promise.all([readFile(controllerUrl, 'utf8'), readFile(styleUrl, 'utf8')]);
   const finite = functionSource(controller, 'finiteMetric', 'compactCount');
   const percentages = functionSource(controller, 'resultPercentages', 'resultBar');
   const normalize = new Function(`${finite}${percentages}; return resultPercentages;`)();
@@ -213,6 +234,119 @@ test('book percentages normalize counts and inconsistent reported percentages', 
   assert.deepEqual(normalize({ games:0 }), [0, 0, 0]);
   assert.match(controller, /No explorer moves for this position/);
   assert.match(controller, /moves \+ summary/);
+  const resultSource = controller.slice(controller.indexOf('function resultPercentages'), controller.indexOf('  function bookPanel'));
+  const resultBar = new Function('finiteMetric', 'safe', `${resultSource}; return resultBar;`)(value => Number.isFinite(Number(value)) ? Number(value) : null, String);
+  const markup = resultBar({ games:100, white:32, draws:44, black:24 }, 'fixture');
+  assert.doesNotMatch(markup, /viewBox=/);
+  assert.match(markup, /class="result-white" width="32%"/);
+  assert.match(markup, /class="result-draw" x="32%" width="44%"/);
+  assert.match(markup, /class="result-black" x="76%" width="24%"/);
+  assert.match(markup, /class="result-outline"/);
+  assert.match(style, /grid-template-columns:32px 34px 42px minmax\(0,1fr\)/);
+  assert.match(style, /\.result-bar\{display:block;width:100%;min-width:0;/);
+});
+
+test('played PV is projected into a nodes-keyed child cache until a coherent snapshot arrives', async () => {
+  const controller = await readFile(controllerUrl, 'utf8');
+  const projectSource = functionSource(controller, 'projectAnalysisToChild', 'joinedPositiveLines');
+  const finiteMetric = value => value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
+  const project = new Function('finiteMetric', `${projectSource}; return projectAnalysisToChild;`)(finiteMetric);
+  const parent = {
+    lines:[{ multipv:2, pv:['e2e4','c7c5','g1f3'], san:['e4','c5','Nf3'], white_cp:18 }],
+    move_stats:[{ uci:'e2e4', visits:321, prior:.27 }],
+    target_nodes:1000,
+    total_nodes:900
+  };
+  const inherited = project(parent, 'e2e4', 4000);
+  assert.equal(inherited.inherited, true);
+  assert.equal(inherited.target_nodes, 4000);
+  assert.equal(inherited.total_nodes, 321);
+  assert.deepEqual(inherited.move_stats, []);
+  assert.deepEqual(inherited.lines[0].pv, ['c7c5','g1f3']);
+  assert.deepEqual(inherited.lines[0].san, ['c5','Nf3']);
+  assert.equal(project(parent, 'd2d4', 4000), null);
+
+  const snapshotSource = controller.slice(controller.indexOf('function joinedPositiveLines'), controller.indexOf('  function applyAnalysisSnapshot'));
+  const coherent = new Function('finiteMetric', `${snapshotSource}; return coherentAnalysisSnapshot;`)(finiteMetric);
+  const packet = {
+    search_phase:'ready',
+    lines:[{pv:['c7c5']},{pv:['e7e5']},{pv:['e7e6']}],
+    move_stats:[{uci:'c7c5',visits:20},{uci:'e7e5',visits:0},{uci:'g8f6',visits:8}]
+  };
+  assert.equal(coherent({ ...packet, search_phase:'provisional' }, 4000), null);
+  assert.deepEqual(coherent(packet, 4000).lines.map(line => line.pv[0]), ['c7c5']);
+  assert.deepEqual(coherent(packet, 4000).move_stats.map(stat => stat.uci), ['c7c5','g8f6']);
+  assert.deepEqual(coherent({ search_phase:'final', lines:[], move_stats:[] }, 4000).lines, []);
+  assert.equal(coherent({ search_phase:'provisional', lines:[], move_stats:[] }, 4000), null);
+
+  const cacheSource = controller.slice(controller.indexOf('function applyAnalysisSnapshot'), controller.indexOf('  function onPositionChanged'));
+  const engine = { lines:[], stats:null };
+  const cursor = { analysisCache:inherited };
+  let arrowLines = null;
+  const restore = new Function('engine', 'cursor', 'settings', 'finiteMetric', 'renderArrows', `${cacheSource}; return restoreCachedAnalysis;`)(engine, cursor, {nodes:4000}, finiteMetric, lines => { arrowLines = lines; });
+  restore();
+  assert.deepEqual(engine.lines[0].pv, ['c7c5','g1f3']);
+  assert.equal(engine.status, 'inherited');
+  assert.deepEqual(arrowLines[0].pv, ['c7c5','g1f3']);
+  cursor.analysisCache.target_nodes = 1000;
+  restore();
+  assert.deepEqual(engine.lines, []);
+  assert.equal(engine.status, 'idle');
+});
+
+test('all positive-visit engine lines remain visible and the prior/visit bar is 8px', async () => {
+  const [controller, style] = await Promise.all([readFile(controllerUrl, 'utf8'), readFile(styleUrl, 'utf8')]);
+  const finiteMetric = value => value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
+  const snapshotSource = controller.slice(controller.indexOf('function joinedPositiveLines'), controller.indexOf('  function applyAnalysisSnapshot'));
+  const coherent = new Function('finiteMetric', `${snapshotSource}; return coherentAnalysisSnapshot;`)(finiteMetric);
+  const lines = Array.from({length:11}, (_, index) => ({ pv:[`move${index}`] }));
+  const move_stats = lines.map((line, index) => ({ uci:line.pv[0], visits:index === 10 ? 0 : index + 1 }));
+  const joined = coherent({ search_phase:'ready', lines, move_stats }, 1000);
+  assert.equal(joined.lines.length, 10);
+  assert.equal(joined.lines.some(line => line.pv[0] === 'move10'), false);
+  assert.doesNotMatch(controller, /engine\.lines\.slice/);
+  assert.match(controller, /engine\.lines\.map\(/);
+  assert.match(controller, /finiteMetric\(stat && stat\.visits\) > 0/);
+  assert.match(controller, /viewBox="0 0 100 8"/);
+  assert.match(controller, /class="stat-prior"[^>]*height="4"/);
+  assert.match(controller, /class="stat-visits" y="4"[^>]*height="4"/);
+  assert.match(style, /\.leela-stat-bar\{display:block;width:46px;height:8px\}/);
+});
+
+test('navigation buttons blur, stop globally, and repeat quickly until the tree boundary', async () => {
+  const [controller, style] = await Promise.all([readFile(controllerUrl, 'utf8'), readFile(styleUrl, 'utf8')]);
+  const source = controller.slice(controller.indexOf('function stopActiveNavigation'), controller.indexOf("  document.querySelectorAll('.tabs button')"));
+  let activeNavigationStop = null, delayed = null, repeating = null, clearedIntervals = 0, restored = [];
+  const button = { disabled:false, blurCount:0, blur() { this.blurCount += 1; }, setPointerCapture() {} };
+  const targets = [{id:1},{id:2},null];
+  const bind = new Function('restore', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'state', `let activeNavigationStop = state.value; ${source}; state.stop = stopActiveNavigation; return bindRepeatingNavigation;`)(
+    next => restored.push(next.id),
+    (callback, ms) => { delayed = {callback,ms}; return 1; },
+    () => {},
+    (callback, ms) => { repeating = {callback,ms}; return 2; },
+    () => { clearedIntervals += 1; },
+    {}
+  );
+  bind(button, () => targets.shift());
+  let prevented = false;
+  button.onpointerdown({ pointerId:7, preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.deepEqual(restored, [1]);
+  assert.equal(delayed.ms, 150);
+  delayed.callback();
+  assert.equal(repeating.ms, 60);
+  repeating.callback();
+  repeating.callback();
+  assert.deepEqual(restored, [1,2]);
+  assert.ok(clearedIntervals >= 1);
+  assert.ok(button.blurCount >= 3);
+  assert.equal(button.onpointerleave, undefined);
+  assert.equal(typeof button.onlostpointercapture, 'function');
+  assert.match(controller, /window\.addEventListener\('blur', stopActiveNavigation\)/);
+  assert.match(controller, /document\.hidden\) \{ stopActiveNavigation\(\); resetTransport\(\); \}/);
+  assert.match(style, /touch-action:manipulation/);
+  assert.match(style, /-webkit-touch-callout:none/);
+  assert.match(style, /user-select:none/);
 });
 
 test('arrow SVG uses desktop blue-grey brushes, dynamic widths, and shortened endpoints', async () => {
@@ -222,7 +356,7 @@ test('arrow SVG uses desktop blue-grey brushes, dynamic widths, and shortened en
     readFile(pageUrl, 'utf8')
   ]);
 
-  assert.match(style, /\.analysis-arrow\.blue\{stroke:#003088;opacity:\.4\}/);
+  assert.match(style, /\.analysis-arrow\.blue\{stroke:#003088;opacity:\.28\}/);
   assert.match(style, /\.analysis-arrow\.grey\{stroke:#4a4a4a;opacity:\.35\}/);
   assert.doesNotMatch(style, /\.analysis-arrow\{[^}]*stroke-width/);
   assert.match(controller, /stroke-width="' \+ width/);
@@ -242,5 +376,5 @@ test('active full-panel forms are not rebuilt by streamed engine updates', async
   visible();
   assert.equal(renders, 1);
   assert.match(controller, /onNativeAnalysis[^\n]*renderActivePanel/);
-  assert.match(controller, /settings\.showArrows = [^;]+; renderArrows\(engine\.lines\)/);
+  assert.match(controller, /settings\.showArrows = [^;]+; if \(settings\.nodes !== previousNodes\) clearAnalysisCaches\(root\); renderArrows\(engine\.lines\)/);
 });

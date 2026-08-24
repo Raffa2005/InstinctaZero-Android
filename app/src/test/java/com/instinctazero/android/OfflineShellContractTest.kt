@@ -55,6 +55,9 @@ class OfflineShellContractTest {
         assertTrue(activity.contains("requested.optInt(\"arrowCount\""))
         assertTrue(activity.contains(".putInt(\"arrowCount\", arrowCount)"))
         assertTrue(activity.contains(".put(\"arrowCount\", uiPreferences.getInt(\"arrowCount\", 8).coerceIn(1, 8))"))
+        assertFalse(activity.contains("requested.optInt(\"multipv\""))
+        assertFalse(activity.contains(".putInt(\"multipv\""))
+        assertFalse(activity.contains("put(\"multipv\", parsed.optInt"))
         assertTrue(activity.contains("readTimeout(30, TimeUnit.SECONDS)"))
         assertTrue(activity.contains("readTimeout(0, TimeUnit.MILLISECONDS)"))
         assertTrue(activity.contains("streaming = true"))
@@ -81,6 +84,22 @@ class OfflineShellContractTest {
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/study/analysis/stream?x=1"))
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/study/../games"))
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/study/%2e%2e/games"))
+    }
+
+    @Test
+    fun nativeStudyBodiesAreReducedToTheEndpointSpecificContract() {
+        val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
+        val start = activity.indexOf("private fun parseStudyRequest")
+        val end = activity.indexOf("private fun apiUrl", start)
+        assertTrue(start >= 0 && end > start)
+        val normalizer = activity.substring(start, end)
+
+        assertTrue(normalizer.contains("JSONObject().put(\"history\", normalizedHistory)"))
+        assertTrue(normalizer.contains("if (target == \"analysis\")"))
+        assertTrue(normalizer.contains("put(\"nodes\", parsed.optInt(\"nodes\", 1000).coerceIn(1, 100_000))"))
+        assertTrue(normalizer.contains("put(\"source\", source)"))
+        assertFalse(normalizer.contains("put(\"multipv\""))
+        assertFalse(normalizer.contains("put(\"fen\""))
     }
 
     @Test
