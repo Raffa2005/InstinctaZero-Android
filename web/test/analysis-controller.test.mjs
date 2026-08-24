@@ -513,3 +513,9 @@ test('stored completed games extend study requests only by trusted game id', asy
   assert.match(controller, /window\.InstinctaZero\.loadArchivedGame/);
   assert.equal('fen' in make(() => [], {nodes:1000,backend:'cpu',bookSource:'masters',bookSpeeds:[],bookRatings:[]}, {gameId:'abcdEF12'})[0], false);
 });
+
+test('account changes and missing stored games safely detach archived context', async () => {
+  const controller = await readFile(controllerUrl, 'utf8');
+  assert.match(controller, /onAccountChanged = function \(\) \{ if \(studyContext\.gameId\) resetStudy\(\); \}/);
+  assert.match(controller, /studyContext\.gameId && Number\(payload\.code \|\| data\.code\) === 404/);
+});

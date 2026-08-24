@@ -1,6 +1,6 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.4.3 is a compact, legacy-Lichess-inspired analysis app.
+InstinctaZero Android 0.4.4 is a compact, legacy-Lichess-inspired analysis app.
 It opens on a native Home screen; Analysis opens at the standard starting
 position and provides a legal interactive board, local variation tree, live
 Leela lines and arrows, opening-book results, and move navigation. The
@@ -75,9 +75,15 @@ account has an ongoing game.
   forgets the local token immediately and then attempts remote self-revocation.
 - When paired, Games asks the PC to sync completed Lichess games, displays only
   one recycled 20-game page at a time, and fetches another page near the end of
-  scrolling. Its legacy-style rows use the exact bundled Cburnett pieces, speed
+  scrolling. Already imported pages appear immediately while a first full sync
+  continues in the background. Switching accounts cooperatively hands the sync
+  over to the selected account instead of blocking on a global archive job. Its
+  legacy-style rows use the exact bundled Cburnett pieces, speed
   and variant symbols, and green/red/draw result text. No ongoing
   game is exposed, and Home performs no archive work.
+- Changing accounts detaches any completed-game context belonging to the former
+  account while preserving an ordinary local study. A stale archived position
+  also falls back to a fresh local study if the server no longer exposes it.
 - The packaged board is warmed after Home's first frame, and its piece sprites
   are revealed atomically, avoiding both launch contention and partial boards.
 

@@ -204,7 +204,7 @@
   function showMenu() { openPanelView('study'); }
 
   window.InstinctaZero = window.InstinctaZero || {};
-  window.InstinctaZero.onNativeAnalysis = function (id, payloadJson) { if (id !== engine.requestId) return; let payload; try { payload = typeof payloadJson === 'string' ? JSON.parse(payloadJson) : payloadJson; } catch (_) { return; } const data = payload.data || payload; if (payload.event === 'engine-error' || payload.event === 'error' || data.error) { engine.error = data.error || payload.message || 'Engine unavailable'; engine.status = 'error'; renderActivePanel(); return; } if (payload.event === 'done') { engine.status = 'done'; renderActivePanel(); return; } if (data.lines) { const snapshot = coherentAnalysisSnapshot(data, settings.nodes); if (snapshot) { cursor.analysisCache = snapshot; applyAnalysisSnapshot(snapshot, 'running'); renderActivePanel(); } else if (data.progress) { engine.progress = data.progress; renderActivePanel(); } } else if (data.progress) { engine.progress = data.progress; renderActivePanel(); } };
+  window.InstinctaZero.onNativeAnalysis = function (id, payloadJson) { if (id !== engine.requestId) return; let payload; try { payload = typeof payloadJson === 'string' ? JSON.parse(payloadJson) : payloadJson; } catch (_) { return; } const data = payload.data || payload; if (payload.event === 'engine-error' || payload.event === 'error' || data.error) { if (studyContext.gameId && Number(payload.code || data.code) === 404) { resetStudy(); return; } engine.error = data.error || payload.message || 'Engine unavailable'; engine.status = 'error'; renderActivePanel(); return; } if (payload.event === 'done') { engine.status = 'done'; renderActivePanel(); return; } if (data.lines) { const snapshot = coherentAnalysisSnapshot(data, settings.nodes); if (snapshot) { cursor.analysisCache = snapshot; applyAnalysisSnapshot(snapshot, 'running'); renderActivePanel(); } else if (data.progress) { engine.progress = data.progress; renderActivePanel(); } } else if (data.progress) { engine.progress = data.progress; renderActivePanel(); } };
   window.InstinctaZero.onNativeExplorer = function (id, payloadJson) {
     if (id !== book.requestId) return;
     try {
@@ -224,6 +224,7 @@
     renderActivePanel();
   };
   window.InstinctaZero.onNativeConnectionState = function () { if (!analysisActive) return; if (settings.enabled) scheduleAnalysis(); if (tab === 'book') requestBook(); };
+  window.InstinctaZero.onAccountChanged = function () { if (studyContext.gameId) resetStudy(); };
   window.InstinctaZero.loadArchivedGame = function (payloadJson) { let payload; try { payload = typeof payloadJson === 'string' ? JSON.parse(payloadJson) : payloadJson; } catch (_) { return false; } return installArchivedGame(payload); };
   window.InstinctaZero.persistStudy = saveStudyNow;
   window.InstinctaZero.setAnalysisActive = function (active) { const next = !!active; if (next === analysisActive) return; analysisActive = next; if (!analysisActive) { resetTransport(); if (engine.status === 'starting' || engine.status === 'running') engine.status = 'idle'; renderActivePanel(); return; } restoreCachedAnalysis(); scheduleAnalysis(); if (tab === 'book') requestBook(); };

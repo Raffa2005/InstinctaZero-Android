@@ -1,7 +1,7 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.4.3). Before producing a release APK, rebuild and verify the two
+(version 0.4.4). Before producing a release APK, rebuild and verify the two
 checked-in browser assets from their retained sources:
 
 ```bash
@@ -38,7 +38,7 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 10 / 0.4.3 release values;
+- versionCode/versionName are the intended 11 / 0.4.4 release values;
 - `npm run check`, `testDebugUnitTest`, release lint, and the signed release
   build all pass;
 - the APK installs and opens on native Home, while Analysis opens at the
@@ -52,6 +52,9 @@ Before publishing, at minimum verify:
   or callbacks;
 - another Lichess account already authorized in an InstinctaZero PC browser
   session can be selected without changing or exposing the paired-device token;
+- switching accounts is accepted while another account is syncing, already
+  imported games render immediately, and an archived analysis from the former
+  account safely detaches instead of leaving the engine in a 404 error state;
 - Leela streams progressive lines/arrows and cancellation closes its request;
 - a local study, selected variation, cursor, orientation, and game context are
   restored after Activity/process recreation;

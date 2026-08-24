@@ -80,6 +80,7 @@ class MainActivity : ComponentActivity() {
     private var archiveFirstPageCursor: String? = null
     private var archiveCacheLoaded = false
     private var archiveLoading = false
+    private var archiveSyncing = false
     private var archiveRefreshedThisSession = false
     private var archiveMessage: String? = null
     private var archiveAdapter: GameArchiveAdapter? = null
@@ -220,15 +221,21 @@ class MainActivity : ComponentActivity() {
         pairingCode.finishPair()
         if (payload.optBoolean("paired")) {
             val selectedAccount = payload.optString("accountUsername")
-            if (selectedAccount.isNotBlank() && archiveAccount.isNotBlank() &&
+            val accountChanged = selectedAccount.isNotBlank() && archiveAccount.isNotBlank() &&
                 !archiveAccount.equals(selectedAccount, ignoreCase = true)
-            ) {
+            if (accountChanged) {
                 archiveGames.clear()
                 archiveCursor = null
                 archiveFirstPageCursor = null
                 archiveTotal = 0
                 archiveCacheLoaded = false
                 archiveRefreshedThisSession = false
+                archiveSyncing = false
+                nativeBridge.clearArchivedStudyContext()
+                if (webPageLoaded) webView.evaluateJavascript(
+                    "window.InstinctaZero&&window.InstinctaZero.onAccountChanged&&window.InstinctaZero.onAccountChanged();void 0;",
+                    null,
+                )
             }
             if (selectedAccount.isNotBlank()) archiveAccount = selectedAccount
             pairingCode.clear()
@@ -241,6 +248,7 @@ class MainActivity : ComponentActivity() {
             archiveTotal = 0
             archiveCacheLoaded = true
             archiveRefreshedThisSession = false
+            archiveSyncing = false
         }
         if (navigation.screen != ShellScreen.ANALYSIS) renderNativeScreen()
     }
@@ -320,6 +328,7 @@ class MainActivity : ComponentActivity() {
         }
         payload.optString("account").takeIf(String::isNotBlank)?.let { archiveAccount = it }
         archiveTotal = payload.optInt("total", archiveTotal.coerceAtLeast(archiveGames.size))
+        archiveSyncing = payload.optBoolean("sync_running", archiveSyncing)
         archiveCursor = archiveCursorFrom(
             if (payload.isNull("next_cursor")) null else payload.optString("next_cursor"),
         )
@@ -511,7 +520,8 @@ class MainActivity : ComponentActivity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(8.dp, 0, 4.dp, 0)
             addView(TextView(this@MainActivity).apply {
-                text = "▾  ${archiveTotal.coerceAtLeast(archiveGames.size)} games"
+                text = "▾  ${archiveTotal.coerceAtLeast(archiveGames.size)} games" +
+                    if (archiveSyncing) "  ·  syncing…" else ""
                 setTextColor(0xffb8b8b8.toInt())
                 textSize = 13f
                 maxLines = 1
@@ -1203,6 +1213,15 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         false
     }
 
+    fun clearArchivedStudyContext() {
+        val state = runCatching {
+            JSONObject(studyPreferences.getString("state_v1", "{}") ?: "{}")
+        }.getOrNull() ?: return
+        if (state.optString("gameId").isNotBlank()) {
+            studyPreferences.edit().remove("state_v1").apply()
+        }
+    }
+
     /** Native-only pairing entry point. The bearer can never cross into WebView JavaScript. */
     fun pairFromNative(code: String?, deviceName: String?): String = newRequestId().also { id ->
         val safeCode = code?.trim()?.uppercase().orEmpty()
@@ -1381,7 +1400,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
             return
         }
         try {
-            executeJson(
+            val syncResponse = executeJson(
                 pending,
                 Request.Builder().url(apiUrl("sync"))
                     .header("Authorization", "Bearer $token")
@@ -1389,18 +1408,6 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
                     .build(),
                 256 * 1024,
             )
-            for (attempt in 0 until 60) {
-                if (pending.isCanceled()) throw IOException("Request cancelled.")
-                val status = executeJson(
-                    pending,
-                    Request.Builder().url(apiUrl("sync"))
-                        .header("Authorization", "Bearer $token")
-                        .get().build(),
-                    256 * 1024,
-                ).optJSONObject("sync")?.optString("status").orEmpty()
-                if (status !in setOf("running", "starting")) break
-                Thread.sleep(250)
-            }
             val session = executeJson(
                 pending,
                 Request.Builder().url(apiUrl("session"))
@@ -1409,7 +1416,11 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
                 256 * 1024,
             )
             val account = storeSessionPayload(session)
-            val result = fetchArchivePage(pending, token, null).put("account", account)
+            val syncRunning = syncResponse.optJSONObject("sync")?.optBoolean("running") == true ||
+                session.optJSONObject("sync")?.optBoolean("running") == true
+            val result = fetchArchivePage(pending, token, null)
+                .put("account", account)
+                .put("sync_running", syncRunning)
             require(result.toString().length <= MAX_ARCHIVE_JSON) { "Completed-game cache is too large." }
             check(archivePreferences.edit().putString("games_v1", result.toString()).commit())
             if (!pending.isCanceled()) activity.runOnUiThread { activity.onArchivePayload(result, null, append = false) }

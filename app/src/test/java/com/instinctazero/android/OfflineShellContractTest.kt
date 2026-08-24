@@ -191,6 +191,10 @@ class OfflineShellContractTest {
         assertTrue(activity.contains("availableAccounts"))
         assertTrue(activity.contains("To add another account, sign into InstinctaZero on the PC"))
         assertFalse(activity.substring(activity.indexOf("fun selectAccount(username: String)"), activity.indexOf("fun loadMoreArchive", activity.indexOf("fun selectAccount(username: String)"))).contains("remove(TOKEN_KEY)"))
+        assertTrue(activity.contains("fun clearArchivedStudyContext()"))
+        assertTrue(activity.contains("window.InstinctaZero.onAccountChanged"))
+        assertFalse(activity.contains("for (attempt in 0 until 60)"))
+        assertTrue(activity.contains("put(\"sync_running\", syncRunning)"))
     }
 
     @Test
