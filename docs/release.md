@@ -1,7 +1,7 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.4.0). Before producing a release APK, rebuild and verify the two
+(version 0.4.1). Before producing a release APK, rebuild and verify the two
 checked-in browser assets from their retained sources:
 
 ```bash
@@ -38,7 +38,7 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 7 / 0.4.0 release values;
+- versionCode/versionName are the intended 8 / 0.4.1 release values;
 - `npm run check`, `testDebugUnitTest`, release lint, and the signed release
   build all pass;
 - the APK installs and opens on native Home, while Analysis opens at the
@@ -61,8 +61,9 @@ Before publishing, at minimum verify:
 - backgrounding the app cancels active native analysis;
 - only the fixed HTTPS pairing/study endpoints are reachable, with the WebView
   still using `connect-src 'none'`; and
-- the server uses the fixed exact-SYCL BT4 profile through InstinctaZero's
-  guarded shared engine lifecycle and enforces its fair-play gate. Mobile analysis
+- the server accepts only the closed `cpu`/`sycl` selector, maps it to its
+  code-owned CPU INT8 or exact-SYCL BT4 profile through InstinctaZero's guarded
+  shared engine lifecycle, and enforces its fair-play gate. Mobile analysis
   shares the InstinctaZero session and may replace a currently active desktop
   search.
 

@@ -1,8 +1,11 @@
 package com.instinctazero.android
 
 import java.io.File
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 /**
@@ -54,6 +57,8 @@ class OfflineShellContractTest {
         assertTrue(activity.contains("saveUiSettings"))
         assertTrue(activity.contains("requested.optInt(\"arrowCount\""))
         assertTrue(activity.contains(".putInt(\"arrowCount\", arrowCount)"))
+        assertTrue(activity.contains("requested.optString(\"engineBackend\""))
+        assertTrue(activity.contains(".putString(\"engineBackend\", engineBackend)"))
         assertTrue(activity.contains(".put(\"arrowCount\", uiPreferences.getInt(\"arrowCount\", 8).coerceIn(1, 8))"))
         assertFalse(activity.contains("requested.optInt(\"multipv\""))
         assertFalse(activity.contains(".putInt(\"multipv\""))
@@ -104,6 +109,8 @@ class OfflineShellContractTest {
         assertTrue(normalizer.contains("JSONObject().put(\"history\", normalizedHistory)"))
         assertTrue(normalizer.contains("if (target == \"analysis\")"))
         assertTrue(normalizer.contains("put(\"nodes\", parsed.optInt(\"nodes\", 1000).coerceIn(1, 100_000))"))
+        assertTrue(normalizer.contains("put(\"backend\", backend)"))
+        assertTrue(normalizer.contains("backend == \"cpu\" || backend == \"sycl\""))
         assertTrue(normalizer.contains("put(\"source\", source)"))
         assertTrue(normalizer.contains("if (source == \"lichess\")"))
         assertTrue(normalizer.contains("put(\"speeds\", JSONArray(normalizedStringSelection(it, BOOK_SPEEDS)))"))
@@ -112,6 +119,19 @@ class OfflineShellContractTest {
         assertFalse(normalizer.contains("put(\"fen\""))
         assertTrue(normalizer.contains("if (parsed.has(\"game_id\"))"))
         assertTrue(normalizer.contains("put(\"game_id\", gameId)"))
+    }
+
+    @Test
+    fun archiveCursorTreatsJsonNullAsTheEndAndRejectsMalformedValues() {
+        assertNull(archiveCursorFrom(null))
+        assertNull(archiveCursorFrom(""))
+        assertEquals("Abc_123-xyz", archiveCursorFrom("Abc_123-xyz"))
+        try {
+            archiveCursorFrom("null")
+            fail("literal null must not become another pagination request")
+        } catch (_: IllegalArgumentException) {
+            // Expected: only server-issued base64url cursor values are accepted.
+        }
     }
 
     @Test
@@ -148,6 +168,7 @@ class OfflineShellContractTest {
         assertTrue(activity.contains(".url(apiUrl(\"sync\"))"))
         assertTrue(activity.contains("optString(\"status\")"))
         assertFalse(activity.contains("optString(\"state\")"))
+        assertTrue(activity.contains("page.isNull(\"next_cursor\")"))
         assertTrue(activity.contains("apiUrl(\"games/\$gameId\")"))
         assertFalse(controller.contains("/api/mobile/v1/games"))
         assertFalse(controller.contains("Authorization"))

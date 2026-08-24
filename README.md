@@ -1,6 +1,6 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.4.0 is a compact, legacy-Lichess-inspired analysis app.
+InstinctaZero Android 0.4.1 is a compact, legacy-Lichess-inspired analysis app.
 It opens on a native Home screen; Analysis opens at the standard starting
 position and provides a legal interactive board, local variation tree, live
 Leela lines and arrows, opening-book results, and move navigation. The
@@ -33,11 +33,13 @@ only the fixed HTTPS host and the pairing/study API routes; cookies, downloads,
 pop-ups, external navigation, cleartext traffic, and arbitrary WebView network
 access remain blocked.
 
-Leela uses the server-selected `exact-sycl` BT4 profile. It shares
-InstinctaZero's guarded SYCL engine lifecycle. Mobile and
-desktop analysis share the PC's InstinctaZero analysis session, however, so a
-phone request can replace a currently active desktop search. The phone cannot
-select an executable, backend, engine profile, arbitrary FEN, or server route.
+Leela offers two closed, server-owned choices: `CPU · safe` uses the approximate
+oneDNN INT8 CPU profile, while `iGPU · exact` uses the normal `exact-sycl` BT4
+profile. CPU is the mobile default so another iGPU workload cannot collide with
+it. Mobile and desktop analysis still share the PC's guarded InstinctaZero
+analysis session, so a phone request can replace a currently active desktop
+search. The phone cannot select an executable, weights, arbitrary backend
+options, FEN, or server route.
 The service's fair-play gate refuses analysis while the configured Lichess
 account has an ongoing game.
 
@@ -53,8 +55,8 @@ account has an ongoing game.
 - Android Back closes the pairing keypad, drawer, or analysis subpanel first;
   then Profile and Analysis return to Home, and Back from Home exits.
 - Menu, settings, board flip, board size, previous, and next are functional.
-  Compact touch-only settings remember a discrete node target, independent arrow
-  count (1–8), Leela, and arrow visibility. The engine panel scrolls through
+  Compact touch-only settings remember CPU/iGPU mode, a discrete node target,
+  independent arrow count (1–8), Leela, and arrow visibility. The engine panel scrolls through
   every returned line with visits.
 - The tabs show study information, notation, live Leela analysis, the
   intentionally blank evaluation chart, and the live opening book. Book rows

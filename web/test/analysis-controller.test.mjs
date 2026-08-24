@@ -112,9 +112,9 @@ test('visible study controls have menu and native-home behavior without a header
   assert.doesNotMatch(controller, /settings\.multipv|data-multipv/);
   assert.doesNotMatch(controller, /engine\.lines\.slice/);
   const requestSource = functionSource(controller, 'studyRequest', 'renderActivePanel');
-  const requests = new Function('history', 'settings', 'studyContext', `${requestSource}; return [studyRequest(), explorerRequest()];`)(() => ['e2e4'], { nodes:4321, bookSource:'lichess', bookSpeeds:[], bookRatings:[] }, {gameId:null});
+  const requests = new Function('history', 'settings', 'studyContext', `${requestSource}; return [studyRequest(), explorerRequest()];`)(() => ['e2e4'], { nodes:4321, backend:'cpu', bookSource:'lichess', bookSpeeds:[], bookRatings:[] }, {gameId:null});
   assert.deepEqual(requests, [
-    { history:['e2e4'], nodes:4321 },
+    { history:['e2e4'], nodes:4321, backend:'cpu' },
     { history:['e2e4'], source:'lichess' }
   ]);
   assert.match(controller, /saveUiSettings/);
@@ -250,7 +250,7 @@ test('book percentages normalize counts and inconsistent reported percentages', 
   assert.match(style, /\.result-bar\{display:block;width:100%;min-width:0;/);
 });
 
-test('played PV is projected into a nodes-keyed child cache until a coherent snapshot arrives', async () => {
+test('played PV is projected into a nodes-and-backend-keyed child cache until a coherent snapshot arrives', async () => {
   const controller = await readFile(controllerUrl, 'utf8');
   const projectSource = functionSource(controller, 'projectAnalysisToChild', 'joinedPositiveLines');
   const finiteMetric = value => value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
@@ -258,6 +258,7 @@ test('played PV is projected into a nodes-keyed child cache until a coherent sna
   const parent = {
     lines:[{ multipv:2, pv:['e2e4','c7c5','g1f3'], san:['e4','c5','Nf3'], white_cp:18 }],
     move_stats:[{ uci:'e2e4', visits:321, prior:.27 }],
+    mobile_backend:'cpu',
     target_nodes:1000,
     total_nodes:900
   };
@@ -271,7 +272,7 @@ test('played PV is projected into a nodes-keyed child cache until a coherent sna
   assert.equal(project(parent, 'd2d4', 4000), null);
 
   const snapshotSource = controller.slice(controller.indexOf('function joinedPositiveLines'), controller.indexOf('  function applyAnalysisSnapshot'));
-  const coherent = new Function('finiteMetric', `${snapshotSource}; return coherentAnalysisSnapshot;`)(finiteMetric);
+  const coherent = new Function('finiteMetric', 'settings', `${snapshotSource}; return coherentAnalysisSnapshot;`)(finiteMetric, {backend:'cpu'});
   const packet = {
     search_phase:'ready',
     lines:[{pv:['c7c5']},{pv:['e7e5']},{pv:['e7e6']}],
@@ -287,7 +288,7 @@ test('played PV is projected into a nodes-keyed child cache until a coherent sna
   const engine = { lines:[], stats:null };
   const cursor = { analysisCache:inherited };
   let arrowLines = null;
-  const restore = new Function('engine', 'cursor', 'settings', 'finiteMetric', 'renderArrows', `${cacheSource}; return restoreCachedAnalysis;`)(engine, cursor, {nodes:4000}, finiteMetric, lines => { arrowLines = lines; });
+  const restore = new Function('engine', 'cursor', 'settings', 'finiteMetric', 'renderArrows', `${cacheSource}; return restoreCachedAnalysis;`)(engine, cursor, {nodes:4000,backend:'cpu'}, finiteMetric, lines => { arrowLines = lines; });
   restore();
   assert.deepEqual(engine.lines[0].pv, ['c7c5','g1f3']);
   assert.equal(engine.status, 'inherited');
@@ -302,12 +303,14 @@ test('all positive-visit engine lines remain visible and the prior/visit bar is 
   const [controller, style] = await Promise.all([readFile(controllerUrl, 'utf8'), readFile(styleUrl, 'utf8')]);
   const finiteMetric = value => value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
   const snapshotSource = controller.slice(controller.indexOf('function joinedPositiveLines'), controller.indexOf('  function applyAnalysisSnapshot'));
-  const coherent = new Function('finiteMetric', `${snapshotSource}; return coherentAnalysisSnapshot;`)(finiteMetric);
+  const coherent = new Function('finiteMetric', 'settings', `${snapshotSource}; return coherentAnalysisSnapshot;`)(finiteMetric, {backend:'cpu'});
   const lines = Array.from({length:11}, (_, index) => ({ pv:[`move${index}`] }));
   const move_stats = lines.map((line, index) => ({ uci:line.pv[0], visits:index === 10 ? 0 : index + 1 }));
   const joined = coherent({ search_phase:'ready', lines, move_stats }, 1000);
   assert.equal(joined.lines.length, 10);
   assert.equal(joined.lines.some(line => line.pv[0] === 'move10'), false);
+  assert.equal(joined.mobile_backend, 'cpu');
+  assert.match(controller, /cached\.mobile_backend === settings\.backend/);
   assert.doesNotMatch(controller, /engine\.lines\.slice/);
   assert.match(controller, /engine\.lines\.map\(/);
   assert.match(controller, /finiteMetric\(stat && stat\.visits\) > 0/);
@@ -391,6 +394,9 @@ test('engine controls are touch-only discrete sliders and contain no text or num
   assert.match(controller, /const NODE_OPTIONS = \[100, 200, 400, 700, 1000, 2000, 4000, 7000, 10000, 20000, 40000, 70000, 100000\]/);
   assert.match(controller, /data-nodes type="range"/);
   assert.match(controller, /data-arrow-count type="range" min="1" max="8" step="1"/);
+  assert.match(controller, /data-backend="cpu"/);
+  assert.match(controller, /data-backend="sycl"/);
+  assert.match(controller, /settings\.backend = next; clearAnalysisCaches\(root\)/);
   assert.match(controller, /nodes\.oninput[^\n]*data-node-readout/);
   assert.match(controller, /nodes\.onchange[^\n]*clearAnalysisCaches\(root\)[^\n]*scheduleAnalysis\(\)/);
   assert.match(controller, /role="switch"/);
@@ -480,10 +486,10 @@ test('stored completed games extend study requests only by trusted game id', asy
   const controller = await readFile(controllerUrl, 'utf8');
   const source = functionSource(controller, 'studyRequest', 'renderActivePanel');
   const make = new Function('history', 'settings', 'studyContext', `${source}; return [studyRequest(), explorerRequest()];`);
-  assert.deepEqual(make(() => ['e2e4'], {nodes:700,bookSource:'masters',bookSpeeds:[],bookRatings:[]}, {gameId:'abcdEF12'}), [
-    {history:['e2e4'],nodes:700,game_id:'abcdEF12'},
+  assert.deepEqual(make(() => ['e2e4'], {nodes:700,backend:'sycl',bookSource:'masters',bookSpeeds:[],bookRatings:[]}, {gameId:'abcdEF12'}), [
+    {history:['e2e4'],nodes:700,backend:'sycl',game_id:'abcdEF12'},
     {history:['e2e4'],source:'masters',game_id:'abcdEF12'},
   ]);
   assert.match(controller, /window\.InstinctaZero\.loadArchivedGame/);
-  assert.equal('fen' in make(() => [], {nodes:1000,bookSource:'masters',bookSpeeds:[],bookRatings:[]}, {gameId:'abcdEF12'})[0], false);
+  assert.equal('fen' in make(() => [], {nodes:1000,backend:'cpu',bookSource:'masters',bookSpeeds:[],bookRatings:[]}, {gameId:'abcdEF12'})[0], false);
 });

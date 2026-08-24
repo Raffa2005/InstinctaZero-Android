@@ -493,7 +493,7 @@ class MainActivity : ComponentActivity() {
                         listOf(
                             archiveAccount.takeIf(String::isNotBlank),
                             state.optString("deviceName").ifBlank { "InstinctaZero Android" },
-                            "Leela: exact SYCL · Intel iGPU",
+                            "Leela: ${nativeBridge.engineBackendLabel()}",
                         ).filterNotNull().joinToString("\n")
                     else "Generate a pairing code on the InstinctaZero PC, then enter it using the keypad."
                     setTextColor(if (connectionMessage == null) TEXT_MUTED else ERROR_TEXT)
@@ -737,6 +737,15 @@ internal object AnalysisWebPolicy {
     }
 }
 
+internal fun archiveCursorFrom(rawCursor: String?): String? {
+    val cursor = rawCursor?.trim().orEmpty()
+    if (cursor.isEmpty()) return null
+    require(cursor != "null" && cursor.matches(Regex("[A-Za-z0-9_-]{1,256}"))) {
+        "Invalid game cursor."
+    }
+    return cursor
+}
+
 /**
  * The complete public JavaScript ABI. All methods return a request id immediately; results are
  * sent to the local page as:
@@ -747,7 +756,7 @@ internal object AnalysisWebPolicy {
  *
  * `payloadJson` is a JSON string, never a bearer token. The page should use Abort-like behaviour
  * by calling [cancelAnalysis] on board/tab/background changes. Analysis requests carry a
- * legal UCI history and search limits. The server alone selects its fixed exact-SYCL profile.
+ * legal UCI history, search limits, and one closed CPU/SYCL selector.
  */
 class NativeAnalysisBridge(private val activity: MainActivity) {
     companion object {
@@ -820,6 +829,8 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         val arrowCount = requested.optInt("arrowCount", uiSettings().getInt("arrowCount")).coerceIn(1, 8)
         val leelaEnabled = requested.optBoolean("leelaEnabled", uiSettings().getBoolean("leelaEnabled"))
         val arrowsEnabled = requested.optBoolean("arrowsEnabled", uiSettings().getBoolean("arrowsEnabled"))
+        val engineBackend = requested.optString("engineBackend", uiSettings().getString("engineBackend"))
+        require(engineBackend in setOf("cpu", "sycl")) { "Invalid engine backend." }
         val appearance = requested.optString("appearance", uiSettings().getString("appearance"))
         val bookSource = requested.optString("bookSource", uiSettings().getString("bookSource"))
         require(bookSource in setOf("masters", "lichess")) { "Invalid opening-book source." }
@@ -837,6 +848,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
             .putInt("arrowCount", arrowCount)
             .putBoolean("leelaEnabled", leelaEnabled)
             .putBoolean("arrowsEnabled", arrowsEnabled)
+            .putString("engineBackend", engineBackend)
             .putString("appearance", appearance)
             .putString("bookSource", bookSource)
             .putString("bookSpeeds", JSONArray(bookSpeeds).toString())
@@ -1044,7 +1056,9 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
                 )
                 val items = page.optJSONArray("games") ?: JSONArray()
                 for (index in 0 until items.length()) allGames.put(items.getJSONObject(index))
-                cursor = page.optString("next_cursor").ifBlank { null }
+                cursor = archiveCursorFrom(
+                    if (page.isNull("next_cursor")) null else page.optString("next_cursor"),
+                )
                 if (cursor == null) break
             }
             val result = JSONObject()
@@ -1209,6 +1223,9 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
             }
             if (target == "analysis") {
                 put("nodes", parsed.optInt("nodes", 1000).coerceIn(1, 100_000))
+                val backend = parsed.optString("backend", "cpu")
+                require(backend == "cpu" || backend == "sycl") { "Invalid engine backend." }
+                put("backend", backend)
             } else {
                 val source = parsed.optString("source", "masters")
                 require(source == "masters" || source == "lichess") { "Invalid opening-book source." }
@@ -1248,10 +1265,17 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         .put("arrowCount", uiPreferences.getInt("arrowCount", 8).coerceIn(1, 8))
         .put("leelaEnabled", uiPreferences.getBoolean("leelaEnabled", true))
         .put("arrowsEnabled", uiPreferences.getBoolean("arrowsEnabled", true))
+        .put("engineBackend", uiPreferences.getString("engineBackend", "cpu"))
         .put("appearance", uiPreferences.getString("appearance", "brown"))
         .put("bookSource", uiPreferences.getString("bookSource", "lichess"))
         .put("bookSpeeds", storedArray("bookSpeeds", "[]"))
         .put("bookRatings", storedArray("bookRatings", "[]"))
+
+    fun engineBackendLabel(): String =
+        if (uiPreferences.getString("engineBackend", "cpu") == "sycl")
+            "iGPU · exact SYCL"
+        else
+            "CPU · safe INT8"
 
     private fun storedArray(key: String, fallback: String): JSONArray = runCatching {
         JSONArray(uiPreferences.getString(key, fallback))
