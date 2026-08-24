@@ -79,6 +79,7 @@ class OfflineShellContractTest {
         val origin = "https://rafael-ms-7e34.tail273ae6.ts.net:8443"
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/pair/claim"))
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/session"))
+        assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/account/select"))
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/study/analysis/stream"))
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/study/explorer"))
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/sync"))
@@ -161,8 +162,9 @@ class OfflineShellContractTest {
         val controller = projectFile("src/main/assets/analysis/analysis.js").readText()
         assertTrue(activity.contains("private val navigation = ShellNavigation()"))
         assertTrue(activity.contains("renderNativeScreen()"))
-        assertTrue(activity.contains("visibility = View.GONE"))
-        assertTrue(activity.contains("if (!webPageLoaded) webView.loadUrl"))
+        assertTrue(activity.contains("webView.loadUrl(AnalysisWebPolicy.MAIN_PAGE_URL)"))
+        assertTrue(activity.contains("Keep the local page laid out beneath the opaque native shell"))
+        assertFalse(activity.contains("if (!webPageLoaded) webView.loadUrl"))
         assertTrue(activity.contains("fun refreshArchive()"))
         assertTrue(activity.contains("fun loadArchivedGame(gameId: String)"))
         assertTrue(activity.contains(".url(apiUrl(\"sync\"))"))
@@ -181,6 +183,31 @@ class OfflineShellContractTest {
     }
 
     @Test
+    fun accountSelectionKeepsThePairedPcCredentialAndUsesAClosedNativeRoute() {
+        val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
+        assertTrue(activity.contains("fun refreshSession()"))
+        assertTrue(activity.contains("fun selectAccount(username: String)"))
+        assertTrue(activity.contains(".url(apiUrl(\"account/select\"))"))
+        assertTrue(activity.contains("availableAccounts"))
+        assertTrue(activity.contains("To add another account, sign into InstinctaZero on the PC"))
+        assertFalse(activity.substring(activity.indexOf("fun selectAccount(username: String)"), activity.indexOf("fun loadMoreArchive", activity.indexOf("fun selectAccount(username: String)"))).contains("remove(TOKEN_KEY)"))
+    }
+
+    @Test
+    fun analysisPageIsPreloadedAndPieceSpritesBecomeVisibleAtomically() {
+        val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
+        val page = projectFile("src/main/assets/analysis/index.html").readText()
+        val style = projectFile("src/main/assets/analysis/analysis.css").readText()
+        val controller = projectFile("src/main/assets/analysis/analysis.js").readText()
+        assertTrue(activity.contains("renderNativeScreen()\n        // Paint Home first"))
+        assertTrue(activity.contains("shellRoot.post { webView.loadUrl(AnalysisWebPolicy.MAIN_PAGE_URL) }"))
+        assertTrue(page.contains("class=\"board-assets-loading\""))
+        assertTrue(page.contains("rel=\"preload\" as=\"image\" href=\"pieces/wK.svg\""))
+        assertTrue(style.contains(".board-assets-loading .cg-board piece{visibility:hidden}"))
+        assertTrue(controller.contains("document.documentElement.classList.remove('board-assets-loading')"))
+    }
+
+    @Test
     fun homeDoesNotLoadGamesAndNativeThumbnailsUseBundledCburnettArtwork() {
         val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
         val thumbnail = projectFile("src/main/java/com/instinctazero/android/GameThumbnailView.kt").readText()
@@ -193,6 +220,13 @@ class OfflineShellContractTest {
         assertTrue(activity.contains("navigation.screen == ShellScreen.GAMES && !archiveRefreshedThisSession"))
         assertTrue(activity.contains("ShellScreen.GAMES -> page.addView(gamesContent()"))
         assertTrue(activity.contains("drawerButton(\"Games\")"))
+        assertTrue(activity.contains("private fun gamePerfIcon"))
+        assertTrue(activity.contains("if (initial > 0 || increment > 0)"))
+        assertTrue(activity.contains("private fun gameResultPresentation"))
+        assertTrue(activity.contains("GAME_WIN"))
+        assertTrue(activity.contains("GAME_LOSS"))
+        assertTrue(activity.contains("Computer analysis available"))
+        assertTrue(activity.contains("LayoutParams(120.dp, 120.dp)"))
         assertTrue(thumbnail.contains("analysis/pieces/\$name.svg"))
         assertTrue(thumbnail.contains("SVG.getFromAsset"))
         assertFalse(thumbnail.contains("♔"))

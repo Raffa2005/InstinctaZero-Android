@@ -1,7 +1,7 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.4.2). Before producing a release APK, rebuild and verify the two
+(version 0.4.3). Before producing a release APK, rebuild and verify the two
 checked-in browser assets from their retained sources:
 
 ```bash
@@ -38,7 +38,7 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 9 / 0.4.2 release values;
+- versionCode/versionName are the intended 10 / 0.4.3 release values;
 - `npm run check`, `testDebugUnitTest`, release lint, and the signed release
   build all pass;
 - the APK installs and opens on native Home, while Analysis opens at the
@@ -50,9 +50,13 @@ Before publishing, at minimum verify:
 - a fresh PC pairing code entered through the Account / PC touch keypad
   produces a paired state and no bearer appears in WebView storage, logs, URLs,
   or callbacks;
+- another Lichess account already authorized in an InstinctaZero PC browser
+  session can be selected without changing or exposing the paired-device token;
 - Leela streams progressive lines/arrows and cancellation closes its request;
 - a local study, selected variation, cursor, orientation, and game context are
   restored after Activity/process recreation;
+- advancing through a selected continuation inherits the cached response arrow
+  and White-perspective value before the replacement search arrives;
 - Home performs no archive sync or list construction. The separate Games screen
   triggers a PC-owned sync, uses recycled native rows with the bundled Cburnett
   pieces, requests 20-game pages while scrolling, and opens a selected game by

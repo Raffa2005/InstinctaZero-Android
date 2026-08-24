@@ -275,6 +275,19 @@ test('played PV is projected into a nodes-and-backend-keyed child cache until a 
   assert.equal(leaf.inherited_eval.white_cp, 18);
   assert.match(controller, /engine\.stats && engine\.stats\.inherited_eval/);
   assert.equal(project(parent, 'd2d4', 4000), null);
+  const inherit = new Function(
+    'finiteMetric',
+    'moveUci',
+    'settings',
+    'engine',
+    `${projectSource}; return inheritAnalysisToChild;`,
+  )(finiteMetric, node => node.uci, {nodes:4000}, {stats:null});
+  const parentNode = {analysisCache:parent};
+  const childNode = {parent:parentNode, uci:'e2e4'};
+  inherit(parentNode, childNode);
+  assert.deepEqual(childNode.analysisCache.lines[0].pv, ['c7c5','g1f3']);
+  assert.equal(childNode.analysisCache.inherited_eval.white_cp, 18);
+  assert.match(controller, /if \(next\.parent === previous\) inheritAnalysisToChild\(previous, next\)/);
 
   const snapshotSource = controller.slice(controller.indexOf('function joinedPositiveLines'), controller.indexOf('  function applyAnalysisSnapshot'));
   const coherent = new Function('finiteMetric', 'settings', `${snapshotSource}; return coherentAnalysisSnapshot;`)(finiteMetric, {backend:'cpu'});

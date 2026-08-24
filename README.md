@@ -1,6 +1,6 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.4.2 is a compact, legacy-Lichess-inspired analysis app.
+InstinctaZero Android 0.4.3 is a compact, legacy-Lichess-inspired analysis app.
 It opens on a native Home screen; Analysis opens at the standard starting
 position and provides a legal interactive board, local variation tree, live
 Leela lines and arrows, opening-book results, and move navigation. The
@@ -8,8 +8,10 @@ evaluation-chart tab is intentionally blank in this release.
 
 The app pairs with one InstinctaZero PC using a short-lived code. It does not
 sign into Lichess directly or contain a Lichess token. Instead, pairing signs the
-phone into the Lichess account already connected on the PC, and the PC synchronizes
-that account's completed-game archive. Games have their own native screen and are
+phone into the analysis PC. The selected Lichess account is then independent of
+that PC pairing: accounts already authorized in separate InstinctaZero browser
+sessions can be switched from Account / PC without re-pairing the phone. The PC
+synchronizes only the selected account's completed-game archive. Games have their own native screen and are
 loaded in 20-game pages only as the user scrolls; Home never builds or refreshes the
 archive. Before creating the pairing code, PC-side InstinctaZero must already be
 connected and configured for the user's Lichess account. An unconfigured,
@@ -52,6 +54,8 @@ account has an ongoing game.
   orientation, board size, and completed-game context survive app restarts.
 - Playing a displayed Leela move immediately inherits its already-known best
   response arrow and White-perspective value until the child search replaces it.
+- Moving forward through the selected line inherits that same cached response
+  arrow and value immediately; it does not wait for a new network snapshot.
 - Tap a move in the notation, a Leela line, or a book move; use previous/next
   (including press-and-hold) to navigate the local tree.
 - Long-press a move where sibling variations exist to promote it to the main
@@ -71,8 +75,11 @@ account has an ongoing game.
   forgets the local token immediately and then attempts remote self-revocation.
 - When paired, Games asks the PC to sync completed Lichess games, displays only
   one recycled 20-game page at a time, and fetches another page near the end of
-  scrolling. Its thumbnails reuse the exact bundled Cburnett pieces. No ongoing
+  scrolling. Its legacy-style rows use the exact bundled Cburnett pieces, speed
+  and variant symbols, and green/red/draw result text. No ongoing
   game is exposed, and Home performs no archive work.
+- The packaged board is warmed after Home's first frame, and its piece sprites
+  are revealed atomically, avoiding both launch contention and partial boards.
 
 ## Build from source
 
