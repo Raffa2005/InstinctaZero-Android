@@ -1,14 +1,15 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.3.3 is a compact, legacy-Lichess-inspired analysis app.
+InstinctaZero Android 0.4.0 is a compact, legacy-Lichess-inspired analysis app.
 It opens on a native Home screen; Analysis opens at the standard starting
 position and provides a legal interactive board, local variation tree, live
 Leela lines and arrows, opening-book results, and move navigation. The
 evaluation-chart tab is intentionally blank in this release.
 
 The app pairs with one InstinctaZero PC using a short-lived code. It does not
-sign into Lichess, fetch games, synchronize an account, or contain a Lichess
-token. Before creating that pairing code, PC-side InstinctaZero must already be
+sign into Lichess or contain a Lichess token. Instead, the paired PC synchronizes
+the user's completed-game archive and the native Home screen caches and displays
+that archive. Before creating the pairing code, PC-side InstinctaZero must already be
 connected and configured for the user's Lichess account. An unconfigured,
 analysis-only PC cannot create a phone pairing code; the PC account configuration
 is what enables the active-game fair-play check. The app reaches the PC through
@@ -32,8 +33,8 @@ only the fixed HTTPS host and the pairing/study API routes; cookies, downloads,
 pop-ups, external navigation, cleartext traffic, and arbitrary WebView network
 access remain blocked.
 
-Leela uses the server-selected `mobile-cpu-int8` BT4 profile. It is an
-approximate CPU-only profile and never starts or uses a SYCL engine. Mobile and
+Leela uses the server-selected `exact-sycl` BT4 profile. It shares
+InstinctaZero's guarded SYCL engine lifecycle. Mobile and
 desktop analysis share the PC's InstinctaZero analysis session, however, so a
 phone request can replace a currently active desktop search. The phone cannot
 select an executable, backend, engine profile, arbitrary FEN, or server route.
@@ -43,11 +44,14 @@ account has an ongoing game.
 ## Controls
 
 - Tap or drag a piece to make a legal move.
+- The complete local study tree, selected continuation, current position, tab,
+  orientation, board size, and completed-game context survive app restarts.
 - Tap a move in the notation, a Leela line, or a book move; use previous/next
   (including press-and-hold) to navigate the local tree.
+- Long-press a move where sibling variations exist to promote it to the main
+  line or delete that variation without invoking text selection.
 - Android Back closes the pairing keypad, drawer, or analysis subpanel first;
-  then Profile and Analysis return to Home, and Back from Home exits. The
-  checkerboard icon opens Appearance inside the full-width analysis panel.
+  then Profile and Analysis return to Home, and Back from Home exits.
 - Menu, settings, board flip, board size, previous, and next are functional.
   Compact touch-only settings remember a discrete node target, independent arrow
   count (1–8), Leela, and arrow visibility. The engine panel scrolls through
@@ -59,6 +63,9 @@ account has an ongoing game.
 - Pairing is kept out of Analysis. Profile / PC uses non-editable code slots and
   a custom touch keypad, so it never opens the Android soft keyboard. Disconnect
   forgets the local token immediately and then attempts remote self-revocation.
+- When paired, Home asks the PC to sync completed Lichess games, renders the
+  locally cached list immediately on later launches, and opens analyzable games
+  on the trusted stored starting position. No ongoing game is exposed.
 
 ## Build from source
 

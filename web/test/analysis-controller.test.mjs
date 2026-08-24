@@ -62,7 +62,8 @@ test('controller retains study branches and presents all underpromotions', async
   const controller = await readFile(controllerUrl, 'utf8');
 
   assert.match(controller, /cursor\.children\.find/);
-  assert.doesNotMatch(controller, /children\.splice/);
+  const remember = functionSource(controller, 'remember', 'cancelBookRequest');
+  assert.doesNotMatch(remember, /children\.splice|children\s*=/);
   assert.match(controller, /\['q','r','b','n'\]/);
   assert.match(controller, /data-cancel/);
   assert.match(controller, /selectedChild/);
@@ -95,21 +96,23 @@ test('real LC0 callback fixture uses White-POV score, SAN, search stats, and ela
   assert.doesNotMatch(controller, /score_cp|score_mate|pv_san|time_ms/);
 });
 
-test('visible study controls have real appearance, menu, and native-home behavior', async () => {
+test('visible study controls have menu and native-home behavior without a header appearance popup', async () => {
   const controller = await readFile(controllerUrl, 'utf8');
+  const page = await readFile(pageUrl, 'utf8');
 
-  assert.match(controller, /function showAppearance/);
   assert.match(controller, /function showMenu/);
   assert.match(controller, /function deleteCurrentBranch/);
-  assert.match(controller, /Delete this branch\?/);
+  assert.match(controller, /Delete the current branch\?/);
   assert.match(controller, /function setTab/);
   assert.match(controller, /leaveAnalysis/);
   assert.doesNotMatch(controller, /exitStudy/);
   assert.match(controller, /settings\.arrowCount/);
+  assert.doesNotMatch(controller, /function showAppearance/);
+  assert.doesNotMatch(page, /board-icon/);
   assert.doesNotMatch(controller, /settings\.multipv|data-multipv/);
   assert.doesNotMatch(controller, /engine\.lines\.slice/);
   const requestSource = functionSource(controller, 'studyRequest', 'renderActivePanel');
-  const requests = new Function('history', 'settings', `${requestSource}; return [studyRequest(), explorerRequest()];`)(() => ['e2e4'], { nodes:4321, bookSource:'lichess', bookSpeeds:[], bookRatings:[] });
+  const requests = new Function('history', 'settings', 'studyContext', `${requestSource}; return [studyRequest(), explorerRequest()];`)(() => ['e2e4'], { nodes:4321, bookSource:'lichess', bookSpeeds:[], bookRatings:[] }, {gameId:null});
   assert.deepEqual(requests, [
     { history:['e2e4'], nodes:4321 },
     { history:['e2e4'], source:'lichess' }
@@ -130,10 +133,10 @@ test('explorer errors render as errors and PV buttons retain legacy row styling'
   assert.match(style, /\.pv\{[^}]*width:100%[^}]*border:0[^}]*background:transparent[^}]*text-align:left[^}]*appearance:none/);
 });
 
-test('reset clears the tree, Leela off clears engine state, and tabs preserve analysis', async () => {
+test('reset clears the tree and game context, Leela off clears engine state, and tabs preserve analysis', async () => {
   const controller = await readFile(controllerUrl, 'utf8');
 
-  assert.match(controller, /function resetStudy\(\) \{ root\.children = \[\]; root\.selectedChild = null; nodeId = 0; restore\(root\); \}/);
+  assert.match(controller, /function resetStudy\(\)[^\n]*resetRoot\(START_FEN,[^\n]*gameId:null/);
   assert.match(controller, /function clearEngine\(nextStatus\)/);
   assert.match(controller, /engine\.lastGood = null; engine\.lines = \[\]; engine\.stats = null; engine\.progress = null/);
   assert.match(controller, /clearEngine\('off'\)/);
@@ -316,7 +319,7 @@ test('all positive-visit engine lines remain visible and the prior/visit bar is 
 
 test('navigation buttons blur, stop globally, and repeat quickly until the tree boundary', async () => {
   const [controller, style] = await Promise.all([readFile(controllerUrl, 'utf8'), readFile(styleUrl, 'utf8')]);
-  const source = controller.slice(controller.indexOf('function stopActiveNavigation'), controller.indexOf("  document.querySelectorAll('.tabs button')"));
+  const source = controller.slice(controller.indexOf('function stopActiveNavigation'), controller.indexOf("  document.querySelectorAll('.tabs [data-tab]')"));
   let activeNavigationStop = null, delayed = null, repeating = null, clearedIntervals = 0, restored = [];
   const button = { disabled:false, blurCount:0, blur() { this.blurCount += 1; }, setPointerCapture() {} };
   const targets = [{id:1},{id:2},null];
@@ -344,7 +347,7 @@ test('navigation buttons blur, stop globally, and repeat quickly until the tree 
   assert.equal(button.onpointerleave, undefined);
   assert.equal(typeof button.onlostpointercapture, 'function');
   assert.match(controller, /window\.addEventListener\('blur', stopActiveNavigation\)/);
-  assert.match(controller, /document\.hidden\) \{ stopActiveNavigation\(\); resetTransport\(\); \}/);
+  assert.match(controller, /document\.hidden\) \{ stopActiveNavigation\(\); saveStudyNow\(\); resetTransport\(\); \}/);
   assert.match(style, /touch-action:manipulation/);
   assert.match(style, /-webkit-touch-callout:none/);
   assert.match(style, /user-select:none/);
@@ -370,10 +373,12 @@ test('active full-panel forms are not rebuilt by streamed engine updates', async
   const controller = await readFile(controllerUrl, 'utf8');
   const source = functionSource(controller, 'renderActivePanel', 'scheduleAnalysis');
   let renders = 0;
-  const hidden = new Function('panelView', 'renderPanel', `${source}; return renderActivePanel;`)('settings', () => { renders += 1; });
+  let headings = 0;
+  const hidden = new Function('panelView', 'renderPanel', 'heading', `${source}; return renderActivePanel;`)('settings', () => { renders += 1; }, () => { headings += 1; });
   hidden();
   assert.equal(renders, 0);
-  const visible = new Function('panelView', 'renderPanel', `${source}; return renderActivePanel;`)(null, () => { renders += 1; });
+  assert.equal(headings, 1);
+  const visible = new Function('panelView', 'renderPanel', 'heading', `${source}; return renderActivePanel;`)(null, () => { renders += 1; }, () => { headings += 1; });
   visible();
   assert.equal(renders, 1);
   assert.match(controller, /onNativeAnalysis[^\n]*renderActivePanel/);
@@ -399,7 +404,7 @@ test('engine controls are touch-only discrete sliders and contain no text or num
 test('book settings produce exact source/filter payloads and refetch only on panel return', async () => {
   const controller = await readFile(controllerUrl, 'utf8');
   const source = functionSource(controller, 'studyRequest', 'renderActivePanel');
-  const make = settings => new Function('history', 'settings', `${source}; return explorerRequest();`)(() => ['e2e4'], settings);
+  const make = settings => new Function('history', 'settings', 'studyContext', `${source}; return explorerRequest();`)(() => ['e2e4'], settings, {gameId:null});
   assert.deepEqual(make({bookSource:'masters',bookSpeeds:['blitz'],bookRatings:[1800]}), {history:['e2e4'],source:'masters'});
   assert.deepEqual(make({bookSource:'lichess',bookSpeeds:[],bookRatings:[]}), {history:['e2e4'],source:'lichess'});
   assert.deepEqual(make({bookSource:'lichess',bookSpeeds:['blitz','rapid'],bookRatings:[1800,2200]}), {history:['e2e4'],source:'lichess',speeds:['blitz','rapid'],ratings:[1800,2200]});
@@ -407,11 +412,10 @@ test('book settings produce exact source/filter payloads and refetch only on pan
   assert.match(controller, /const BOOK_RATINGS = \[1600,1800,2000,2200,2500\]/);
   assert.match(controller, /BOOK_RATINGS\.map\(value => chip\(value, value,/);
   assert.doesNotMatch(controller, /BOOK_RATINGS\.map\(value => chip\(value, value \+ '\+'/);
-  assert.match(controller, /none selected = All/);
   const persist = functionSource(controller, 'persistBookSettings', 'bindPanelView');
   assert.doesNotMatch(persist, /requestBook/);
-  assert.match(controller, /wasBookSettings && bookSettingsDirty[^\n]*requestBook\(\)/);
-  assert.match(controller, /showOverlay\(tab === 'book' \? 'bookSettings' : 'settings'\)/);
+  assert.match(controller, /panelView === 'bookSettings' && bookSettingsDirty/);
+  assert.match(controller, /panelView === target\) closePanelView\(\)/);
 });
 
 test('analysis activation and Android Back preserve the retained offline board lifecycle', async () => {
@@ -434,4 +438,52 @@ test('legacy drag has no magnified finger offset and readable book geometry is p
   assert.match(style, /\.book-share,\.book-games\{[^}]*font-size:12px/);
   assert.match(style, /\.result-bar\{[^}]*height:20px/);
   assert.match(style, /\.result-bar text\{[^}]*font:9px/);
+});
+
+test('study tree, cursor, game context and board layout persist through the typed native bridge', async () => {
+  const controller = await readFile(controllerUrl, 'utf8');
+  assert.match(controller, /function studyState\(\)/);
+  assert.match(controller, /gameId:studyContext\.gameId/);
+  assert.match(controller, /cursor:history\(\)/);
+  assert.match(controller, /tree:root\.children\.map\(wireNode\)/);
+  assert.match(controller, /black:wrap\.classList\.contains\('orientation-black'\)/);
+  assert.match(controller, /expanded:wrap\.classList\.contains\('expanded'\)/);
+  assert.match(controller, /native\(\)\.saveStudyState/);
+  assert.match(controller, /native\(\)\.getStudyState/);
+  assert.match(controller, /function rebuildTree/);
+  assert.match(controller, /loadStudyState\(\)/);
+  assert.doesNotMatch(controller, /localStorage/);
+});
+
+test('variation long press opens touch actions without text selection', async () => {
+  const [controller, style] = await Promise.all([readFile(controllerUrl, 'utf8'), readFile(styleUrl, 'utf8')]);
+  assert.match(controller, /setTimeout\(\(\) => \{ held = true; variationTarget = target; openPanelView\('variationActions'\); \}, 480\)/);
+  assert.match(controller, /Promote to main line/);
+  assert.match(controller, /Delete variation/);
+  assert.match(controller, /function promoteVariation/);
+  assert.match(controller, /function deleteVariation/);
+  assert.match(controller, /button\.oncontextmenu = event => event\.preventDefault\(\)/);
+  assert.match(style, /\.moves\{[^}]*user-select:none[^}]*-webkit-touch-callout:none/);
+});
+
+test('settings are toggleable panel tabs and White POV eval remains in the tab title', async () => {
+  const [controller, page] = await Promise.all([readFile(controllerUrl, 'utf8'), readFile(pageUrl, 'utf8')]);
+  assert.match(page, /data-panel-tab="settings"/);
+  assert.match(controller, /document\.querySelector\('\[data-panel-tab\]'\)\.onclick = closePanelView/);
+  assert.match(controller, /if \(panelView === target\) closePanelView\(\)/);
+  assert.match(controller, /const evalText = settings\.enabled && best \? whiteEvalText\(best\)/);
+  assert.match(controller, /evalText \+ ' · Leela'/);
+  assert.doesNotMatch(controller, /panel-back|‹ Back/);
+});
+
+test('stored completed games extend study requests only by trusted game id', async () => {
+  const controller = await readFile(controllerUrl, 'utf8');
+  const source = functionSource(controller, 'studyRequest', 'renderActivePanel');
+  const make = new Function('history', 'settings', 'studyContext', `${source}; return [studyRequest(), explorerRequest()];`);
+  assert.deepEqual(make(() => ['e2e4'], {nodes:700,bookSource:'masters',bookSpeeds:[],bookRatings:[]}, {gameId:'abcdEF12'}), [
+    {history:['e2e4'],nodes:700,game_id:'abcdEF12'},
+    {history:['e2e4'],source:'masters',game_id:'abcdEF12'},
+  ]);
+  assert.match(controller, /window\.InstinctaZero\.loadArchivedGame/);
+  assert.equal('fen' in make(() => [], {nodes:1000,bookSource:'masters',bookSpeeds:[],bookRatings:[]}, {gameId:'abcdEF12'})[0], false);
 });

@@ -1,7 +1,7 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.3.3). Before producing a release APK, rebuild and verify the two
+(version 0.4.0). Before producing a release APK, rebuild and verify the two
 checked-in browser assets from their retained sources:
 
 ```bash
@@ -38,7 +38,7 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 6 / 0.3.3 release values;
+- versionCode/versionName are the intended 7 / 0.4.0 release values;
 - `npm run check`, `testDebugUnitTest`, release lint, and the signed release
   build all pass;
 - the APK installs and opens on native Home, while Analysis opens at the
@@ -51,17 +51,22 @@ Before publishing, at minimum verify:
   produces a paired state and no bearer appears in WebView storage, logs, URLs,
   or callbacks;
 - Leela streams progressive lines/arrows and cancellation closes its request;
+- a local study, selected variation, cursor, orientation, and game context are
+  restored after Activity/process recreation;
+- Home triggers a PC-owned completed-game sync, shows cached native thumbnails,
+  paginates the archive, and opens a selected game by trusted stored ID;
 - opening-book moves load and can be played, Masters/Lichess filters send the
   documented endpoint-specific body, and the chart remains blank;
 - all tabs and footer/header controls perform their documented action;
 - backgrounding the app cancels active native analysis;
 - only the fixed HTTPS pairing/study endpoints are reachable, with the WebView
   still using `connect-src 'none'`; and
-- the server uses the approximate CPU-only BT4 mobile profile, never starts or
-  uses SYCL for phone analysis, and enforces its fair-play gate. Mobile analysis
+- the server uses the fixed exact-SYCL BT4 profile through InstinctaZero's
+  guarded shared engine lifecycle and enforces its fair-play gate. Mobile analysis
   shares the InstinctaZero session and may replace a currently active desktop
   search.
 
 The release may request Android's `INTERNET` permission solely for the native
-paired PC gateway. It must not claim Lichess sign-in, account synchronization,
-game fetching, or an implemented evaluation graph.
+paired PC gateway. It must not claim phone-side Lichess sign-in or token access:
+completed-game synchronization is performed by the paired PC. The evaluation
+graph remains intentionally blank.

@@ -70,16 +70,22 @@ class OfflineShellContractTest {
     }
 
     @Test
-    fun onlyPairingAndStudyRoutesOnTheConfiguredHttpsOriginMayUseNativeNetwork() {
+    fun onlyPairingStudyAndCompletedGameRoutesOnTheConfiguredHttpsOriginMayUseNativeNetwork() {
         val origin = "https://rafael-ms-7e34.tail273ae6.ts.net:8443"
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/pair/claim"))
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/session"))
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/study/analysis/stream"))
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/study/explorer"))
+        assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/sync"))
+        assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games?limit=100"))
+        assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games?limit=100&cursor=Abc_123-xyz"))
+        assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games/abcdEF12"))
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("http://rafael-ms-7e34.tail273ae6.ts.net:8443/api/mobile/v1/study/analysis/stream"))
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("https://rafael-ms-7e34.tail273ae6.ts.net/api/mobile/v1/study/analysis/stream"))
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("https://rafael-ms-7e34.tail273ae6.ts.net:443/api/mobile/v1/study/analysis/stream"))
-        assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games"))
+        assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games?limit=50"))
+        assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games?cursor=x&limit=100"))
+        assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games/abcdEF12?ply=1"))
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/study/unknown"))
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("https://evil.example:8443/api/mobile/v1/study/analysis/stream"))
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/study/analysis/stream?x=1"))
@@ -104,6 +110,8 @@ class OfflineShellContractTest {
         assertTrue(normalizer.contains("put(\"ratings\", JSONArray(normalizedIntSelection(it, BOOK_RATINGS)))"))
         assertFalse(normalizer.contains("put(\"multipv\""))
         assertFalse(normalizer.contains("put(\"fen\""))
+        assertTrue(normalizer.contains("if (parsed.has(\"game_id\"))"))
+        assertTrue(normalizer.contains("put(\"game_id\", gameId)"))
     }
 
     @Test
@@ -128,14 +136,33 @@ class OfflineShellContractTest {
     }
 
     @Test
-    fun launchAndNativeNavigationDoNotFetchGamesOrSynchroniseAccounts() {
+    fun completedGameArchiveIsNativeAuthenticatedAndNeverRunsInsideTheWebPage() {
         val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
+        val controller = projectFile("src/main/assets/analysis/analysis.js").readText()
         assertTrue(activity.contains("private val navigation = ShellNavigation()"))
         assertTrue(activity.contains("renderNativeScreen()"))
         assertTrue(activity.contains("visibility = View.GONE"))
         assertTrue(activity.contains("if (!webPageLoaded) webView.loadUrl"))
-        assertFalse(activity.contains("/games"))
-        assertFalse(activity.contains("syncAccount"))
+        assertTrue(activity.contains("fun refreshArchive()"))
+        assertTrue(activity.contains("fun loadArchivedGame(gameId: String)"))
+        assertTrue(activity.contains(".url(apiUrl(\"sync\"))"))
+        assertTrue(activity.contains("optString(\"status\")"))
+        assertFalse(activity.contains("optString(\"state\")"))
+        assertTrue(activity.contains("apiUrl(\"games/\$gameId\")"))
+        assertFalse(controller.contains("/api/mobile/v1/games"))
+        assertFalse(controller.contains("Authorization"))
+    }
+
+    @Test
+    fun localStudyStateIsBoundedVersionedAndStoredWithoutWebStorage() {
+        val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
+        val controller = projectFile("src/main/assets/analysis/analysis.js").readText()
+        assertTrue(activity.contains("MAX_STUDY_JSON = 256 * 1024"))
+        assertTrue(activity.contains("fun getStudyState()"))
+        assertTrue(activity.contains("fun saveStudyState"))
+        assertTrue(activity.contains("require(parsed.optInt(\"v\") == 1)"))
+        assertTrue(activity.contains("require(cursor.length() <= 512)"))
+        assertFalse(controller.contains("localStorage"))
     }
 
     @Test

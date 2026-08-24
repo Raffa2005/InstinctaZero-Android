@@ -24,6 +24,7 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.ComponentActivity
@@ -35,6 +36,9 @@ import androidx.webkit.WebViewFeature
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.net.URI
+import java.text.DateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -54,7 +58,7 @@ import org.json.JSONObject
  * cannot make network requests. Its small, documented JavaScript bridge delegates only analysis
  * work to [NativeAnalysisBridge], which holds the paired-device bearer token in encrypted Android
  * storage and speaks only to the build-configured HTTPS gateway. The server selects its fixed,
- * CPU-only BT4 profile; profile choice is intentionally not part of the phone protocol.
+ * exact-SYCL BT4 profile; profile choice is intentionally not part of the phone protocol.
  */
 class MainActivity : ComponentActivity() {
     private lateinit var shellRoot: FrameLayout
@@ -65,6 +69,11 @@ class MainActivity : ComponentActivity() {
     private val pairingCode = PairingCodeBuffer()
     private var webPageLoaded = false
     private var connectionMessage: String? = null
+    private var archiveGames = JSONArray()
+    private var archiveAccount = ""
+    private var archiveLoading = false
+    private var archiveMessage: String? = null
+    private var pendingArchivedGame: JSONObject? = null
 
     private val assetLoader by lazy {
         WebViewAssetLoader.Builder()
@@ -79,6 +88,7 @@ class MainActivity : ComponentActivity() {
         WebView.setWebContentsDebuggingEnabled(false)
         CookieManager.getInstance().setAcceptCookie(false)
         nativeBridge = NativeAnalysisBridge(this)
+        nativeBridge.cachedArchive()?.let(::applyArchivePayload)
 
         shellRoot = FrameLayout(this).apply { setBackgroundColor(SHELL_BACKGROUND) }
         nativeLayer = FrameLayout(this).apply { setBackgroundColor(SHELL_BACKGROUND) }
@@ -143,7 +153,10 @@ class MainActivity : ComponentActivity() {
         if (::webView.isInitialized) {
             webView.onResume()
             if (navigation.screen == ShellScreen.ANALYSIS) setAnalysisActive(true)
-            else renderNativeScreen()
+            else {
+                renderNativeScreen()
+                if (navigation.screen == ShellScreen.HOME) refreshArchive()
+            }
         }
     }
 
@@ -177,6 +190,7 @@ class MainActivity : ComponentActivity() {
         webView.visibility = View.GONE
         nativeLayer.visibility = View.VISIBLE
         renderNativeScreen()
+        refreshArchive()
     }
 
     internal fun onBridgeConnectionState(payload: JSONObject) {
@@ -185,6 +199,10 @@ class MainActivity : ComponentActivity() {
         if (payload.optBoolean("paired")) {
             pairingCode.clear()
             navigation.closeKeypad()
+            refreshArchive()
+        } else {
+            archiveGames = JSONArray()
+            archiveAccount = ""
         }
         if (navigation.screen != ShellScreen.ANALYSIS) renderNativeScreen()
     }
@@ -204,6 +222,50 @@ class MainActivity : ComponentActivity() {
         nativeLayer.visibility = View.GONE
         webView.visibility = View.VISIBLE
         if (!webPageLoaded) webView.loadUrl(AnalysisWebPolicy.MAIN_PAGE_URL) else setAnalysisActive(true)
+    }
+
+    private fun refreshArchive() {
+        if (archiveLoading || navigation.screen == ShellScreen.ANALYSIS || !nativeBridge.isPaired()) return
+        archiveLoading = true
+        archiveMessage = null
+        if (::nativeLayer.isInitialized) renderNativeScreen()
+        nativeBridge.refreshArchive()
+    }
+
+    internal fun onArchivePayload(payload: JSONObject?, error: String?) {
+        archiveLoading = false
+        archiveMessage = error
+        payload?.let(::applyArchivePayload)
+        if (navigation.screen == ShellScreen.HOME) renderNativeScreen()
+    }
+
+    private fun applyArchivePayload(payload: JSONObject) {
+        archiveGames = payload.optJSONArray("games") ?: JSONArray()
+        archiveAccount = payload.optString("account")
+    }
+
+    internal fun onArchivedGame(payload: JSONObject?, error: String?) {
+        archiveMessage = error
+        if (payload != null) {
+            val game = payload.optJSONObject("game") ?: payload
+            val account = archiveAccount.lowercase(Locale.ROOT)
+            val white = playerName(game.optJSONObject("white")).lowercase(Locale.ROOT)
+            game.put("mobile_orientation", if (account.isNotBlank() && account == white) "white" else "black")
+            pendingArchivedGame = JSONObject().put("game", game)
+            showAnalysisScreen()
+            deliverPendingArchivedGame()
+        } else if (navigation.screen == ShellScreen.HOME) renderNativeScreen()
+    }
+
+    private fun deliverPendingArchivedGame() {
+        val payload = pendingArchivedGame ?: return
+        if (!webPageLoaded) return
+        pendingArchivedGame = null
+        webView.evaluateJavascript(
+            "window.InstinctaZero&&window.InstinctaZero.loadArchivedGame&&window.InstinctaZero.loadArchivedGame(${JSONObject.quote(payload.toString())});void 0;",
+            null,
+        )
+        setAnalysisActive(true)
     }
 
     private fun setAnalysisActive(active: Boolean) {
@@ -281,25 +343,136 @@ class MainActivity : ComponentActivity() {
         }, LinearLayout.LayoutParams(0, 56.dp, 1f))
     }.also { it.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 56.dp) }
 
-    private fun homeContent(): View = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(18.dp, 24.dp, 18.dp, 18.dp)
-        addView(TextView(this@MainActivity).apply {
-            text = "Chess analysis"
-            setTextColor(Color.WHITE)
-            textSize = 24f
-            typeface = Typeface.DEFAULT_BOLD
-        })
-        addView(TextView(this@MainActivity).apply {
-            text = "A quiet, local study board powered by your paired InstinctaZero PC."
-            setTextColor(TEXT_MUTED)
-            textSize = 15f
-            setPadding(0, 6.dp, 0, 20.dp)
-        })
-        addView(shellCard("Analysis board", "Open the legacy board, Leela lines and opening book") { showAnalysisScreen() })
-        addView(shellCard("Profile / PC", connectionSummary()) { showProfileScreen() }.apply {
-            (layoutParams as? LinearLayout.LayoutParams)?.topMargin = 12.dp
-        })
+    private fun homeContent(): View {
+        val paired = nativeBridge.isPaired()
+        if (!paired) return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(18.dp, 24.dp, 18.dp, 18.dp)
+            addView(TextView(this@MainActivity).apply {
+                text = "Chess analysis"
+                setTextColor(Color.WHITE)
+                textSize = 24f
+                typeface = Typeface.DEFAULT_BOLD
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = "A local study board with Leela lines and opening book. Pair your PC to load completed Lichess games."
+                setTextColor(TEXT_MUTED)
+                textSize = 15f
+                setPadding(0, 6.dp, 0, 20.dp)
+            })
+            addView(shellCard("Analysis board", "Continue the board where you left it") { showAnalysisScreen() })
+            addView(shellCard("Profile / PC", connectionSummary()) { showProfileScreen() }.apply {
+                (layoutParams as? LinearLayout.LayoutParams)?.topMargin = 12.dp
+            })
+        }
+
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(6.dp, 4.dp, 6.dp, 10.dp)
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(TextView(this@MainActivity).apply {
+                    text = archiveAccount.ifBlank { "Completed games" }
+                    setTextColor(Color.WHITE)
+                    textSize = 18f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setPadding(8.dp, 4.dp, 4.dp, 4.dp)
+                }, LinearLayout.LayoutParams(0, 44.dp, 1f))
+                addView(shellButton(if (archiveLoading) "…" else "↻", 22f).apply {
+                    contentDescription = "Refresh completed games"
+                    isEnabled = !archiveLoading
+                    setOnClickListener { refreshArchive() }
+                }, LinearLayout.LayoutParams(48.dp, 44.dp))
+            })
+            archiveMessage?.let { message ->
+                addView(TextView(this@MainActivity).apply {
+                    text = message
+                    setTextColor(ERROR_TEXT)
+                    textSize = 13f
+                    setPadding(8.dp, 0, 8.dp, 8.dp)
+                })
+            }
+            if (archiveGames.length() == 0) {
+                addView(TextView(this@MainActivity).apply {
+                    text = if (archiveLoading) "Fetching completed games…" else "No completed games cached yet."
+                    setTextColor(TEXT_MUTED)
+                    textSize = 15f
+                    gravity = Gravity.CENTER
+                    setPadding(12.dp, 50.dp, 12.dp, 12.dp)
+                })
+                addView(shellCard("Analysis board", "Continue the board where you left it") { showAnalysisScreen() })
+            } else {
+                for (index in 0 until archiveGames.length()) {
+                    archiveGames.optJSONObject(index)?.let { addView(gameRow(it)) }
+                }
+            }
+        }
+        return ScrollView(this).apply {
+            isFillViewport = true
+            isVerticalScrollBarEnabled = false
+            addView(content, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+    }
+
+    private fun gameRow(game: JSONObject): View {
+        val white = playerName(game.optJSONObject("white"))
+        val black = playerName(game.optJSONObject("black"))
+        val whiteRating = playerRating(game.optJSONObject("white"))
+        val blackRating = playerRating(game.optJSONObject("black"))
+        val boardOrientation = if (archiveAccount.equals(white, ignoreCase = true)) "white" else "black"
+        val title = listOf(
+            game.optString("speed").replaceFirstChar { it.uppercase() },
+            game.optString("variant").ifBlank { "Standard" }.replaceFirstChar { it.uppercase() },
+            if (game.optBoolean("rated")) "Rated" else "Casual",
+        ).filter(String::isNotBlank).joinToString(" · ")
+        val date = DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(game.optLong("last_move_at_ms")))
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(8.dp, 8.dp, 8.dp, 8.dp)
+            setBackgroundColor(if (game.optInt("ply_count") % 2 == 0) 0xff292824.toInt() else 0xff302f2a.toInt())
+            addView(GameThumbnailView(this@MainActivity, game.optString("preview_fen"), boardOrientation), LinearLayout.LayoutParams(108.dp, 108.dp).apply { marginEnd = 10.dp })
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(nativeText(title, 14f, Color.WHITE, true))
+                addView(nativeText(date, 11f, TEXT_MUTED).apply { setPadding(0, 1.dp, 0, 8.dp) })
+                addView(nativeText("$white${ratingSuffix(whiteRating)}", 14f, 0xffdddddd.toInt(), true))
+                addView(nativeText("$black${ratingSuffix(blackRating)}", 14f, 0xffdddddd.toInt(), true))
+                addView(nativeText(gameResultText(game, white, black), 11f, if (game.optBoolean("analyzable")) 0xff9ca85b.toInt() else ERROR_TEXT).apply { setPadding(0, 7.dp, 0, 0) })
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        row.isClickable = game.optBoolean("analyzable")
+        row.isFocusable = row.isClickable
+        row.alpha = if (row.isClickable) 1f else .68f
+        if (row.isClickable) row.setOnClickListener {
+            archiveMessage = "Loading game…"
+            renderNativeScreen()
+            nativeBridge.loadArchivedGame(game.optString("id"))
+        }
+        return row
+    }
+
+    private fun nativeText(value: String, size: Float, color: Int, bold: Boolean = false) = TextView(this).apply {
+        text = value
+        textSize = size
+        setTextColor(color)
+        maxLines = 1
+        ellipsize = android.text.TextUtils.TruncateAt.END
+        if (bold) typeface = Typeface.DEFAULT_BOLD
+    }
+
+    private fun playerName(player: JSONObject?): String = player?.optString("name")
+        ?.ifBlank { player.optString("username") }?.ifBlank { "Anonymous" } ?: "Anonymous"
+
+    private fun playerRating(player: JSONObject?): Int = player?.optInt("rating", 0) ?: 0
+    private fun ratingSuffix(rating: Int) = if (rating > 0) "  $rating" else ""
+    private fun gameResultText(game: JSONObject, white: String, black: String): String = when (game.optString("result")) {
+        "1-0" -> "$white won"
+        "0-1" -> "$black won"
+        "1/2-1/2" -> "Draw"
+        else -> game.optString("analysis_block_reason").ifBlank { "Completed" }
     }
 
     private fun profileContent(): View {
@@ -317,7 +490,11 @@ class MainActivity : ComponentActivity() {
                 })
                 addView(TextView(this@MainActivity).apply {
                     text = connectionMessage ?: if (state.optBoolean("paired"))
-                        state.optString("deviceName").ifBlank { "InstinctaZero Android" }
+                        listOf(
+                            archiveAccount.takeIf(String::isNotBlank),
+                            state.optString("deviceName").ifBlank { "InstinctaZero Android" },
+                            "Leela: exact SYCL · Intel iGPU",
+                        ).filterNotNull().joinToString("\n")
                     else "Generate a pairing code on the InstinctaZero PC, then enter it using the keypad."
                     setTextColor(if (connectionMessage == null) TEXT_MUTED else ERROR_TEXT)
                     textSize = 15f
@@ -496,6 +673,7 @@ class MainActivity : ComponentActivity() {
             if (AnalysisWebPolicy.isAllowedMainFrameUrl(url)) {
                 webPageLoaded = true
                 setAnalysisActive(navigation.screen == ShellScreen.ANALYSIS)
+                deliverPendingArchivedGame()
             }
         }
     }
@@ -539,16 +717,21 @@ internal object AnalysisWebPolicy {
 
     fun isAllowedNativeGatewayUrl(rawUrl: String): Boolean = try {
         val uri = URI(rawUrl)
+        val fixedRoute = uri.rawPath in setOf(
+            "/api/mobile/v1/pair/claim",
+            "/api/mobile/v1/session",
+            "/api/mobile/v1/sync",
+            "/api/mobile/v1/study/analysis/stream",
+            "/api/mobile/v1/study/explorer",
+        ) && uri.rawQuery == null
+        val gamesList = uri.rawPath == "/api/mobile/v1/games" &&
+            (uri.rawQuery == null || Regex("limit=100(?:&cursor=[A-Za-z0-9_-]{1,256})?").matches(uri.rawQuery))
+        val gameDetail = Regex("/api/mobile/v1/games/[A-Za-z0-9]{8,16}").matches(uri.rawPath) &&
+            uri.rawQuery == null
         uri.scheme.equals("https", ignoreCase = true) &&
             uri.host.equals(gatewayOrigin.host, ignoreCase = true) &&
             uri.port == gatewayOrigin.port && uri.userInfo == null &&
-            uri.rawQuery == null && uri.rawFragment == null &&
-            uri.rawPath in setOf(
-                "/api/mobile/v1/pair/claim",
-                "/api/mobile/v1/session",
-                "/api/mobile/v1/study/analysis/stream",
-                "/api/mobile/v1/study/explorer",
-            )
+            uri.rawFragment == null && (fixedRoute || gamesList || gameDetail)
     } catch (_: Exception) {
         false
     }
@@ -564,7 +747,7 @@ internal object AnalysisWebPolicy {
  *
  * `payloadJson` is a JSON string, never a bearer token. The page should use Abort-like behaviour
  * by calling [cancelAnalysis] on board/tab/background changes. Analysis requests carry a
- * standard-chess UCI history and search limits. The server alone selects its fixed CPU profile.
+ * legal UCI history and search limits. The server alone selects its fixed exact-SYCL profile.
  */
 class NativeAnalysisBridge(private val activity: MainActivity) {
     companion object {
@@ -573,6 +756,8 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         private const val DEVICE_NAME_KEY = "paired_device_name"
         private const val MAX_REQUEST_JSON = 16 * 1024
         private const val MAX_SETTINGS_JSON = 2 * 1024
+        private const val MAX_STUDY_JSON = 256 * 1024
+        private const val MAX_ARCHIVE_JSON = 2 * 1024 * 1024
         private val BOOK_SPEEDS = listOf("bullet", "blitz", "rapid", "classical", "correspondence")
         private val BOOK_RATINGS = listOf(1600, 1800, 2000, 2200, 2500)
     }
@@ -605,6 +790,12 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     private val uiPreferences by lazy {
         activity.getSharedPreferences("study_ui_settings", Context.MODE_PRIVATE)
     }
+    private val studyPreferences by lazy {
+        activity.getSharedPreferences("local_study_state", Context.MODE_PRIVATE)
+    }
+    private val archivePreferences by lazy {
+        activity.getSharedPreferences("completed_game_cache", Context.MODE_PRIVATE)
+    }
     private val gatewayBase: HttpUrl = BuildConfig.LEELA_GATEWAY_ORIGIN.toHttpUrlChecked()
 
     fun attachWebView(value: WebView) {
@@ -612,6 +803,10 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     }
 
     fun getConnectionState(): String = connectionState().toString()
+    fun isPaired(): Boolean = encryptedPreferences.contains(TOKEN_KEY)
+    fun cachedArchive(): JSONObject? = runCatching {
+        archivePreferences.getString("games_v1", null)?.let(::JSONObject)
+    }.getOrNull()
 
     /** Typed UI preferences only; this is not a generic WebView key-value store. */
     @JavascriptInterface
@@ -653,6 +848,22 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         uiSettings().toString()
     }
 
+    @JavascriptInterface
+    fun getStudyState(): String = studyPreferences.getString("state_v1", "{}") ?: "{}"
+
+    @JavascriptInterface
+    fun saveStudyState(rawState: String?): Boolean = try {
+        require(rawState != null && rawState.length <= MAX_STUDY_JSON) { "Study is too large." }
+        val parsed = JSONObject(rawState)
+        require(parsed.optInt("v") == 1) { "Unsupported study state." }
+        val cursor = parsed.optJSONArray("cursor") ?: JSONArray()
+        require(cursor.length() <= 512) { "Study cursor is too long." }
+        check(studyPreferences.edit().putString("state_v1", parsed.toString()).commit())
+        true
+    } catch (_: Exception) {
+        false
+    }
+
     /** Native-only pairing entry point. The bearer can never cross into WebView JavaScript. */
     fun pairFromNative(code: String?, deviceName: String?): String = newRequestId().also { id ->
         val safeCode = code?.trim()?.uppercase().orEmpty()
@@ -666,6 +877,22 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
             calls[id] = pending
             executor.execute { pairOnWorker(id, pending, safeCode, safeName) }
         }
+    }
+
+    fun refreshArchive(): String = newRequestId().also { id ->
+        val pending = PendingCall()
+        calls[id] = pending
+        executor.execute { refreshArchiveOnWorker(id, pending) }
+    }
+
+    fun loadArchivedGame(gameId: String): String = newRequestId().also { id ->
+        if (!gameId.matches(Regex("[A-Za-z0-9]{8,16}"))) {
+            activity.runOnUiThread { activity.onArchivedGame(null, "Invalid stored game.") }
+            return@also
+        }
+        val pending = PendingCall()
+        calls[id] = pending
+        executor.execute { loadArchivedGameOnWorker(id, pending, gameId) }
     }
 
     /** Starts the authorized Leela SSE stream from standard chess initial position. */
@@ -706,6 +933,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         val token = encryptedPreferences.getString(TOKEN_KEY, null)
         cancelAll("disconnected")
         encryptedPreferences.edit().remove(TOKEN_KEY).remove(DEVICE_NAME_KEY).commit()
+        archivePreferences.edit().clear().commit()
         publishConnectionState(connectionState())
         if (token.isNullOrBlank()) return
         executor.execute {
@@ -761,6 +989,113 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
             if (!call.isCanceled()) emitConnectionError(error.safeMessage(), error.gatewayCode())
         } finally {
             calls.remove(id, pending)
+        }
+    }
+
+    private fun refreshArchiveOnWorker(id: String, pending: PendingCall) {
+        val token = encryptedPreferences.getString(TOKEN_KEY, null)
+        if (token.isNullOrBlank()) {
+            calls.remove(id, pending)
+            activity.runOnUiThread { activity.onArchivePayload(null, "Pair the analysis PC first.") }
+            return
+        }
+        try {
+            executeJson(
+                pending,
+                Request.Builder().url(apiUrl("sync"))
+                    .header("Authorization", "Bearer $token")
+                    .post("{}".toRequestBody("application/json; charset=utf-8".toMediaType()))
+                    .build(),
+                256 * 1024,
+            )
+            for (attempt in 0 until 60) {
+                if (pending.isCanceled()) throw IOException("Request cancelled.")
+                val status = executeJson(
+                    pending,
+                    Request.Builder().url(apiUrl("sync"))
+                        .header("Authorization", "Bearer $token")
+                        .get().build(),
+                    256 * 1024,
+                ).optJSONObject("sync")?.optString("status").orEmpty()
+                if (status !in setOf("running", "starting")) break
+                Thread.sleep(250)
+            }
+            val session = executeJson(
+                pending,
+                Request.Builder().url(apiUrl("session"))
+                    .header("Authorization", "Bearer $token")
+                    .get().build(),
+                256 * 1024,
+            )
+            val allGames = JSONArray()
+            var cursor: String? = null
+            for (pageIndex in 0 until 100) {
+                val gamesUrl = apiUrl("games").newBuilder()
+                    .addQueryParameter("limit", "100")
+                    .apply { cursor?.let { addQueryParameter("cursor", it) } }
+                    .build()
+                check(AnalysisWebPolicy.isAllowedNativeGatewayUrl(gamesUrl.toString()))
+                val page = executeJson(
+                    pending,
+                    Request.Builder().url(gamesUrl)
+                        .header("Authorization", "Bearer $token")
+                        .get().build(),
+                    MAX_ARCHIVE_JSON,
+                )
+                val items = page.optJSONArray("games") ?: JSONArray()
+                for (index in 0 until items.length()) allGames.put(items.getJSONObject(index))
+                cursor = page.optString("next_cursor").ifBlank { null }
+                if (cursor == null) break
+            }
+            val result = JSONObject()
+                .put("account", session.optJSONObject("account")?.optString("username").orEmpty())
+                .put("games", allGames)
+                .put("next_cursor", cursor)
+            require(result.toString().length <= MAX_ARCHIVE_JSON) { "Completed-game cache is too large." }
+            check(archivePreferences.edit().putString("games_v1", result.toString()).commit())
+            if (!pending.isCanceled()) activity.runOnUiThread { activity.onArchivePayload(result, null) }
+        } catch (error: Exception) {
+            if (!pending.isCanceled()) activity.runOnUiThread {
+                activity.onArchivePayload(null, error.safeMessage())
+            }
+        } finally {
+            calls.remove(id, pending)
+        }
+    }
+
+    private fun loadArchivedGameOnWorker(id: String, pending: PendingCall, gameId: String) {
+        val token = encryptedPreferences.getString(TOKEN_KEY, null)
+        if (token.isNullOrBlank()) {
+            calls.remove(id, pending)
+            activity.runOnUiThread { activity.onArchivedGame(null, "Pair the analysis PC first.") }
+            return
+        }
+        try {
+            val payload = executeJson(
+                pending,
+                Request.Builder().url(apiUrl("games/$gameId"))
+                    .header("Authorization", "Bearer $token")
+                    .get().build(),
+                MAX_ARCHIVE_JSON,
+            )
+            if (!pending.isCanceled()) activity.runOnUiThread { activity.onArchivedGame(payload, null) }
+        } catch (error: Exception) {
+            if (!pending.isCanceled()) activity.runOnUiThread {
+                activity.onArchivedGame(null, error.safeMessage())
+            }
+        } finally {
+            calls.remove(id, pending)
+        }
+    }
+
+    private fun executeJson(pending: PendingCall, request: Request, maximumBytes: Int): JSONObject {
+        val call = restHttp.newCall(request)
+        if (!pending.attach(call)) throw IOException("Request cancelled.")
+        return call.execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (body.length > maximumBytes) throw IOException("Gateway response is too large.")
+            if (!response.isSuccessful) throw GatewayException(response.code, responseError(response, body))
+            JSONObject(body)
         }
     }
 
@@ -867,6 +1202,11 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         // The server reconstructs and validates this sequence from standard chess initial state.
         // Deliberately do not forward a client FEN, even if an older local page still includes one.
         JSONObject().put("history", normalizedHistory).apply {
+            if (parsed.has("game_id")) {
+                val gameId = parsed.getString("game_id")
+                require(gameId.matches(Regex("[A-Za-z0-9]{8,16}"))) { "Invalid stored game." }
+                put("game_id", gameId)
+            }
             if (target == "analysis") {
                 put("nodes", parsed.optInt("nodes", 1000).coerceIn(1, 100_000))
             } else {
