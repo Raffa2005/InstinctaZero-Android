@@ -1,8 +1,8 @@
 # Release build
 
-This repository's current release target is the paired analysis board (version
-0.3.x). Before producing a release APK, rebuild and verify the two checked-in
-browser assets from their retained sources:
+This repository's current release target is the native-shell analysis app
+(version 0.3.3). Before producing a release APK, rebuild and verify the two
+checked-in browser assets from their retained sources:
 
 ```bash
 cd web
@@ -38,18 +38,21 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 0.3 release values;
+- versionCode/versionName are the intended 6 / 0.3.3 release values;
 - `npm run check`, `testDebugUnitTest`, release lint, and the signed release
   build all pass;
-- the APK installs and opens at the standard starting position;
+- the APK installs and opens on native Home, while Analysis opens at the
+  standard starting position;
 - system dark mode does not recolour the board or turn all pieces white;
 - PC-side InstinctaZero is already connected/configured for the user's Lichess
   account before a pairing code is created, so active-game fair-play checks are
   available; an unconfigured analysis-only PC is not treated as pairable;
-- a fresh PC pairing code produces an inline paired state and no bearer appears
-  in WebView storage, logs, URLs, or callbacks;
+- a fresh PC pairing code entered through the Profile / PC touch keypad
+  produces a paired state and no bearer appears in WebView storage, logs, URLs,
+  or callbacks;
 - Leela streams progressive lines/arrows and cancellation closes its request;
-- opening-book moves load and can be played, while the chart remains blank;
+- opening-book moves load and can be played, Masters/Lichess filters send the
+  documented endpoint-specific body, and the chart remains blank;
 - all tabs and footer/header controls perform their documented action;
 - backgrounding the app cancels active native analysis;
 - only the fixed HTTPS pairing/study endpoints are reachable, with the WebView

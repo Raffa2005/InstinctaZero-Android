@@ -1,10 +1,10 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.3 is a compact, legacy-Lichess-inspired analysis board.
-It opens at the standard starting position and provides a legal interactive
-board, local variation tree, live Leela lines and arrows, opening-book results,
-and move navigation. The evaluation-chart tab is intentionally blank in this
-release.
+InstinctaZero Android 0.3.3 is a compact, legacy-Lichess-inspired analysis app.
+It opens on a native Home screen; Analysis opens at the standard starting
+position and provides a legal interactive board, local variation tree, live
+Leela lines and arrows, opening-book results, and move navigation. The
+evaluation-chart tab is intentionally blank in this release.
 
 The app pairs with one InstinctaZero PC using a short-lived code. It does not
 sign into Lichess, fetch games, synchronize an account, or contain a Lichess
@@ -45,16 +45,20 @@ account has an ongoing game.
 - Tap or drag a piece to make a legal move.
 - Tap a move in the notation, a Leela line, or a book move; use previous/next
   (including press-and-hold) to navigate the local tree.
-- The back button first closes an open panel view or promotion picker; otherwise
-  it exits the Android activity. The checkerboard icon opens Appearance inside
-  the full-width analysis panel.
+- Android Back closes the pairing keypad, drawer, or analysis subpanel first;
+  then Profile and Analysis return to Home, and Back from Home exits. The
+  checkerboard icon opens Appearance inside the full-width analysis panel.
 - Menu, settings, board flip, board size, previous, and next are functional.
-  Settings remember nodes, independent arrow count (1–8), Leela, and arrow
-  visibility. The engine panel scrolls through every returned line with visits.
+  Compact touch-only settings remember a discrete node target, independent arrow
+  count (1–8), Leela, and arrow visibility. The engine panel scrolls through
+  every returned line with visits.
 - The tabs show study information, notation, live Leela analysis, the
   intentionally blank evaluation chart, and the live opening book. Book rows
-  compactly show move share, game count, and White/draw/Black percentages.
-- Pairing code entry and connection/error status are shown inside Settings.
+  show move share, game count, and White/draw/Black percentages. Its contextual
+  gear selects Masters/Lichess plus optional Lichess speed and rating filters.
+- Pairing is kept out of Analysis. Profile / PC uses non-editable code slots and
+  a custom touch keypad, so it never opens the Android soft keyboard. Disconnect
+  forgets the local token immediately and then attempts remote self-revocation.
 
 ## Build from source
 

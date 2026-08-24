@@ -73,6 +73,7 @@ class OfflineShellContractTest {
     fun onlyPairingAndStudyRoutesOnTheConfiguredHttpsOriginMayUseNativeNetwork() {
         val origin = "https://rafael-ms-7e34.tail273ae6.ts.net:8443"
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/pair/claim"))
+        assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/session"))
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/study/analysis/stream"))
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/study/explorer"))
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("http://rafael-ms-7e34.tail273ae6.ts.net:8443/api/mobile/v1/study/analysis/stream"))
@@ -98,8 +99,43 @@ class OfflineShellContractTest {
         assertTrue(normalizer.contains("if (target == \"analysis\")"))
         assertTrue(normalizer.contains("put(\"nodes\", parsed.optInt(\"nodes\", 1000).coerceIn(1, 100_000))"))
         assertTrue(normalizer.contains("put(\"source\", source)"))
+        assertTrue(normalizer.contains("if (source == \"lichess\")"))
+        assertTrue(normalizer.contains("put(\"speeds\", JSONArray(normalizedStringSelection(it, BOOK_SPEEDS)))"))
+        assertTrue(normalizer.contains("put(\"ratings\", JSONArray(normalizedIntSelection(it, BOOK_RATINGS)))"))
         assertFalse(normalizer.contains("put(\"multipv\""))
         assertFalse(normalizer.contains("put(\"fen\""))
+    }
+
+    @Test
+    fun pairingIsNativeTouchOnlyAndDisconnectForgetsLocallyBeforeRemoteRevoke() {
+        val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
+        val page = projectFile("src/main/assets/analysis/index.html").readText()
+        val controller = projectFile("src/main/assets/analysis/analysis.js").readText()
+        val disconnectStart = activity.indexOf("fun disconnectLocalFirst()")
+        val disconnectEnd = activity.indexOf("fun cancelAll", disconnectStart)
+        val disconnect = activity.substring(disconnectStart, disconnectEnd)
+
+        assertTrue(activity.contains("fun pairFromNative"))
+        assertFalse(activity.contains("@JavascriptInterface\n    fun pair("))
+        assertFalse(activity.contains("EditText"))
+        assertFalse(Regex("<input[^>]+type=[\\\"'](?:text|number)[\\\"']", RegexOption.IGNORE_CASE).containsMatchIn(page + controller))
+        assertFalse(controller.contains("Pair code"))
+        assertFalse(controller.contains("data-pair"))
+        assertTrue(disconnect.indexOf("remove(TOKEN_KEY)") < disconnect.indexOf("executor.execute"))
+        assertTrue(disconnect.contains(".url(apiUrl(\"session\"))"))
+        assertTrue(disconnect.contains(".delete()"))
+        assertFalse(disconnect.contains("putString(TOKEN_KEY"))
+    }
+
+    @Test
+    fun launchAndNativeNavigationDoNotFetchGamesOrSynchroniseAccounts() {
+        val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
+        assertTrue(activity.contains("private val navigation = ShellNavigation()"))
+        assertTrue(activity.contains("renderNativeScreen()"))
+        assertTrue(activity.contains("visibility = View.GONE"))
+        assertTrue(activity.contains("if (!webPageLoaded) webView.loadUrl"))
+        assertFalse(activity.contains("/games"))
+        assertFalse(activity.contains("syncAccount"))
     }
 
     @Test

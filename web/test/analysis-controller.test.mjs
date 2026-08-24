@@ -95,7 +95,7 @@ test('real LC0 callback fixture uses White-POV score, SAN, search stats, and ela
   assert.doesNotMatch(controller, /score_cp|score_mate|pv_san|time_ms/);
 });
 
-test('visible study controls have real appearance, menu, and exit behavior', async () => {
+test('visible study controls have real appearance, menu, and native-home behavior', async () => {
   const controller = await readFile(controllerUrl, 'utf8');
 
   assert.match(controller, /function showAppearance/);
@@ -103,18 +103,19 @@ test('visible study controls have real appearance, menu, and exit behavior', asy
   assert.match(controller, /function deleteCurrentBranch/);
   assert.match(controller, /Delete this branch\?/);
   assert.match(controller, /function setTab/);
-  assert.match(controller, /exitStudy/);
+  assert.match(controller, /leaveAnalysis/);
+  assert.doesNotMatch(controller, /exitStudy/);
   assert.match(controller, /settings\.arrowCount/);
   assert.doesNotMatch(controller, /settings\.multipv|data-multipv/);
   assert.doesNotMatch(controller, /engine\.lines\.slice/);
   const requestSource = functionSource(controller, 'studyRequest', 'renderActivePanel');
-  const requests = new Function('history', 'settings', `${requestSource}; return [studyRequest(), explorerRequest()];`)(() => ['e2e4'], { nodes:4321 });
+  const requests = new Function('history', 'settings', `${requestSource}; return [studyRequest(), explorerRequest()];`)(() => ['e2e4'], { nodes:4321, bookSource:'lichess', bookSpeeds:[], bookRatings:[] });
   assert.deepEqual(requests, [
     { history:['e2e4'], nodes:4321 },
     { history:['e2e4'], source:'lichess' }
   ]);
   assert.match(controller, /saveUiSettings/);
-  assert.match(controller, /settings\.nodes = clampInteger\(/);
+  assert.match(controller, /settings\.nodes = next/);
 });
 
 test('explorer errors render as errors and PV buttons retain legacy row styling', async () => {
@@ -194,10 +195,10 @@ test('menus are touch-first full-panel views and Back dismisses them', async () 
 
   assert.match(controller, /function panelViewHtml\(\)/);
   assert.match(controller, /panel\.innerHTML = panelView \? panelViewHtml\(\)/);
-  assert.match(controller, /if \(panelView\) \{ closePanelView\(\); return; \}/);
+  assert.match(controller, /handleAndroidBack = function \(\) \{ if \(promotionPicker\)[^\n]*if \(panelView\) \{ closePanelView\(\); return true; \}/);
   assert.doesNotMatch(controller, /study-overlay|overlay-card|document\.body\.appendChild\(overlay\)/);
   assert.match(style, /\.panel-view\{width:100%/);
-  assert.match(style, /\.panel-buttons button\{min-height:44px/);
+  assert.match(style, /\.panel-buttons button\{min-height:40px/);
   assert.doesNotMatch(style, /\.study-overlay|\.overlay-card/);
 });
 
@@ -242,7 +243,7 @@ test('book percentages normalize counts and inconsistent reported percentages', 
   assert.match(markup, /class="result-draw" x="32%" width="44%"/);
   assert.match(markup, /class="result-black" x="76%" width="24%"/);
   assert.match(markup, /class="result-outline"/);
-  assert.match(style, /grid-template-columns:32px 34px 42px minmax\(0,1fr\)/);
+  assert.match(style, /grid-template-columns:38px 38px 48px minmax\(0,1fr\)/);
   assert.match(style, /\.result-bar\{display:block;width:100%;min-width:0;/);
 });
 
@@ -376,5 +377,61 @@ test('active full-panel forms are not rebuilt by streamed engine updates', async
   visible();
   assert.equal(renders, 1);
   assert.match(controller, /onNativeAnalysis[^\n]*renderActivePanel/);
-  assert.match(controller, /settings\.showArrows = [^;]+; if \(settings\.nodes !== previousNodes\) clearAnalysisCaches\(root\); renderArrows\(engine\.lines\)/);
+  assert.match(controller, /settings\.showArrows = !settings\.showArrows/);
+  assert.match(controller, /renderArrows\(engine\.lines\)/);
+});
+
+test('engine controls are touch-only discrete sliders and contain no text or number field', async () => {
+  const [controller, page, style] = await Promise.all([readFile(controllerUrl, 'utf8'), readFile(pageUrl, 'utf8'), readFile(styleUrl, 'utf8')]);
+  assert.match(controller, /const NODE_OPTIONS = \[100, 200, 400, 700, 1000, 2000, 4000, 7000, 10000, 20000, 40000, 70000, 100000\]/);
+  assert.match(controller, /data-nodes type="range"/);
+  assert.match(controller, /data-arrow-count type="range" min="1" max="8" step="1"/);
+  assert.match(controller, /nodes\.oninput[^\n]*data-node-readout/);
+  assert.match(controller, /nodes\.onchange[^\n]*clearAnalysisCaches\(root\)[^\n]*scheduleAnalysis\(\)/);
+  assert.match(controller, /role="switch"/);
+  assert.doesNotMatch(controller + page, /<input[^>]+type=["'](?:text|number)["']/i);
+  assert.doesNotMatch(controller, /data-code|data-pair|Pair code/);
+  assert.match(style, /\.panel-view\{[^}]*height:100%;overflow:hidden/);
+  assert.match(style, /\.range-row\{height:46px/);
+  assert.match(style, /\.switch-row\{height:42px/);
+});
+
+test('book settings produce exact source/filter payloads and refetch only on panel return', async () => {
+  const controller = await readFile(controllerUrl, 'utf8');
+  const source = functionSource(controller, 'studyRequest', 'renderActivePanel');
+  const make = settings => new Function('history', 'settings', `${source}; return explorerRequest();`)(() => ['e2e4'], settings);
+  assert.deepEqual(make({bookSource:'masters',bookSpeeds:['blitz'],bookRatings:[1800]}), {history:['e2e4'],source:'masters'});
+  assert.deepEqual(make({bookSource:'lichess',bookSpeeds:[],bookRatings:[]}), {history:['e2e4'],source:'lichess'});
+  assert.deepEqual(make({bookSource:'lichess',bookSpeeds:['blitz','rapid'],bookRatings:[1800,2200]}), {history:['e2e4'],source:'lichess',speeds:['blitz','rapid'],ratings:[1800,2200]});
+  assert.match(controller, /const BOOK_SPEEDS = \['bullet','blitz','rapid','classical','correspondence'\]/);
+  assert.match(controller, /const BOOK_RATINGS = \[1600,1800,2000,2200,2500\]/);
+  assert.match(controller, /BOOK_RATINGS\.map\(value => chip\(value, value,/);
+  assert.doesNotMatch(controller, /BOOK_RATINGS\.map\(value => chip\(value, value \+ '\+'/);
+  assert.match(controller, /none selected = All/);
+  const persist = functionSource(controller, 'persistBookSettings', 'bindPanelView');
+  assert.doesNotMatch(persist, /requestBook/);
+  assert.match(controller, /wasBookSettings && bookSettingsDirty[^\n]*requestBook\(\)/);
+  assert.match(controller, /showOverlay\(tab === 'book' \? 'bookSettings' : 'settings'\)/);
+});
+
+test('analysis activation and Android Back preserve the retained offline board lifecycle', async () => {
+  const controller = await readFile(controllerUrl, 'utf8');
+  assert.match(controller, /analysisActive = false/);
+  assert.match(controller, /setAnalysisActive = function \(active\)/);
+  assert.match(controller, /if \(!analysisActive\) \{ resetTransport\(\);/);
+  assert.match(controller, /else if \(analysisActive && settings\.enabled\) scheduleAnalysis\(\)/);
+  assert.match(controller, /handleAndroidBack = function/);
+  assert.match(controller, /if \(panelView\) \{ closePanelView\(\); return true; \}/);
+  assert.doesNotMatch(controller.slice(controller.lastIndexOf('loadUiSettings()')), /scheduleAnalysis\(\)/);
+});
+
+test('legacy drag has no magnified finger offset and readable book geometry is phone sized', async () => {
+  const [controller, style] = await Promise.all([readFile(controllerUrl, 'utf8'), readFile(styleUrl, 'utf8')]);
+  assert.match(controller, /draggable:\{ enabled:true, magnified:false \}/);
+  assert.doesNotMatch(controller, /draggable:\{ enabled:true, magnified:true \}/);
+  assert.match(style, /\.book-move\{[^}]*height:44px/);
+  assert.match(style, /\.book-move b\{font-size:14px/);
+  assert.match(style, /\.book-share,\.book-games\{[^}]*font-size:12px/);
+  assert.match(style, /\.result-bar\{[^}]*height:20px/);
+  assert.match(style, /\.result-bar text\{[^}]*font:9px/);
 });
