@@ -2,6 +2,7 @@ package com.instinctazero.android
 
 internal enum class ShellScreen {
     HOME,
+    GAMES,
     PROFILE,
     ANALYSIS,
 }
@@ -53,6 +54,12 @@ internal class ShellNavigation {
         keypadOpen = false
     }
 
+    fun showGames() {
+        screen = ShellScreen.GAMES
+        drawerOpen = false
+        keypadOpen = false
+    }
+
     fun showAnalysis() {
         screen = ShellScreen.ANALYSIS
         drawerOpen = false
@@ -84,7 +91,7 @@ internal class ShellNavigation {
             drawerOpen = false
             ShellBackAction.RENDER_NATIVE
         }
-        screen == ShellScreen.PROFILE -> {
+        screen == ShellScreen.PROFILE || screen == ShellScreen.GAMES -> {
             showHome()
             ShellBackAction.RENDER_NATIVE
         }

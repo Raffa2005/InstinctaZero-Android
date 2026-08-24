@@ -30,6 +30,15 @@ The local rules controller uses
 - Build/provenance: `web-src/chess-rules-PROVENANCE.md`
 - Full text: `app/src/main/assets/licenses/Chess.js-BSD-2-Clause.txt`
 
+## AndroidSVG
+
+The native completed-game list renders the bundled Cburnett SVG artwork with
+[`AndroidSVG`](https://github.com/BigBadaboom/androidsvg) 1.4 by Paul LeBeau,
+Cave Rock Software Ltd.
+
+- License: Apache-2.0
+- Full text: `app/src/main/assets/licenses/Apache-2.0.txt`
+
 ## Fonts
 
 - Noto Sans and Cousine: Apache-2.0

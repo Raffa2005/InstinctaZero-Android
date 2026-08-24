@@ -1,15 +1,17 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.4.1 is a compact, legacy-Lichess-inspired analysis app.
+InstinctaZero Android 0.4.2 is a compact, legacy-Lichess-inspired analysis app.
 It opens on a native Home screen; Analysis opens at the standard starting
 position and provides a legal interactive board, local variation tree, live
 Leela lines and arrows, opening-book results, and move navigation. The
 evaluation-chart tab is intentionally blank in this release.
 
 The app pairs with one InstinctaZero PC using a short-lived code. It does not
-sign into Lichess or contain a Lichess token. Instead, the paired PC synchronizes
-the user's completed-game archive and the native Home screen caches and displays
-that archive. Before creating the pairing code, PC-side InstinctaZero must already be
+sign into Lichess directly or contain a Lichess token. Instead, pairing signs the
+phone into the Lichess account already connected on the PC, and the PC synchronizes
+that account's completed-game archive. Games have their own native screen and are
+loaded in 20-game pages only as the user scrolls; Home never builds or refreshes the
+archive. Before creating the pairing code, PC-side InstinctaZero must already be
 connected and configured for the user's Lichess account. An unconfigured,
 analysis-only PC cannot create a phone pairing code; the PC account configuration
 is what enables the active-game fair-play check. The app reaches the PC through
@@ -48,6 +50,8 @@ account has an ongoing game.
 - Tap or drag a piece to make a legal move.
 - The complete local study tree, selected continuation, current position, tab,
   orientation, board size, and completed-game context survive app restarts.
+- Playing a displayed Leela move immediately inherits its already-known best
+  response arrow and White-perspective value until the child search replaces it.
 - Tap a move in the notation, a Leela line, or a book move; use previous/next
   (including press-and-hold) to navigate the local tree.
 - Long-press a move where sibling variations exist to promote it to the main
@@ -62,12 +66,13 @@ account has an ongoing game.
   intentionally blank evaluation chart, and the live opening book. Book rows
   show move share, game count, and White/draw/Black percentages. Its contextual
   gear selects Masters/Lichess plus optional Lichess speed and rating filters.
-- Pairing is kept out of Analysis. Profile / PC uses non-editable code slots and
+- Pairing is kept out of Analysis. Account / PC uses non-editable code slots and
   a custom touch keypad, so it never opens the Android soft keyboard. Disconnect
   forgets the local token immediately and then attempts remote self-revocation.
-- When paired, Home asks the PC to sync completed Lichess games, renders the
-  locally cached list immediately on later launches, and opens analyzable games
-  on the trusted stored starting position. No ongoing game is exposed.
+- When paired, Games asks the PC to sync completed Lichess games, displays only
+  one recycled 20-game page at a time, and fetches another page near the end of
+  scrolling. Its thumbnails reuse the exact bundled Cburnett pieces. No ongoing
+  game is exposed, and Home performs no archive work.
 
 ## Build from source
 

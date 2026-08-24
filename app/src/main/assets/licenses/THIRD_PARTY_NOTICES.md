@@ -5,6 +5,8 @@ The complete third-party notice for the offline analysis assets is
 
 It covers the legacy lichobile Chessground source snapshot, Cburnett SVG pieces
 and brown board, the local `chess.js` rules bundle, and the bundled typefaces.
+The native completed-game list uses AndroidSVG 1.4 (Apache-2.0) to render the
+same bundled Cburnett SVG pieces instead of a separate Unicode piece set.
 The app does not ship the former native Compose board renderer, Chessground
 10.1.1, or the non-free legacy Lichess icon font.
 

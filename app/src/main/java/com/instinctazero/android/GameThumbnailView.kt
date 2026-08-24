@@ -1,24 +1,28 @@
 package com.instinctazero.android
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Typeface
+import android.graphics.RectF
 import android.view.View
+import com.caverock.androidsvg.SVG
 
-/** Lightweight native preview used only in the completed-game list. */
+/** Lightweight native preview using the exact bundled Cburnett artwork from the analysis board. */
 internal class GameThumbnailView(
     context: Context,
     fen: String,
     orientation: String,
 ) : View(context) {
-    private val blackAtBottom = orientation == "black"
-    private val pieces = parseFen(fen)
+    private var blackAtBottom = orientation == "black"
+    private var pieces = parseFen(fen)
     private val squarePaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val piecePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textAlign = Paint.Align.CENTER
-        typeface = Typeface.create("serif", Typeface.NORMAL)
+    private val piecePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+    fun setPosition(fen: String, orientation: String) {
+        blackAtBottom = orientation == "black"
+        pieces = parseFen(fen)
+        invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -37,11 +41,18 @@ internal class GameThumbnailView(
             val file = if (blackAtBottom) 7 - screenFile else screenFile
             val rank = if (blackAtBottom) screenRank else 7 - screenRank
             val piece = pieces[rank * 8 + file] ?: continue
-            piecePaint.textSize = square * .86f
-            piecePaint.color = if (piece.isUpperCase()) Color.WHITE else Color.BLACK
-            piecePaint.setShadowLayer(square * .045f, 0f, square * .03f, if (piece.isUpperCase()) Color.BLACK else Color.WHITE)
-            canvas.drawText(GLYPHS[piece] ?: "", (screenFile + .5f) * square, (screenRank + .79f) * square, piecePaint)
-            piecePaint.clearShadowLayer()
+            val bitmap = CburnettBitmapCache.get(context, piece) ?: continue
+            canvas.drawBitmap(
+                bitmap,
+                null,
+                RectF(
+                    screenFile * square,
+                    screenRank * square,
+                    (screenFile + 1) * square,
+                    (screenRank + 1) * square,
+                ),
+                piecePaint,
+            )
         }
     }
 
@@ -53,7 +64,7 @@ internal class GameThumbnailView(
             var file = 0
             row.forEach { token ->
                 if (token.isDigit()) file += token.digitToInt()
-                else if (file in 0..7 && token in GLYPHS) {
+                else if (file in 0..7 && token in PIECE_NAMES) {
                     val rank = 7 - fenRank
                     result[rank * 8 + file] = token
                     file += 1
@@ -66,9 +77,26 @@ internal class GameThumbnailView(
     companion object {
         private val LIGHT = 0xfff0d9b5.toInt()
         private val DARK = 0xffb58863.toInt()
-        private val GLYPHS = mapOf(
-            'K' to "♔", 'Q' to "♕", 'R' to "♖", 'B' to "♗", 'N' to "♘", 'P' to "♙",
-            'k' to "♚", 'q' to "♛", 'r' to "♜", 'b' to "♝", 'n' to "♞", 'p' to "♟",
+        private val PIECE_NAMES = mapOf(
+            'K' to "wK", 'Q' to "wQ", 'R' to "wR", 'B' to "wB", 'N' to "wN", 'P' to "wP",
+            'k' to "bK", 'q' to "bQ", 'r' to "bR", 'b' to "bB", 'n' to "bN", 'p' to "bP",
         )
+
+        private object CburnettBitmapCache {
+            private const val RASTER_SIZE = 96
+            private val bitmaps = mutableMapOf<Char, Bitmap>()
+
+            @Synchronized
+            fun get(context: Context, piece: Char): Bitmap? = bitmaps[piece] ?: runCatching {
+                val name = requireNotNull(PIECE_NAMES[piece])
+                val svg = SVG.getFromAsset(context.applicationContext.assets, "analysis/pieces/$name.svg")
+                Bitmap.createBitmap(RASTER_SIZE, RASTER_SIZE, Bitmap.Config.ARGB_8888).also { bitmap ->
+                    val canvas = Canvas(bitmap)
+                    canvas.scale(RASTER_SIZE / 45f, RASTER_SIZE / 45f)
+                    svg.renderToCanvas(canvas)
+                    bitmaps[piece] = bitmap
+                }
+            }.getOrNull()
+        }
     }
 }

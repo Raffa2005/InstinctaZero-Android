@@ -21,10 +21,12 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
+import android.widget.BaseAdapter
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ScrollView
+import android.widget.AbsListView
+import android.widget.ListView
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.ComponentActivity
@@ -53,12 +55,14 @@ import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
 
+private const val ARCHIVE_PAGE_SIZE = 20
+
 /**
  * Local WebView shell for the legacy analysis UI. Web content is always packaged in the APK and
  * cannot make network requests. Its small, documented JavaScript bridge delegates only analysis
  * work to [NativeAnalysisBridge], which holds the paired-device bearer token in encrypted Android
- * storage and speaks only to the build-configured HTTPS gateway. The server selects its fixed,
- * exact-SYCL BT4 profile; profile choice is intentionally not part of the phone protocol.
+ * storage and speaks only to the build-configured HTTPS gateway. The server maps the phone's
+ * closed CPU/SYCL choice to code-owned BT4 profiles; arbitrary engine configuration is absent.
  */
 class MainActivity : ComponentActivity() {
     private lateinit var shellRoot: FrameLayout
@@ -69,10 +73,15 @@ class MainActivity : ComponentActivity() {
     private val pairingCode = PairingCodeBuffer()
     private var webPageLoaded = false
     private var connectionMessage: String? = null
-    private var archiveGames = JSONArray()
+    private val archiveGames = mutableListOf<JSONObject>()
     private var archiveAccount = ""
+    private var archiveCursor: String? = null
+    private var archiveFirstPageCursor: String? = null
+    private var archiveCacheLoaded = false
     private var archiveLoading = false
+    private var archiveRefreshedThisSession = false
     private var archiveMessage: String? = null
+    private var archiveAdapter: GameArchiveAdapter? = null
     private var pendingArchivedGame: JSONObject? = null
 
     private val assetLoader by lazy {
@@ -88,7 +97,6 @@ class MainActivity : ComponentActivity() {
         WebView.setWebContentsDebuggingEnabled(false)
         CookieManager.getInstance().setAcceptCookie(false)
         nativeBridge = NativeAnalysisBridge(this)
-        nativeBridge.cachedArchive()?.let(::applyArchivePayload)
 
         shellRoot = FrameLayout(this).apply { setBackgroundColor(SHELL_BACKGROUND) }
         nativeLayer = FrameLayout(this).apply { setBackgroundColor(SHELL_BACKGROUND) }
@@ -155,13 +163,17 @@ class MainActivity : ComponentActivity() {
             if (navigation.screen == ShellScreen.ANALYSIS) setAnalysisActive(true)
             else {
                 renderNativeScreen()
-                if (navigation.screen == ShellScreen.HOME) refreshArchive()
+                if (navigation.screen == ShellScreen.GAMES && !archiveRefreshedThisSession) refreshArchive()
             }
         }
     }
 
     override fun onPause() {
         // Closing the native calls closes the gateway response body and cancels the SSE search.
+        if (::webView.isInitialized && webPageLoaded) webView.evaluateJavascript(
+            "window.InstinctaZero&&window.InstinctaZero.persistStudy&&window.InstinctaZero.persistStudy();void 0;",
+            null,
+        )
         if (::webView.isInitialized) setAnalysisActive(false)
         if (::nativeBridge.isInitialized) nativeBridge.cancelAll("backgrounded")
         if (pairingCode.busy) connectionMessage = null
@@ -183,14 +195,15 @@ class MainActivity : ComponentActivity() {
     }
 
     internal fun showHomeScreen() {
+        releaseExtraArchiveRows()
         cancelPairingIfActive("left profile")
         navigation.showHome()
         setAnalysisActive(false)
         nativeBridge.cancelAll("left analysis")
+        archiveLoading = false
         webView.visibility = View.GONE
         nativeLayer.visibility = View.VISIBLE
         renderNativeScreen()
-        refreshArchive()
     }
 
     internal fun onBridgeConnectionState(payload: JSONObject) {
@@ -199,49 +212,101 @@ class MainActivity : ComponentActivity() {
         if (payload.optBoolean("paired")) {
             pairingCode.clear()
             navigation.closeKeypad()
-            refreshArchive()
         } else {
-            archiveGames = JSONArray()
+            archiveGames.clear()
             archiveAccount = ""
+            archiveCursor = null
+            archiveFirstPageCursor = null
+            archiveCacheLoaded = true
+            archiveRefreshedThisSession = false
         }
         if (navigation.screen != ShellScreen.ANALYSIS) renderNativeScreen()
     }
 
     private fun showProfileScreen() {
+        releaseExtraArchiveRows()
         navigation.showProfile()
         setAnalysisActive(false)
         nativeBridge.cancelAll("opened profile")
+        archiveLoading = false
         webView.visibility = View.GONE
         nativeLayer.visibility = View.VISIBLE
         renderNativeScreen()
     }
 
+    private fun showGamesScreen() {
+        cancelPairingIfActive("left profile")
+        if (!archiveCacheLoaded) {
+            nativeBridge.cachedArchive()?.let { applyArchivePayload(it, append = false) }
+            archiveCacheLoaded = true
+        }
+        navigation.showGames()
+        setAnalysisActive(false)
+        nativeBridge.cancelAll("opened games")
+        webView.visibility = View.GONE
+        nativeLayer.visibility = View.VISIBLE
+        renderNativeScreen()
+        if (!archiveRefreshedThisSession) refreshArchive()
+    }
+
     private fun showAnalysisScreen() {
+        releaseExtraArchiveRows()
         cancelPairingIfActive("left profile")
         navigation.showAnalysis()
+        archiveLoading = false
         nativeLayer.visibility = View.GONE
         webView.visibility = View.VISIBLE
         if (!webPageLoaded) webView.loadUrl(AnalysisWebPolicy.MAIN_PAGE_URL) else setAnalysisActive(true)
     }
 
     private fun refreshArchive() {
-        if (archiveLoading || navigation.screen == ShellScreen.ANALYSIS || !nativeBridge.isPaired()) return
+        if (archiveLoading || navigation.screen != ShellScreen.GAMES || !nativeBridge.isPaired()) return
+        archiveRefreshedThisSession = true
         archiveLoading = true
         archiveMessage = null
         if (::nativeLayer.isInitialized) renderNativeScreen()
         nativeBridge.refreshArchive()
     }
 
-    internal fun onArchivePayload(payload: JSONObject?, error: String?) {
-        archiveLoading = false
-        archiveMessage = error
-        payload?.let(::applyArchivePayload)
-        if (navigation.screen == ShellScreen.HOME) renderNativeScreen()
+    private fun loadMoreArchive() {
+        val cursor = archiveCursor ?: return
+        if (archiveLoading || navigation.screen != ShellScreen.GAMES || !nativeBridge.isPaired()) return
+        archiveLoading = true
+        archiveMessage = null
+        nativeBridge.loadMoreArchive(cursor)
     }
 
-    private fun applyArchivePayload(payload: JSONObject) {
-        archiveGames = payload.optJSONArray("games") ?: JSONArray()
-        archiveAccount = payload.optString("account")
+    internal fun onArchivePayload(payload: JSONObject?, error: String?, append: Boolean = false) {
+        archiveLoading = false
+        archiveMessage = error
+        payload?.let { applyArchivePayload(it, append) }
+        if (navigation.screen == ShellScreen.GAMES) {
+            if (append) archiveAdapter?.notifyDataSetChanged() else renderNativeScreen()
+        }
+    }
+
+    private fun applyArchivePayload(payload: JSONObject, append: Boolean = false) {
+        archiveCacheLoaded = true
+        val incoming = payload.optJSONArray("games") ?: JSONArray()
+        if (!append) archiveGames.clear()
+        val existingIds = archiveGames.mapTo(mutableSetOf()) { it.optString("id") }
+        for (index in 0 until incoming.length()) {
+            incoming.optJSONObject(index)?.let { game ->
+                if (existingIds.add(game.optString("id"))) archiveGames += game
+            }
+        }
+        payload.optString("account").takeIf(String::isNotBlank)?.let { archiveAccount = it }
+        archiveCursor = archiveCursorFrom(
+            if (payload.isNull("next_cursor")) null else payload.optString("next_cursor"),
+        )
+        if (!append) archiveFirstPageCursor = archiveCursor
+    }
+
+    private fun releaseExtraArchiveRows() {
+        if (navigation.screen != ShellScreen.GAMES || archiveGames.size <= ARCHIVE_PAGE_SIZE) return
+        archiveGames.subList(ARCHIVE_PAGE_SIZE, archiveGames.size).clear()
+        archiveCursor = archiveFirstPageCursor
+        archiveAdapter = null
     }
 
     internal fun onArchivedGame(payload: JSONObject?, error: String?) {
@@ -254,7 +319,7 @@ class MainActivity : ComponentActivity() {
             pendingArchivedGame = JSONObject().put("game", game)
             showAnalysisScreen()
             deliverPendingArchivedGame()
-        } else if (navigation.screen == ShellScreen.HOME) renderNativeScreen()
+        } else if (navigation.screen == ShellScreen.GAMES) renderNativeScreen()
     }
 
     private fun deliverPendingArchivedGame() {
@@ -302,6 +367,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun renderNativeScreen() {
+        if (navigation.screen != ShellScreen.GAMES) archiveAdapter = null
         nativeLayer.removeAllViews()
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -310,6 +376,7 @@ class MainActivity : ComponentActivity() {
         page.addView(nativeHeader())
         when (navigation.screen) {
             ShellScreen.PROFILE -> page.addView(profileContent(), weighted())
+            ShellScreen.GAMES -> page.addView(gamesContent(), weighted())
             else -> page.addView(homeContent(), weighted())
         }
         nativeLayer.addView(page, matchFrame())
@@ -321,10 +388,11 @@ class MainActivity : ComponentActivity() {
         gravity = Gravity.CENTER_VERTICAL
         setPadding(4.dp, 0, 10.dp, 0)
         setBackgroundColor(HEADER_BACKGROUND)
-        val leading = shellButton(if (navigation.screen == ShellScreen.PROFILE) "‹" else "☰", 25f).apply {
-            contentDescription = if (navigation.screen == ShellScreen.PROFILE) "Back to home" else "Open menu"
+        val childScreen = navigation.screen == ShellScreen.PROFILE || navigation.screen == ShellScreen.GAMES
+        val leading = shellButton(if (childScreen) "‹" else "☰", 25f).apply {
+            contentDescription = if (childScreen) "Back to home" else "Open menu"
             setOnClickListener {
-                if (navigation.screen == ShellScreen.PROFILE) showHomeScreen()
+                if (childScreen) showHomeScreen()
                 else { navigation.openDrawer(); renderNativeScreen() }
             }
         }
@@ -335,7 +403,11 @@ class MainActivity : ComponentActivity() {
             contentDescription = null
         }, LinearLayout.LayoutParams(32.dp, 32.dp).apply { marginEnd = 8.dp })
         addView(TextView(this@MainActivity).apply {
-            text = if (navigation.screen == ShellScreen.PROFILE) "Profile / PC" else "InstinctaZero"
+            text = when (navigation.screen) {
+                ShellScreen.PROFILE -> "Account / PC"
+                ShellScreen.GAMES -> "Games"
+                else -> "InstinctaZero"
+            }
             setTextColor(Color.WHITE)
             textSize = 18f
             typeface = Typeface.DEFAULT_BOLD
@@ -345,7 +417,7 @@ class MainActivity : ComponentActivity() {
 
     private fun homeContent(): View {
         val paired = nativeBridge.isPaired()
-        if (!paired) return LinearLayout(this).apply {
+        return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(18.dp, 24.dp, 18.dp, 18.dp)
             addView(TextView(this@MainActivity).apply {
@@ -355,103 +427,162 @@ class MainActivity : ComponentActivity() {
                 typeface = Typeface.DEFAULT_BOLD
             })
             addView(TextView(this@MainActivity).apply {
-                text = "A local study board with Leela lines and opening book. Pair your PC to load completed Lichess games."
+                text = "A local study board with Leela lines and opening book. Games remain separate and load only when you open them."
                 setTextColor(TEXT_MUTED)
                 textSize = 15f
                 setPadding(0, 6.dp, 0, 20.dp)
             })
             addView(shellCard("Analysis board", "Continue the board where you left it") { showAnalysisScreen() })
-            addView(shellCard("Profile / PC", connectionSummary()) { showProfileScreen() }.apply {
+            addView(shellCard(
+                "Games",
+                if (paired) archiveAccount.takeIf(String::isNotBlank)?.let { "Completed games · $it" }
+                    ?: "Completed games from the paired account"
+                else "Connect the analysis PC to view completed games",
+            ) { if (paired) showGamesScreen() else showProfileScreen() }.apply {
+                (layoutParams as? LinearLayout.LayoutParams)?.topMargin = 12.dp
+            })
+            addView(shellCard("Account / PC", connectionSummary()) { showProfileScreen() }.apply {
                 (layoutParams as? LinearLayout.LayoutParams)?.topMargin = 12.dp
             })
         }
+    }
 
-        val content = LinearLayout(this).apply {
+    private fun gamesContent(): View {
+        if (!nativeBridge.isPaired()) return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(6.dp, 4.dp, 6.dp, 10.dp)
-            addView(LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                addView(TextView(this@MainActivity).apply {
-                    text = archiveAccount.ifBlank { "Completed games" }
-                    setTextColor(Color.WHITE)
-                    textSize = 18f
-                    typeface = Typeface.DEFAULT_BOLD
-                    setPadding(8.dp, 4.dp, 4.dp, 4.dp)
-                }, LinearLayout.LayoutParams(0, 44.dp, 1f))
-                addView(shellButton(if (archiveLoading) "…" else "↻", 22f).apply {
-                    contentDescription = "Refresh completed games"
-                    isEnabled = !archiveLoading
-                    setOnClickListener { refreshArchive() }
-                }, LinearLayout.LayoutParams(48.dp, 44.dp))
+            setPadding(18.dp, 24.dp, 18.dp, 18.dp)
+            addView(nativeText("Connect your Lichess account", 22f, Color.WHITE, true))
+            addView(nativeText("Pair this phone with the InstinctaZero PC account first.", 15f, TEXT_MUTED).apply {
+                setPadding(0, 8.dp, 0, 18.dp)
             })
-            archiveMessage?.let { message ->
-                addView(TextView(this@MainActivity).apply {
-                    text = message
-                    setTextColor(ERROR_TEXT)
-                    textSize = 13f
-                    setPadding(8.dp, 0, 8.dp, 8.dp)
-                })
-            }
-            if (archiveGames.length() == 0) {
-                addView(TextView(this@MainActivity).apply {
-                    text = if (archiveLoading) "Fetching completed games…" else "No completed games cached yet."
-                    setTextColor(TEXT_MUTED)
-                    textSize = 15f
-                    gravity = Gravity.CENTER
-                    setPadding(12.dp, 50.dp, 12.dp, 12.dp)
-                })
-                addView(shellCard("Analysis board", "Continue the board where you left it") { showAnalysisScreen() })
-            } else {
-                for (index in 0 until archiveGames.length()) {
-                    archiveGames.optJSONObject(index)?.let { addView(gameRow(it)) }
+            addView(actionButton("Open Account / PC") { showProfileScreen() })
+        }
+
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(SHELL_BACKGROUND)
+        }
+        page.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(8.dp, 0, 4.dp, 0)
+            addView(TextView(this@MainActivity).apply {
+                text = archiveAccount.ifBlank { "Paired Lichess account" }
+                setTextColor(Color.WHITE)
+                textSize = 17f
+                typeface = Typeface.DEFAULT_BOLD
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            }, LinearLayout.LayoutParams(0, 46.dp, 1f))
+            addView(shellButton(if (archiveLoading) "…" else "↻", 22f).apply {
+                contentDescription = "Refresh completed games"
+                isEnabled = !archiveLoading
+                setOnClickListener { refreshArchive() }
+            }, LinearLayout.LayoutParams(48.dp, 46.dp))
+        })
+        archiveMessage?.let { message ->
+            page.addView(nativeText(message, 13f, ERROR_TEXT).apply { setPadding(10.dp, 0, 10.dp, 6.dp) })
+        }
+
+        val list = ListView(this).apply {
+            divider = null
+            isVerticalScrollBarEnabled = false
+            cacheColorHint = Color.TRANSPARENT
+            setBackgroundColor(SHELL_BACKGROUND)
+        }
+        val empty = TextView(this).apply {
+            text = if (archiveLoading) "Loading completed games…" else "No completed games cached yet."
+            setTextColor(TEXT_MUTED)
+            textSize = 15f
+            gravity = Gravity.CENTER
+            setPadding(18.dp, 40.dp, 18.dp, 18.dp)
+        }
+        val body = FrameLayout(this).apply {
+            addView(list, matchFrame())
+            addView(empty, matchFrame())
+        }
+        list.emptyView = empty
+        archiveAdapter = GameArchiveAdapter().also { list.adapter = it }
+        list.setOnScrollListener(object : AbsListView.OnScrollListener {
+            override fun onScrollStateChanged(view: AbsListView?, scrollState: Int) = Unit
+
+            override fun onScroll(
+                view: AbsListView?,
+                firstVisibleItem: Int,
+                visibleItemCount: Int,
+                totalItemCount: Int,
+            ) {
+                if (totalItemCount > 0 && firstVisibleItem + visibleItemCount >= totalItemCount - 3) {
+                    loadMoreArchive()
                 }
             }
-        }
-        return ScrollView(this).apply {
-            isFillViewport = true
-            isVerticalScrollBarEnabled = false
-            addView(content, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        })
+        page.addView(body, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        return page
+    }
+
+    private inner class GameArchiveAdapter : BaseAdapter() {
+        override fun getCount(): Int = archiveGames.size
+        override fun getItem(position: Int): JSONObject = archiveGames[position]
+        override fun getItemId(position: Int): Long = getItem(position).optString("id").hashCode().toLong()
+        override fun hasStableIds(): Boolean = true
+
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
+            val row = convertView as? GameRowView ?: GameRowView(this@MainActivity)
+            row.bind(getItem(position), position)
+            return row
         }
     }
 
-    private fun gameRow(game: JSONObject): View {
-        val white = playerName(game.optJSONObject("white"))
-        val black = playerName(game.optJSONObject("black"))
-        val whiteRating = playerRating(game.optJSONObject("white"))
-        val blackRating = playerRating(game.optJSONObject("black"))
-        val boardOrientation = if (archiveAccount.equals(white, ignoreCase = true)) "white" else "black"
-        val title = listOf(
-            game.optString("speed").replaceFirstChar { it.uppercase() },
-            game.optString("variant").ifBlank { "Standard" }.replaceFirstChar { it.uppercase() },
-            if (game.optBoolean("rated")) "Rated" else "Casual",
-        ).filter(String::isNotBlank).joinToString(" · ")
-        val date = DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(game.optLong("last_move_at_ms")))
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+    private inner class GameRowView(context: Context) : LinearLayout(context) {
+        private val thumbnail = GameThumbnailView(context, "", "white")
+        private val titleView = nativeText("", 14f, Color.WHITE, true)
+        private val dateView = nativeText("", 11f, TEXT_MUTED)
+        private val whiteView = nativeText("", 14f, 0xffdddddd.toInt(), true)
+        private val blackView = nativeText("", 14f, 0xffdddddd.toInt(), true)
+        private val resultView = nativeText("", 11f, 0xff9ca85b.toInt())
+
+        init {
+            orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(8.dp, 8.dp, 8.dp, 8.dp)
-            setBackgroundColor(if (game.optInt("ply_count") % 2 == 0) 0xff292824.toInt() else 0xff302f2a.toInt())
-            addView(GameThumbnailView(this@MainActivity, game.optString("preview_fen"), boardOrientation), LinearLayout.LayoutParams(108.dp, 108.dp).apply { marginEnd = 10.dp })
-            addView(LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.VERTICAL
+            addView(thumbnail, LayoutParams(108.dp, 108.dp).apply { marginEnd = 10.dp })
+            addView(LinearLayout(context).apply {
+                orientation = VERTICAL
                 gravity = Gravity.CENTER_VERTICAL
-                addView(nativeText(title, 14f, Color.WHITE, true))
-                addView(nativeText(date, 11f, TEXT_MUTED).apply { setPadding(0, 1.dp, 0, 8.dp) })
-                addView(nativeText("$white${ratingSuffix(whiteRating)}", 14f, 0xffdddddd.toInt(), true))
-                addView(nativeText("$black${ratingSuffix(blackRating)}", 14f, 0xffdddddd.toInt(), true))
-                addView(nativeText(gameResultText(game, white, black), 11f, if (game.optBoolean("analyzable")) 0xff9ca85b.toInt() else ERROR_TEXT).apply { setPadding(0, 7.dp, 0, 0) })
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(titleView)
+                addView(dateView.apply { setPadding(0, 1.dp, 0, 8.dp) })
+                addView(whiteView)
+                addView(blackView)
+                addView(resultView.apply { setPadding(0, 7.dp, 0, 0) })
+            }, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
-        row.isClickable = game.optBoolean("analyzable")
-        row.isFocusable = row.isClickable
-        row.alpha = if (row.isClickable) 1f else .68f
-        if (row.isClickable) row.setOnClickListener {
-            archiveMessage = "Loading game…"
-            renderNativeScreen()
-            nativeBridge.loadArchivedGame(game.optString("id"))
+
+        fun bind(game: JSONObject, position: Int) {
+            val white = playerName(game.optJSONObject("white"))
+            val black = playerName(game.optJSONObject("black"))
+            val boardOrientation = if (archiveAccount.equals(white, ignoreCase = true)) "white" else "black"
+            thumbnail.setPosition(game.optString("preview_fen"), boardOrientation)
+            titleView.text = listOf(
+                game.optString("speed").replaceFirstChar { it.uppercase() },
+                game.optString("variant").ifBlank { "Standard" }.replaceFirstChar { it.uppercase() },
+                if (game.optBoolean("rated")) "Rated" else "Casual",
+            ).filter(String::isNotBlank).joinToString(" · ")
+            dateView.text = DateFormat.getDateInstance(DateFormat.MEDIUM)
+                .format(Date(game.optLong("last_move_at_ms")))
+            whiteView.text = "$white${ratingSuffix(playerRating(game.optJSONObject("white")))}"
+            blackView.text = "$black${ratingSuffix(playerRating(game.optJSONObject("black")))}"
+            resultView.text = gameResultText(game, white, black)
+            resultView.setTextColor(if (game.optBoolean("analyzable")) 0xff9ca85b.toInt() else ERROR_TEXT)
+            setBackgroundColor(if (position % 2 == 0) 0xff292824.toInt() else 0xff302f2a.toInt())
+            isClickable = game.optBoolean("analyzable")
+            isFocusable = isClickable
+            alpha = if (isClickable) 1f else .68f
+            setOnClickListener(if (isClickable) View.OnClickListener {
+                archiveMessage = "Loading game…"
+                nativeBridge.loadArchivedGame(game.optString("id"))
+            } else null)
         }
-        return row
     }
 
     private fun nativeText(value: String, size: Float, color: Int, bold: Boolean = false) = TextView(this).apply {
@@ -483,7 +614,7 @@ class MainActivity : ComponentActivity() {
             if (navigation.keypadOpen && !state.optBoolean("paired")) addView(pairingKeypad())
             else {
                 addView(TextView(this@MainActivity).apply {
-                    text = if (state.optBoolean("paired")) "PC paired" else "Connect your PC"
+                    text = if (state.optBoolean("paired")) "Lichess account connected" else "Connect your Lichess account"
                     setTextColor(Color.WHITE)
                     textSize = 23f
                     typeface = Typeface.DEFAULT_BOLD
@@ -491,16 +622,17 @@ class MainActivity : ComponentActivity() {
                 addView(TextView(this@MainActivity).apply {
                     text = connectionMessage ?: if (state.optBoolean("paired"))
                         listOf(
-                            archiveAccount.takeIf(String::isNotBlank),
+                            archiveAccount.ifBlank { state.optString("accountUsername") }.takeIf(String::isNotBlank)
+                                ?.let { "Lichess account: $it" },
                             state.optString("deviceName").ifBlank { "InstinctaZero Android" },
                             "Leela: ${nativeBridge.engineBackendLabel()}",
                         ).filterNotNull().joinToString("\n")
-                    else "Generate a pairing code on the InstinctaZero PC, then enter it using the keypad."
+                    else "Generate a pairing code on the InstinctaZero PC already signed into your Lichess account."
                     setTextColor(if (connectionMessage == null) TEXT_MUTED else ERROR_TEXT)
                     textSize = 15f
                     setPadding(0, 8.dp, 0, 22.dp)
                 })
-                addView(actionButton(if (state.optBoolean("paired")) "Disconnect" else "Enter pairing code") {
+                addView(actionButton(if (state.optBoolean("paired")) "Disconnect account" else "Connect account") {
                     connectionMessage = null
                     if (state.optBoolean("paired")) nativeBridge.disconnectLocalFirst()
                     else { navigation.openKeypad(); renderNativeScreen() }
@@ -512,7 +644,7 @@ class MainActivity : ComponentActivity() {
     private fun pairingKeypad(): View = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         addView(TextView(this@MainActivity).apply {
-            text = "Pair InstinctaZero PC"
+            text = "Connect Lichess account"
             setTextColor(Color.WHITE)
             textSize = 21f
             typeface = Typeface.DEFAULT_BOLD
@@ -586,7 +718,8 @@ class MainActivity : ComponentActivity() {
             })
             addView(drawerButton("Home") { showHomeScreen() })
             addView(drawerButton("Analysis board") { showAnalysisScreen() })
-            addView(drawerButton("Profile / PC") { showProfileScreen() })
+            addView(drawerButton("Games") { if (nativeBridge.isPaired()) showGamesScreen() else showProfileScreen() })
+            addView(drawerButton("Account / PC") { showProfileScreen() })
         }, FrameLayout.LayoutParams(292.dp, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START))
     }
 
@@ -725,7 +858,7 @@ internal object AnalysisWebPolicy {
             "/api/mobile/v1/study/explorer",
         ) && uri.rawQuery == null
         val gamesList = uri.rawPath == "/api/mobile/v1/games" &&
-            (uri.rawQuery == null || Regex("limit=100(?:&cursor=[A-Za-z0-9_-]{1,256})?").matches(uri.rawQuery))
+            (uri.rawQuery == null || Regex("limit=20(?:&cursor=[A-Za-z0-9_-]{1,256})?").matches(uri.rawQuery))
         val gameDetail = Regex("/api/mobile/v1/games/[A-Za-z0-9]{8,16}").matches(uri.rawPath) &&
             uri.rawQuery == null
         uri.scheme.equals("https", ignoreCase = true) &&
@@ -763,10 +896,12 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         const val JS_OBJECT = "InstinctaZeroNative"
         private const val TOKEN_KEY = "paired_device_token"
         private const val DEVICE_NAME_KEY = "paired_device_name"
+        private const val ACCOUNT_NAME_KEY = "paired_account_name"
         private const val MAX_REQUEST_JSON = 16 * 1024
         private const val MAX_SETTINGS_JSON = 2 * 1024
         private const val MAX_STUDY_JSON = 256 * 1024
         private const val MAX_ARCHIVE_JSON = 2 * 1024 * 1024
+        private const val MAX_CACHED_ARCHIVE_JSON = 256 * 1024
         private val BOOK_SPEEDS = listOf("bullet", "blitz", "rapid", "classical", "correspondence")
         private val BOOK_RATINGS = listOf(1600, 1800, 2000, 2200, 2500)
     }
@@ -814,7 +949,26 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     fun getConnectionState(): String = connectionState().toString()
     fun isPaired(): Boolean = encryptedPreferences.contains(TOKEN_KEY)
     fun cachedArchive(): JSONObject? = runCatching {
-        archivePreferences.getString("games_v1", null)?.let(::JSONObject)
+        val raw = archivePreferences.getString("games_v1", null) ?: return@runCatching null
+        if (raw.length > MAX_CACHED_ARCHIVE_JSON) {
+            // v0.4.0 cached the whole archive. Drop only that rebuildable display cache instead of
+            // parsing megabytes on the UI thread; the PC remains the authoritative game store.
+            archivePreferences.edit().remove("games_v1").apply()
+            return@runCatching null
+        }
+        JSONObject(raw).let { cached ->
+            val source = cached.optJSONArray("games") ?: JSONArray()
+            val games = JSONArray()
+            for (index in 0 until minOf(source.length(), ARCHIVE_PAGE_SIZE)) {
+                source.optJSONObject(index)?.let(games::put)
+            }
+            JSONObject()
+                .put("account", cached.optString("account").ifBlank {
+                    encryptedPreferences.getString(ACCOUNT_NAME_KEY, "").orEmpty()
+                })
+                .put("games", games)
+                .put("next_cursor", if (source.length() > ARCHIVE_PAGE_SIZE) JSONObject.NULL else cached.opt("next_cursor"))
+        }
     }.getOrNull()
 
     /** Typed UI preferences only; this is not a generic WebView key-value store. */
@@ -870,7 +1024,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         require(parsed.optInt("v") == 1) { "Unsupported study state." }
         val cursor = parsed.optJSONArray("cursor") ?: JSONArray()
         require(cursor.length() <= 512) { "Study cursor is too long." }
-        check(studyPreferences.edit().putString("state_v1", parsed.toString()).commit())
+        studyPreferences.edit().putString("state_v1", parsed.toString()).apply()
         true
     } catch (_: Exception) {
         false
@@ -895,6 +1049,17 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         val pending = PendingCall()
         calls[id] = pending
         executor.execute { refreshArchiveOnWorker(id, pending) }
+    }
+
+    fun loadMoreArchive(cursor: String): String = newRequestId().also { id ->
+        val safeCursor = runCatching { archiveCursorFrom(cursor) }.getOrNull()
+        if (safeCursor == null) {
+            activity.runOnUiThread { activity.onArchivePayload(null, "Invalid game cursor.", append = true) }
+            return@also
+        }
+        val pending = PendingCall()
+        calls[id] = pending
+        executor.execute { loadMoreArchiveOnWorker(id, pending, safeCursor) }
     }
 
     fun loadArchivedGame(gameId: String): String = newRequestId().also { id ->
@@ -944,7 +1109,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     fun disconnectLocalFirst() {
         val token = encryptedPreferences.getString(TOKEN_KEY, null)
         cancelAll("disconnected")
-        encryptedPreferences.edit().remove(TOKEN_KEY).remove(DEVICE_NAME_KEY).commit()
+        encryptedPreferences.edit().remove(TOKEN_KEY).remove(DEVICE_NAME_KEY).remove(ACCOUNT_NAME_KEY).commit()
         archivePreferences.edit().clear().commit()
         publishConnectionState(connectionState())
         if (token.isNullOrBlank()) return
@@ -989,11 +1154,14 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
             call.execute().use { response ->
                 val payload = response.body?.string().orEmpty()
                 if (!response.isSuccessful) throw GatewayException(response.code, responseError(response, payload))
-                val token = JSONObject(payload).optString("token")
+                val responseJson = JSONObject(payload)
+                val token = responseJson.optString("token")
+                val accountName = responseJson.optJSONObject("server")?.optString("account_username").orEmpty()
                 if (token.isBlank() || token.length > 512) throw IOException("Pairing response had no valid token.")
                 encryptedPreferences.edit()
                     .putString(TOKEN_KEY, token)
                     .putString(DEVICE_NAME_KEY, deviceName)
+                    .putString(ACCOUNT_NAME_KEY, accountName)
                     .commit()
                 publishConnectionState(connectionState())
             }
@@ -1039,42 +1207,61 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
                     .get().build(),
                 256 * 1024,
             )
-            val allGames = JSONArray()
-            var cursor: String? = null
-            for (pageIndex in 0 until 100) {
-                val gamesUrl = apiUrl("games").newBuilder()
-                    .addQueryParameter("limit", "100")
-                    .apply { cursor?.let { addQueryParameter("cursor", it) } }
-                    .build()
-                check(AnalysisWebPolicy.isAllowedNativeGatewayUrl(gamesUrl.toString()))
-                val page = executeJson(
-                    pending,
-                    Request.Builder().url(gamesUrl)
-                        .header("Authorization", "Bearer $token")
-                        .get().build(),
-                    MAX_ARCHIVE_JSON,
-                )
-                val items = page.optJSONArray("games") ?: JSONArray()
-                for (index in 0 until items.length()) allGames.put(items.getJSONObject(index))
-                cursor = archiveCursorFrom(
-                    if (page.isNull("next_cursor")) null else page.optString("next_cursor"),
-                )
-                if (cursor == null) break
-            }
-            val result = JSONObject()
-                .put("account", session.optJSONObject("account")?.optString("username").orEmpty())
-                .put("games", allGames)
-                .put("next_cursor", cursor)
+            val account = session.optJSONObject("account")?.optString("username").orEmpty()
+            encryptedPreferences.edit().putString(ACCOUNT_NAME_KEY, account).commit()
+            val result = fetchArchivePage(pending, token, null).put("account", account)
             require(result.toString().length <= MAX_ARCHIVE_JSON) { "Completed-game cache is too large." }
             check(archivePreferences.edit().putString("games_v1", result.toString()).commit())
-            if (!pending.isCanceled()) activity.runOnUiThread { activity.onArchivePayload(result, null) }
+            if (!pending.isCanceled()) activity.runOnUiThread { activity.onArchivePayload(result, null, append = false) }
         } catch (error: Exception) {
             if (!pending.isCanceled()) activity.runOnUiThread {
-                activity.onArchivePayload(null, error.safeMessage())
+                activity.onArchivePayload(null, error.safeMessage(), append = false)
             }
         } finally {
             calls.remove(id, pending)
         }
+    }
+
+    private fun loadMoreArchiveOnWorker(id: String, pending: PendingCall, cursor: String) {
+        val token = encryptedPreferences.getString(TOKEN_KEY, null)
+        if (token.isNullOrBlank()) {
+            calls.remove(id, pending)
+            activity.runOnUiThread { activity.onArchivePayload(null, "Pair the analysis PC first.", append = true) }
+            return
+        }
+        try {
+            val result = fetchArchivePage(pending, token, cursor)
+            if (!pending.isCanceled()) activity.runOnUiThread {
+                activity.onArchivePayload(result, null, append = true)
+            }
+        } catch (error: Exception) {
+            if (!pending.isCanceled()) activity.runOnUiThread {
+                activity.onArchivePayload(null, error.safeMessage(), append = true)
+            }
+        } finally {
+            calls.remove(id, pending)
+        }
+    }
+
+    private fun fetchArchivePage(pending: PendingCall, token: String, cursor: String?): JSONObject {
+        val gamesUrl = apiUrl("games").newBuilder()
+            .addQueryParameter("limit", ARCHIVE_PAGE_SIZE.toString())
+            .apply { cursor?.let { addQueryParameter("cursor", it) } }
+            .build()
+        check(AnalysisWebPolicy.isAllowedNativeGatewayUrl(gamesUrl.toString()))
+        val page = executeJson(
+            pending,
+            Request.Builder().url(gamesUrl)
+                .header("Authorization", "Bearer $token")
+                .get().build(),
+            MAX_ARCHIVE_JSON,
+        )
+        val next = archiveCursorFrom(
+            if (page.isNull("next_cursor")) null else page.optString("next_cursor"),
+        )
+        return JSONObject()
+            .put("games", page.optJSONArray("games") ?: JSONArray())
+            .put("next_cursor", next ?: JSONObject.NULL)
     }
 
     private fun loadArchivedGameOnWorker(id: String, pending: PendingCall, gameId: String) {
@@ -1258,6 +1445,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         state.put("paired", paired)
             .put("state", if (paired) "paired" else "unpaired")
             .put("deviceName", encryptedPreferences.getString(DEVICE_NAME_KEY, ""))
+            .put("accountUsername", encryptedPreferences.getString(ACCOUNT_NAME_KEY, ""))
     }
 
     private fun uiSettings() = JSONObject()

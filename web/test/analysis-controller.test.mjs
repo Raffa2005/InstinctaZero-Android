@@ -256,7 +256,7 @@ test('played PV is projected into a nodes-and-backend-keyed child cache until a 
   const finiteMetric = value => value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
   const project = new Function('finiteMetric', `${projectSource}; return projectAnalysisToChild;`)(finiteMetric);
   const parent = {
-    lines:[{ multipv:2, pv:['e2e4','c7c5','g1f3'], san:['e4','c5','Nf3'], white_cp:18 }],
+    lines:[{ multipv:2, pv:['e2e4','c7c5','g1f3'], san:['e4','c5','Nf3'], white_score:'+0.18', white_cp:18, white_mate:null }],
     move_stats:[{ uci:'e2e4', visits:321, prior:.27 }],
     mobile_backend:'cpu',
     target_nodes:1000,
@@ -269,6 +269,11 @@ test('played PV is projected into a nodes-and-backend-keyed child cache until a 
   assert.deepEqual(inherited.move_stats, []);
   assert.deepEqual(inherited.lines[0].pv, ['c7c5','g1f3']);
   assert.deepEqual(inherited.lines[0].san, ['c5','Nf3']);
+  assert.deepEqual(inherited.inherited_eval, {white_score:'+0.18', white_cp:18, white_mate:null});
+  const leaf = project({ ...parent, lines:[{pv:['e2e4'],san:['e4'],white_score:'+0.18',white_cp:18}] }, 'e2e4', 4000);
+  assert.deepEqual(leaf.lines, []);
+  assert.equal(leaf.inherited_eval.white_cp, 18);
+  assert.match(controller, /engine\.stats && engine\.stats\.inherited_eval/);
   assert.equal(project(parent, 'd2d4', 4000), null);
 
   const snapshotSource = controller.slice(controller.indexOf('function joinedPositiveLines'), controller.indexOf('  function applyAnalysisSnapshot'));
@@ -456,6 +461,8 @@ test('study tree, cursor, game context and board layout persist through the type
   assert.match(controller, /expanded:wrap\.classList\.contains\('expanded'\)/);
   assert.match(controller, /native\(\)\.saveStudyState/);
   assert.match(controller, /native\(\)\.getStudyState/);
+  assert.match(controller, /window\.InstinctaZero\.persistStudy = saveStudyNow/);
+  assert.match(controller, /cursor\.selectedChild = child; cursor = child; saveStudyNow\(\)/);
   assert.match(controller, /function rebuildTree/);
   assert.match(controller, /loadStudyState\(\)/);
   assert.doesNotMatch(controller, /localStorage/);

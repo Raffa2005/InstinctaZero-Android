@@ -31,7 +31,7 @@
   function remember(move, number, mover) {
     let child = cursor.children.find(item => item.san === move.san && item.fen === chess.fen());
     if (!child) { child = { id: ++nodeId, fen: chess.fen(), san: move.san, move: { from: move.from, to: move.to, promotion: move.promotion || null }, number, color: mover, parent: cursor, children: [], selectedChild: null }; cursor.children.push(child); }
-    cursor.selectedChild = child; cursor = child; scheduleStudySave(); return child;
+    cursor.selectedChild = child; cursor = child; saveStudyNow(); return child;
   }
   function cancelBookRequest() { if (book.requestId && native() && native().cancelAnalysis) native().cancelAnalysis(book.requestId); book.requestId = null; book.loading = false; }
   function resetTransport() { if (engine.timer) clearTimeout(engine.timer); engine.timer = null; if (engine.requestId && native()) native().cancelAnalysis(engine.requestId); engine.requestId = null; cancelBookRequest(); }
@@ -87,7 +87,32 @@
   function renderActivePanel() { if (panelView) heading(); else renderPanel(); }
   function scheduleAnalysis() { if (!analysisActive) { resetTransport(); return; } if (!settings.enabled) { clearEngine('off'); renderActivePanel(); return; } if (!native()) { engine.status = 'disconnected'; renderActivePanel(); return; } if (engine.timer) clearTimeout(engine.timer); if (engine.requestId) native().cancelAnalysis(engine.requestId); engine.requestId = null; engine.status = 'starting'; engine.error = ''; renderActivePanel(); engine.timer = setTimeout(() => { engine.timer = null; if (!analysisActive) return; try { engine.requestId = native().startAnalysis(JSON.stringify(studyRequest())); } catch (_) { engine.status = 'disconnected'; renderActivePanel(); } }, 120); }
   function requestBook() { if (!analysisActive || tab !== 'book' || !native()) { cancelBookRequest(); renderActivePanel(); return; } cancelBookRequest(); bookSettingsDirty = false; book.loading = true; book.error = ''; renderActivePanel(); try { book.requestId = native().requestExplorer(JSON.stringify(explorerRequest())); } catch (_) { book.loading = false; book.error = 'Connection unavailable'; renderActivePanel(); } }
-  function projectAnalysisToChild(data, move, targetNodes) { const selectedMove = String(move || ''); if (!data || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(selectedMove)) return null; const sourceLine = (data.lines || []).find(line => line && line.pv && line.pv[0] === selectedMove); const sourceStat = (data.move_stats || []).find(stat => stat && stat.uci === selectedMove); if (!sourceLine && !sourceStat) return null; const visits = finiteMetric(sourceStat && sourceStat.visits), continuation = sourceLine && Array.isArray(sourceLine.pv) ? sourceLine.pv.slice(1) : [], continuationSan = sourceLine && Array.isArray(sourceLine.san) ? sourceLine.san.slice(1) : []; return Object.assign({}, data, { inherited:true, root_move_stats:[], move_stats:[], actual_nodes:visits, total_nodes:visits === null ? data.total_nodes : visits, target_nodes:targetNodes == null ? data.target_nodes : targetNodes, progress:null, lines:continuation.length ? [Object.assign({}, sourceLine, { multipv:1, pv:continuation, san:continuationSan })] : [] }); }
+  function projectAnalysisToChild(data, move, targetNodes) {
+    const selectedMove = String(move || '');
+    if (!data || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(selectedMove)) return null;
+    const sourceLine = (data.lines || []).find(line => line && line.pv && line.pv[0] === selectedMove);
+    const sourceStat = (data.move_stats || []).find(stat => stat && stat.uci === selectedMove);
+    if (!sourceLine && !sourceStat) return null;
+    const visits = finiteMetric(sourceStat && sourceStat.visits);
+    const continuation = sourceLine && Array.isArray(sourceLine.pv) ? sourceLine.pv.slice(1) : [];
+    const continuationSan = sourceLine && Array.isArray(sourceLine.san) ? sourceLine.san.slice(1) : [];
+    const inheritedEval = sourceLine ? {
+      white_score: sourceLine.white_score,
+      white_cp: sourceLine.white_cp,
+      white_mate: sourceLine.white_mate,
+    } : null;
+    return Object.assign({}, data, {
+      inherited:true,
+      inherited_eval:inheritedEval,
+      root_move_stats:[],
+      move_stats:[],
+      actual_nodes:visits,
+      total_nodes:visits === null ? data.total_nodes : visits,
+      target_nodes:targetNodes == null ? data.target_nodes : targetNodes,
+      progress:null,
+      lines:continuation.length ? [Object.assign({}, sourceLine, { multipv:1, pv:continuation, san:continuationSan })] : [],
+    });
+  }
   function joinedPositiveLines(data) { const stats = Array.isArray(data && data.move_stats) ? data.move_stats.filter(stat => finiteMetric(stat && stat.visits) > 0) : []; const byMove = new Map(stats.map(stat => [stat.uci, stat])); return { lines:(Array.isArray(data && data.lines) ? data.lines : []).filter(line => line && Array.isArray(line.pv) && byMove.has(line.pv[0])), stats }; }
   function coherentAnalysisSnapshot(data, targetNodes) { if (!data || !Array.isArray(data.lines) || data.search_phase === 'provisional') return null; const joined = joinedPositiveLines(data), authoritative = data.search_phase === 'ready' || data.search_phase === 'final'; if (!joined.lines.length && !authoritative) return null; return Object.assign({}, data, { inherited:false, mobile_backend:settings.backend, target_nodes:targetNodes == null ? data.target_nodes : targetNodes, lines:joined.lines, move_stats:joined.stats }); }
   function applyAnalysisSnapshot(snapshot, status) { engine.lastGood = snapshot; engine.lines = snapshot && Array.isArray(snapshot.lines) ? snapshot.lines : []; engine.stats = snapshot || null; engine.progress = snapshot && snapshot.progress || null; engine.status = status || 'cached'; engine.error = ''; renderArrows(engine.lines); }
@@ -130,7 +155,7 @@
     if (panelView === 'variationActions') return '<div class="panel-view"><div class="panel-readout"><span>Variation</span><b>' + safe(variationTarget && variationTarget.san || '') + '</b></div><div class="panel-buttons panel-buttons-stack"><button data-promote-variation>Promote to main line</button><button data-delete-variation>Delete variation</button><button data-cancel-variation>Cancel</button></div></div>';
     return '<div class="panel-view"><div class="panel-buttons panel-buttons-stack"><button data-reset>New / reset</button><button data-delete' + (cursor.parent ? '' : ' disabled') + '>Delete current branch</button></div></div>';
   }
-  function heading() { const best = engine.lines && engine.lines[0]; const evalText = settings.enabled && best ? whiteEvalText(best) : null; title.textContent = evalText && evalText !== '—' ? evalText + ' · Leela' : settings.enabled ? 'Leela · ' + (engine.status === 'running' || engine.status === 'starting' ? 'analyzing' : engine.status) : ({moves:'Moves',info:'Study information',engine:'Leela off',chart:'',book:'Opening book'})[tab]; document.querySelector('[data-study-title]').textContent = studyContext.title; document.querySelector('[data-panel-tab]').hidden = !panelView; document.querySelector('[data-panel-tab]').classList.toggle('selected', !!panelView); }
+  function heading() { const best = engine.lines && engine.lines[0] || engine.stats && engine.stats.inherited_eval; const evalText = settings.enabled && best ? whiteEvalText(best) : null; title.textContent = evalText && evalText !== '—' ? evalText + ' · Leela' : settings.enabled ? 'Leela · ' + (engine.status === 'running' || engine.status === 'starting' ? 'analyzing' : engine.status) : ({moves:'Moves',info:'Study information',engine:'Leela off',chart:'',book:'Opening book'})[tab]; document.querySelector('[data-study-title]').textContent = studyContext.title; document.querySelector('[data-panel-tab]').hidden = !panelView; document.querySelector('[data-panel-tab]').classList.toggle('selected', !!panelView); }
   function closePanelView() { const refreshBook = panelView === 'bookSettings' && bookSettingsDirty; panelView = null; variationTarget = null; if (refreshBook) { bookSettingsDirty = false; requestBook(); } renderPanel(); scheduleStudySave(); }
   function clearAnalysisCaches(node) { delete node.analysisCache; node.children.forEach(clearAnalysisCaches); }
   function persistBookSettings() { saveUiSettings(); cancelBookRequest(); book.data = null; bookSettingsDirty = true; }
@@ -193,6 +218,7 @@
   };
   window.InstinctaZero.onNativeConnectionState = function () { if (!analysisActive) return; if (settings.enabled) scheduleAnalysis(); if (tab === 'book') requestBook(); };
   window.InstinctaZero.loadArchivedGame = function (payloadJson) { let payload; try { payload = typeof payloadJson === 'string' ? JSON.parse(payloadJson) : payloadJson; } catch (_) { return false; } return installArchivedGame(payload); };
+  window.InstinctaZero.persistStudy = saveStudyNow;
   window.InstinctaZero.setAnalysisActive = function (active) { const next = !!active; if (next === analysisActive) return; analysisActive = next; if (!analysisActive) { resetTransport(); if (engine.status === 'starting' || engine.status === 'running') engine.status = 'idle'; renderActivePanel(); return; } restoreCachedAnalysis(); scheduleAnalysis(); if (tab === 'book') requestBook(); };
   window.InstinctaZero.handleAndroidBack = function () { if (promotionPicker) { promotionPicker.querySelector('[data-cancel]').click(); return true; } if (panelView) { closePanelView(); return true; } return false; };
 

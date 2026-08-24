@@ -82,14 +82,14 @@ class OfflineShellContractTest {
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/study/analysis/stream"))
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/study/explorer"))
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/sync"))
-        assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games?limit=100"))
-        assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games?limit=100&cursor=Abc_123-xyz"))
+        assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games?limit=20"))
+        assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games?limit=20&cursor=Abc_123-xyz"))
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games/abcdEF12"))
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("http://rafael-ms-7e34.tail273ae6.ts.net:8443/api/mobile/v1/study/analysis/stream"))
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("https://rafael-ms-7e34.tail273ae6.ts.net/api/mobile/v1/study/analysis/stream"))
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("https://rafael-ms-7e34.tail273ae6.ts.net:443/api/mobile/v1/study/analysis/stream"))
-        assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games?limit=50"))
-        assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games?cursor=x&limit=100"))
+        assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games?limit=100"))
+        assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games?cursor=x&limit=20"))
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games/abcdEF12?ply=1"))
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/study/unknown"))
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("https://evil.example:8443/api/mobile/v1/study/analysis/stream"))
@@ -169,9 +169,34 @@ class OfflineShellContractTest {
         assertTrue(activity.contains("optString(\"status\")"))
         assertFalse(activity.contains("optString(\"state\")"))
         assertTrue(activity.contains("page.isNull(\"next_cursor\")"))
+        assertTrue(activity.contains("ARCHIVE_PAGE_SIZE = 20"))
+        assertTrue(activity.contains("class GameArchiveAdapter : BaseAdapter"))
+        assertTrue(activity.contains("loadMoreArchiveOnWorker"))
+        assertTrue(activity.contains("releaseExtraArchiveRows()"))
+        assertTrue(activity.contains("archiveGames.subList(ARCHIVE_PAGE_SIZE, archiveGames.size).clear()"))
+        assertFalse(activity.contains("for (pageIndex in 0 until 100)"))
         assertTrue(activity.contains("apiUrl(\"games/\$gameId\")"))
         assertFalse(controller.contains("/api/mobile/v1/games"))
         assertFalse(controller.contains("Authorization"))
+    }
+
+    @Test
+    fun homeDoesNotLoadGamesAndNativeThumbnailsUseBundledCburnettArtwork() {
+        val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
+        val thumbnail = projectFile("src/main/java/com/instinctazero/android/GameThumbnailView.kt").readText()
+        val homeStart = activity.indexOf("private fun homeContent")
+        val gamesStart = activity.indexOf("private fun gamesContent", homeStart)
+        val home = activity.substring(homeStart, gamesStart)
+        assertFalse(home.contains("gameRow("))
+        assertFalse(home.contains("archiveGames.forEach"))
+        assertFalse(activity.contains("navigation.screen == ShellScreen.HOME) refreshArchive()"))
+        assertTrue(activity.contains("navigation.screen == ShellScreen.GAMES && !archiveRefreshedThisSession"))
+        assertTrue(activity.contains("ShellScreen.GAMES -> page.addView(gamesContent()"))
+        assertTrue(activity.contains("drawerButton(\"Games\")"))
+        assertTrue(thumbnail.contains("analysis/pieces/\$name.svg"))
+        assertTrue(thumbnail.contains("SVG.getFromAsset"))
+        assertFalse(thumbnail.contains("♔"))
+        assertFalse(thumbnail.contains("Typeface.create(\"serif\""))
     }
 
     @Test
@@ -183,6 +208,8 @@ class OfflineShellContractTest {
         assertTrue(activity.contains("fun saveStudyState"))
         assertTrue(activity.contains("require(parsed.optInt(\"v\") == 1)"))
         assertTrue(activity.contains("require(cursor.length() <= 512)"))
+        assertTrue(activity.contains("window.InstinctaZero.persistStudy"))
+        assertTrue(activity.contains("putString(\"state_v1\", parsed.toString()).apply()"))
         assertFalse(controller.contains("localStorage"))
     }
 
