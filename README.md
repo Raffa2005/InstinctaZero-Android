@@ -1,6 +1,6 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.4.4 is a compact, legacy-Lichess-inspired analysis app.
+InstinctaZero Android 0.4.5 is a compact, legacy-Lichess-inspired analysis app.
 It opens on a native Home screen; Analysis opens at the standard starting
 position and provides a legal interactive board, local variation tree, live
 Leela lines and arrows, opening-book results, and move navigation. The
@@ -60,6 +60,8 @@ account has an ongoing game.
   (including press-and-hold) to navigate the local tree.
 - Long-press a move where sibling variations exist to promote it to the main
   line or delete that variation without invoking text selection.
+- Creating a new sibling variation keeps the existing main navigation
+  continuation selected, including after restoring the saved study.
 - Android Back closes the pairing keypad, drawer, or analysis subpanel first;
   then Profile and Analysis return to Home, and Back from Home exits.
 - Menu, settings, board flip, board size, previous, and next are functional.

@@ -69,6 +69,34 @@ test('controller retains study branches and presents all underpromotions', async
   assert.match(controller, /selectedChild/);
 });
 
+test('creating and restoring a new variation does not replace the main navigation continuation', async () => {
+  const controller = await readFile(controllerUrl, 'utf8');
+  const rememberSource = functionSource(controller, 'remember', 'cancelBookRequest');
+  const makeRemember = (parent, fen) => new Function(
+    'initialCursor', 'chess', 'saveStudyNow',
+    `let cursor = initialCursor, nodeId = 10; ${rememberSource}; return remember;`
+  )(parent, { fen: () => fen }, () => {});
+
+  const main = { id:1, san:'e5', fen:'main', move:{from:'e7',to:'e5'}, children:[], selectedChild:null };
+  const parent = { id:0, children:[main], selectedChild:main };
+  const variation = makeRemember(parent, 'variation')({ san:'c5', from:'c7', to:'c5' }, 1, 'b');
+  assert.equal(parent.children.length, 2);
+  assert.equal(parent.children[1], variation);
+  assert.equal(parent.selectedChild, main);
+
+  const emptyParent = { id:2, children:[], selectedChild:null };
+  const first = makeRemember(emptyParent, 'first')({ san:'Nf3', from:'g1', to:'f3' }, 1, 'w');
+  assert.equal(emptyParent.selectedChild, first);
+
+  const cursorSource = functionSource(controller, 'cursorForHistory', 'applyStudyState');
+  const restored = new Function('root', 'moveUci', `${cursorSource}; return cursorForHistory;`)(
+    parent,
+    node => node.move.from + node.move.to
+  )(['c7c5']);
+  assert.equal(restored, variation);
+  assert.equal(parent.selectedChild, main);
+});
+
 test('real LC0 callback fixture uses White-POV score, SAN, search stats, and elapsed schema', async () => {
   const controller = await readFile(controllerUrl, 'utf8');
   const fixture = {
@@ -475,7 +503,8 @@ test('study tree, cursor, game context and board layout persist through the type
   assert.match(controller, /native\(\)\.saveStudyState/);
   assert.match(controller, /native\(\)\.getStudyState/);
   assert.match(controller, /window\.InstinctaZero\.persistStudy = saveStudyNow/);
-  assert.match(controller, /cursor\.selectedChild = child; cursor = child; saveStudyNow\(\)/);
+  assert.match(controller, /if \(!newVariation\) cursor\.selectedChild = child/);
+  assert.match(controller, /cursor = child; saveStudyNow\(\)/);
   assert.match(controller, /function rebuildTree/);
   assert.match(controller, /loadStudyState\(\)/);
   assert.doesNotMatch(controller, /localStorage/);

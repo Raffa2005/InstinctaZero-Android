@@ -1,7 +1,7 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.4.4). Before producing a release APK, rebuild and verify the two
+(version 0.4.5). Before producing a release APK, rebuild and verify the two
 checked-in browser assets from their retained sources:
 
 ```bash
@@ -38,7 +38,7 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 11 / 0.4.4 release values;
+- versionCode/versionName are the intended 12 / 0.4.5 release values;
 - `npm run check`, `testDebugUnitTest`, release lint, and the signed release
   build all pass;
 - the APK installs and opens on native Home, while Analysis opens at the
@@ -60,6 +60,8 @@ Before publishing, at minimum verify:
   restored after Activity/process recreation;
 - advancing through a selected continuation inherits the cached response arrow
   and White-perspective value before the replacement search arrives;
+- creating and restoring a sibling variation does not replace the parent’s
+  existing main navigation continuation;
 - Home performs no archive sync or list construction. The separate Games screen
   triggers a PC-owned sync, uses recycled native rows with the bundled Cburnett
   pieces, requests 20-game pages while scrolling, and opens a selected game by
