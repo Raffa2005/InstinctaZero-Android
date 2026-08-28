@@ -1,6 +1,6 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.4.5 is a compact, legacy-Lichess-inspired analysis app.
+InstinctaZero Android 0.4.6 is a compact, legacy-Lichess-inspired analysis app.
 It opens on a native Home screen; Analysis opens at the standard starting
 position and provides a legal interactive board, local variation tree, live
 Leela lines and arrows, opening-book results, and move navigation. The
@@ -50,21 +50,25 @@ account has an ongoing game.
 ## Controls
 
 - Tap or drag a piece to make a legal move.
-- The complete local study tree, selected continuation, current position, tab,
-  orientation, board size, and completed-game context survive app restarts.
+- The complete local study tree, current position, tab, orientation, and
+  completed-game context survive app restarts.
 - Playing a displayed Leela move immediately inherits its already-known best
   response arrow and White-perspective value until the child search replaces it.
-- Moving forward through the selected line inherits that same cached response
+- Moving forward through the canonical mainline inherits that same cached response
   arrow and value immediately; it does not wait for a new network snapshot.
 - Tap a move in the notation, a Leela line, or a book move; use previous/next
   (including press-and-hold) to navigate the local tree.
 - Long-press a move where sibling variations exist to promote it to the main
   line or delete that variation without invoking text selection.
-- Creating a new sibling variation keeps the existing main navigation
-  continuation selected, including after restoring the saved study.
+- Forward navigation always follows the first, canonical child at an
+  intersection. Creating, visiting, or restoring a variation never changes
+  that default path.
+- The former board-size control is now a distinct Return to mainline button.
+  From a variation it jumps to the nearest intersection where that branch
+  diverged; the ordinary Forward button then follows the canonical mainline.
 - Android Back closes the pairing keypad, drawer, or analysis subpanel first;
   then Profile and Analysis return to Home, and Back from Home exits.
-- Menu, settings, board flip, board size, previous, and next are functional.
+- Menu, settings, board flip, Return to mainline, previous, and next are functional.
   Compact touch-only settings remember CPU/iGPU mode, a discrete node target,
   independent arrow count (1–8), Leela, and arrow visibility. The engine panel scrolls through
   every returned line with visits.
@@ -88,6 +92,8 @@ account has an ongoing game.
   also falls back to a fresh local study if the server no longer exposes it.
 - The packaged board is warmed after Home's first frame, and its piece sprites
   are revealed atomically, avoiding both launch contention and partial boards.
+- MainActivity is portrait-only, preventing the unsupported landscape rotation
+  path while retaining normal pause/resume and process-recreation persistence.
 
 ## Build from source
 

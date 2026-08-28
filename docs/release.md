@@ -1,7 +1,7 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.4.5). Before producing a release APK, rebuild and verify the two
+(version 0.4.6). Before producing a release APK, rebuild and verify the two
 checked-in browser assets from their retained sources:
 
 ```bash
@@ -38,7 +38,7 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 12 / 0.4.5 release values;
+- versionCode/versionName are the intended 13 / 0.4.6 release values;
 - `npm run check`, `testDebugUnitTest`, release lint, and the signed release
   build all pass;
 - the APK installs and opens on native Home, while Analysis opens at the
@@ -58,10 +58,14 @@ Before publishing, at minimum verify:
 - Leela streams progressive lines/arrows and cancellation closes its request;
 - a local study, selected variation, cursor, orientation, and game context are
   restored after Activity/process recreation;
-- advancing through a selected continuation inherits the cached response arrow
+- advancing through the canonical continuation inherits the cached response arrow
   and White-perspective value before the replacement search arrives;
-- creating and restoring a sibling variation does not replace the parent’s
-  existing main navigation continuation;
+- forward navigation always chooses the first child at an intersection,
+  regardless of which variation was created, visited, or restored;
+- Return to mainline replaces the size/minimize control, is disabled on the
+  mainline, and jumps from a variation to its nearest divergence intersection;
+- MainActivity is locked to portrait and its existing pause/resume persistence
+  remains intact;
 - Home performs no archive sync or list construction. The separate Games screen
   triggers a PC-owned sync, uses recycled native rows with the bundled Cburnett
   pieces, requests 20-game pages while scrolling, and opens a selected game by

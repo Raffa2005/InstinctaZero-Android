@@ -71,7 +71,7 @@ test('controller retains study branches and presents all underpromotions', async
 
 test('creating and restoring a new variation does not replace the main navigation continuation', async () => {
   const controller = await readFile(controllerUrl, 'utf8');
-  const rememberSource = functionSource(controller, 'remember', 'cancelBookRequest');
+  const rememberSource = controller.slice(controller.indexOf('function mainlineChild'), controller.indexOf('  function cancelBookRequest'));
   const makeRemember = (parent, fen) => new Function(
     'initialCursor', 'chess', 'saveStudyNow',
     `let cursor = initialCursor, nodeId = 10; ${rememberSource}; return remember;`
@@ -95,6 +95,47 @@ test('creating and restoring a new variation does not replace the main navigatio
   )(['c7c5']);
   assert.equal(restored, variation);
   assert.equal(parent.selectedChild, main);
+});
+
+test('forward navigation is canonical and Return to mainline finds the nearest branch intersection', async () => {
+  const [controller, page, style] = await Promise.all([
+    readFile(controllerUrl, 'utf8'),
+    readFile(pageUrl, 'utf8'),
+    readFile(styleUrl, 'utf8'),
+  ]);
+  const mainlineSource = functionSource(controller, 'mainlineChild', 'remember');
+  const mainlineChild = new Function(`${mainlineSource}; return mainlineChild;`)();
+  const root = { children:[] };
+  const beforeBranch = { parent:root, children:[] };
+  const branchPoint = { parent:beforeBranch, children:[] };
+  root.children = [beforeBranch];
+  beforeBranch.children = [branchPoint];
+  const canonical = { parent:branchPoint, children:[] };
+  const variation = { parent:branchPoint, children:[] };
+  const continuation = { parent:variation, children:[] };
+  branchPoint.children = [canonical, variation];
+  variation.children = [continuation];
+  branchPoint.selectedChild = variation; // Simulate stale v0.4.5 visit state.
+  assert.equal(mainlineChild(branchPoint), canonical);
+
+  const actionSource = functionSource(controller, 'mainlineIntersection', 'restore');
+  let restored = null;
+  const actions = new Function(
+    'mainlineChild', 'initialCursor', 'restore',
+    `let cursor = initialCursor; ${actionSource}; return { mainlineIntersection, returnToMainline };`,
+  )(mainlineChild, continuation, node => { restored = node; });
+  assert.equal(actions.mainlineIntersection(continuation), branchPoint);
+  actions.returnToMainline();
+  assert.equal(restored, branchPoint);
+
+  const restoreSource = functionSource(controller, 'restore', 'playUci');
+  assert.doesNotMatch(restoreSource, /selectedChild/);
+  assert.match(controller, /next\.disabled = !mainlineChild\(cursor\)/);
+  assert.match(controller, /action === 'prev' \? cursor\.parent : mainlineChild\(cursor\)/);
+  assert.doesNotMatch(controller, /cursor\.selectedChild \|\| cursor\.children\[0\]/);
+  assert.match(page, /data-action="mainline"[^>]*aria-label="Return to mainline intersection"/);
+  assert.doesNotMatch(page, /data-action="size"|aria-label="Expand board"/);
+  assert.match(style, /\.actions button\.return-mainline\{[^}]*#c4a86f[^}]*border-top:2px solid #c4a86f/);
 });
 
 test('real LC0 callback fixture uses White-POV score, SAN, search stats, and elapsed schema', async () => {
@@ -499,11 +540,12 @@ test('study tree, cursor, game context and board layout persist through the type
   assert.match(controller, /cursor:history\(\)/);
   assert.match(controller, /tree:root\.children\.map\(wireNode\)/);
   assert.match(controller, /black:wrap\.classList\.contains\('orientation-black'\)/);
-  assert.match(controller, /expanded:wrap\.classList\.contains\('expanded'\)/);
+  assert.match(controller, /expanded:false/);
+  assert.match(controller, /wrap\.classList\.remove\('expanded'\)/);
   assert.match(controller, /native\(\)\.saveStudyState/);
   assert.match(controller, /native\(\)\.getStudyState/);
   assert.match(controller, /window\.InstinctaZero\.persistStudy = saveStudyNow/);
-  assert.match(controller, /if \(!newVariation\) cursor\.selectedChild = child/);
+  assert.match(controller, /cursor\.selectedChild = mainlineChild\(cursor\)/);
   assert.match(controller, /cursor = child; saveStudyNow\(\)/);
   assert.match(controller, /function rebuildTree/);
   assert.match(controller, /loadStudyState\(\)/);

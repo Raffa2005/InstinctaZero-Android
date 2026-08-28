@@ -14,6 +14,18 @@ import org.junit.Test
  */
 class OfflineShellContractTest {
     @Test
+    fun mainActivityIsPortraitLockedAndRetainsSafeLifecyclePersistence() {
+        val manifest = projectFile("src/main/AndroidManifest.xml").readText()
+        val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
+        assertTrue(manifest.contains("android:name=\".MainActivity\""))
+        assertTrue(manifest.contains("android:screenOrientation=\"portrait\""))
+        assertTrue(activity.contains("override fun onResume()"))
+        assertTrue(activity.contains("override fun onPause()"))
+        assertTrue(activity.contains("window.InstinctaZero.persistStudy"))
+        assertTrue(activity.contains("nativeBridge.cancelAll(\"backgrounded\")"))
+    }
+
+    @Test
     fun onlyTheExactBundledDocumentMayBecomeTheMainFrame() {
         assertTrue(AnalysisWebPolicy.isAllowedMainFrameUrl(AnalysisWebPolicy.MAIN_PAGE_URL))
         assertFalse(AnalysisWebPolicy.isAllowedMainFrameUrl("https://appassets.androidplatform.net/assets/analysis/"))
