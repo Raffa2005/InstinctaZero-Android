@@ -6,7 +6,6 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.RippleDrawable
 import android.os.Bundle
 import android.os.Build
 import android.view.Gravity
@@ -114,7 +113,7 @@ class MainActivity : ComponentActivity() {
             if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
                 WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, false)
             }
-            setBackgroundColor(SHELL_BACKGROUND)
+            setBackgroundColor(0xff2b2b2b.toInt())
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = false
@@ -435,15 +434,13 @@ class MainActivity : ComponentActivity() {
                 textSize = 12f
                 setTextColor(0xff9b9b9b.toInt())
                 gravity = Gravity.CENTER
-                contentDescription = "Selected account"
+                contentDescription = "Account online status"
             }, LinearLayout.LayoutParams(24.dp, 32.dp))
         } else {
             addView(ImageView(this@MainActivity).apply {
                 setImageResource(com.instinctazero.android.R.drawable.instinctazero_logo)
                 scaleType = ImageView.ScaleType.CENTER_INSIDE
                 contentDescription = null
-                background = roundedBackground(Color.WHITE, 0, Color.TRANSPARENT, 16)
-                clipToOutline = true
             }, LinearLayout.LayoutParams(32.dp, 32.dp).apply { marginEnd = 8.dp })
         }
         addView(TextView(this@MainActivity).apply {
@@ -458,35 +455,35 @@ class MainActivity : ComponentActivity() {
             gravity = Gravity.CENTER_VERTICAL
         }, LinearLayout.LayoutParams(0, 56.dp, 1f))
         if (navigation.screen == ShellScreen.GAMES) {
-            addView(shellButton("Analysis", 12f).apply {
-                setTextColor(ACCENT)
+            addView(ImageView(this@MainActivity).apply {
+                setImageResource(com.instinctazero.android.R.drawable.instinctazero_logo)
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
                 contentDescription = "Open analysis board"
+                isClickable = true
+                isFocusable = true
                 setOnClickListener { showAnalysisScreen() }
-            }, LinearLayout.LayoutParams(72.dp, 48.dp))
+            }, LinearLayout.LayoutParams(42.dp, 42.dp))
         }
     }.also { it.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 56.dp) }
 
-    private fun homeContent(paired: Boolean = nativeBridge.isPaired(), connection: String = connectionSummary()): View {
+    private fun homeContent(): View {
+        val paired = nativeBridge.isPaired()
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(20.dp, 28.dp, 20.dp, 20.dp)
-            addView(nativeText("YOUR CHESS WORKSPACE", 11f, ACCENT, true).apply {
-                letterSpacing = .12f
-                setPadding(0, 0, 0, 10.dp)
-            })
+            setPadding(18.dp, 24.dp, 18.dp, 18.dp)
             addView(TextView(this@MainActivity).apply {
-                text = "A closer look."
+                text = "Chess analysis"
                 setTextColor(Color.WHITE)
-                textSize = 30f
+                textSize = 24f
                 typeface = Typeface.DEFAULT_BOLD
             })
             addView(TextView(this@MainActivity).apply {
-                text = "Explore a line. Understand your next move."
+                text = "A local study board with Leela lines and opening book. Games remain separate and load only when you open them."
                 setTextColor(TEXT_MUTED)
                 textSize = 15f
-                setPadding(0, 8.dp, 0, 28.dp)
+                setPadding(0, 6.dp, 0, 20.dp)
             })
-            addView(shellCard("Analysis board", "Your saved position · Leela & opening book", primary = true) { showAnalysisScreen() })
+            addView(shellCard("Analysis board", "Continue the board where you left it") { showAnalysisScreen() })
             addView(shellCard(
                 "Games",
                 if (paired) archiveAccount.takeIf(String::isNotBlank)?.let { "Completed games · $it" }
@@ -495,7 +492,7 @@ class MainActivity : ComponentActivity() {
             ) { if (paired) showGamesScreen() else showProfileScreen() }.apply {
                 (layoutParams as? LinearLayout.LayoutParams)?.topMargin = 12.dp
             })
-            addView(shellCard("Account / PC", connection) { showProfileScreen() }.apply {
+            addView(shellCard("Account / PC", connectionSummary()) { showProfileScreen() }.apply {
                 (layoutParams as? LinearLayout.LayoutParams)?.topMargin = 12.dp
             })
         }
@@ -519,20 +516,20 @@ class MainActivity : ComponentActivity() {
         page.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(14.dp, 0, 6.dp, 0)
+            setPadding(8.dp, 0, 4.dp, 0)
             addView(TextView(this@MainActivity).apply {
-                text = "${archiveTotal.coerceAtLeast(archiveGames.size)} completed games" +
+                text = "▾  ${archiveTotal.coerceAtLeast(archiveGames.size)} games" +
                     if (archiveSyncing) "  ·  syncing…" else ""
-                setTextColor(TEXT_MUTED)
+                setTextColor(0xffb8b8b8.toInt())
                 textSize = 13f
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
-            }, LinearLayout.LayoutParams(0, 48.dp, 1f))
+            }, LinearLayout.LayoutParams(0, 46.dp, 1f))
             addView(shellButton(if (archiveLoading) "…" else "↻", 22f).apply {
                 contentDescription = "Refresh completed games"
                 isEnabled = !archiveLoading
                 setOnClickListener { refreshArchive() }
-            }, LinearLayout.LayoutParams(48.dp, 48.dp))
+            }, LinearLayout.LayoutParams(48.dp, 46.dp))
         })
         archiveMessage?.let { message ->
             page.addView(nativeText(message, 13f, ERROR_TEXT).apply { setPadding(10.dp, 0, 10.dp, 6.dp) })
@@ -540,9 +537,7 @@ class MainActivity : ComponentActivity() {
 
         val list = ListView(this).apply {
             divider = null
-            isVerticalScrollBarEnabled = true
-            setPadding(0, 0, 0, 8.dp)
-            clipToPadding = false
+            isVerticalScrollBarEnabled = false
             cacheColorHint = Color.TRANSPARENT
             setBackgroundColor(SHELL_BACKGROUND)
         }
@@ -592,50 +587,42 @@ class MainActivity : ComponentActivity() {
 
     private inner class GameRowView(context: Context) : LinearLayout(context) {
         private val thumbnail = GameThumbnailView(context, "", "white")
-        private val perfIcon = nativeText("", 16f, ACCENT).apply {
+        private val perfIcon = nativeText("", 24f, 0xffbdbdbd.toInt()).apply {
             typeface = iconTypeface
             gravity = Gravity.CENTER
         }
-        private val titleView = nativeText("", 12f, TEXT_MUTED)
-        private val dateView = nativeText("", 11f, TEXT_MUTED)
-        private val whiteName = nativeText("", 14f, TEXT_PRIMARY, true)
-        private val blackName = nativeText("", 14f, TEXT_PRIMARY, true)
-        private val whiteRating = nativeText("", 12f, TEXT_MUTED)
-        private val blackRating = nativeText("", 12f, TEXT_MUTED)
-        private val resultView = nativeText("", 12f, GAME_DRAW, true).apply {
-            maxLines = 2
+        private val titleView = nativeText("", 15f, 0xffcccccc.toInt())
+        private val dateView = nativeText("", 12f, TEXT_MUTED)
+        private val matchupView = nativeText("", 14f, 0xffdddddd.toInt(), true).apply {
+            gravity = Gravity.CENTER
         }
-        private val analysisView = nativeText("", 11f, TEXT_MUTED)
+        private val ratingsView = nativeText("", 11f, TEXT_MUTED).apply {
+            gravity = Gravity.CENTER
+        }
+        private val resultView = nativeText("", 10f, GAME_DRAW)
+        private val analysisView = nativeText("", 10f, 0xff8b8b8b.toInt())
 
         init {
             orientation = HORIZONTAL
-            gravity = Gravity.TOP
-            setPadding(12.dp, 14.dp, 12.dp, 14.dp)
-            minimumHeight = 158.dp
-            val previewSize = if (resources.configuration.screenWidthDp < 380) 96 else 112
-            addView(thumbnail, LayoutParams(previewSize.dp, previewSize.dp).apply { marginEnd = 12.dp })
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(8.dp, 8.dp, 8.dp, 8.dp)
+            minimumHeight = 136.dp
+            addView(thumbnail, LayoutParams(120.dp, 120.dp).apply { marginEnd = 10.dp })
             addView(LinearLayout(context).apply {
                 orientation = VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
                 addView(LinearLayout(context).apply {
                     orientation = HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    addView(perfIcon, LayoutParams(20.dp, 22.dp).apply { marginEnd = 3.dp })
-                    addView(titleView, LayoutParams(0, 22.dp, 1f))
+                    addView(perfIcon, LayoutParams(30.dp, 30.dp).apply { marginEnd = 3.dp })
+                    addView(titleView, LayoutParams(0, 30.dp, 1f))
                 })
-                addView(playerLine("○", whiteName, whiteRating))
-                addView(playerLine("●", blackName, blackRating))
-                addView(resultView.apply { setPadding(0, 6.dp, 0, 0) })
-                addView(dateView.apply { setPadding(0, 4.dp, 0, 0) })
+                addView(dateView.apply { setPadding(33.dp, 0, 0, 7.dp) })
+                addView(matchupView)
+                addView(ratingsView)
+                addView(resultView.apply { setPadding(0, 7.dp, 0, 0) })
                 addView(analysisView.apply { setPadding(0, 4.dp, 0, 0) })
             }, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        }
-
-        private fun playerLine(symbol: String, name: TextView, rating: TextView) = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(nativeText(symbol, 13f, TEXT_MUTED), LayoutParams(19.dp, 27.dp))
-            addView(name, LayoutParams(0, 27.dp, 1f))
-            addView(rating.apply { setPadding(6.dp, 0, 0, 0) }, LayoutParams(LayoutParams.WRAP_CONTENT, 27.dp))
         }
 
         fun bind(game: JSONObject, position: Int) {
@@ -651,23 +638,21 @@ class MainActivity : ComponentActivity() {
             ).filter(String::isNotBlank).joinToString(" · ")
             dateView.text = DateFormat.getDateInstance(DateFormat.MEDIUM)
                 .format(Date(game.optLong("last_move_at_ms")))
-            whiteName.text = white
-            blackName.text = black
-            whiteRating.text = playerRating(game.optJSONObject("white")).takeIf { it > 0 }?.toString() ?: "—"
-            blackRating.text = playerRating(game.optJSONObject("black")).takeIf { it > 0 }?.toString() ?: "—"
+            matchupView.text = "$white  ⚔  $black"
+            ratingsView.text = listOf(
+                playerRating(game.optJSONObject("white")).takeIf { it > 0 }?.toString() ?: "—",
+                playerRating(game.optJSONObject("black")).takeIf { it > 0 }?.toString() ?: "—",
+            ).joinToString("    ⚔    ")
             val result = gameResultPresentation(game, white, black)
-            val outcome = when (result.color) { GAME_WIN -> "↑  Won"; GAME_LOSS -> "↓  Lost"; else -> "½  Draw" }
-            resultView.text = "$outcome · ${game.optString("result")}"
-            resultView.contentDescription = result.text
+            resultView.text = result.text
             resultView.setTextColor(result.color)
-            analysisView.text = if (game.optBoolean("analyzable")) "Open analysis  ›"
+            analysisView.text = if (game.optBoolean("analyzable")) "▥  Computer analysis available"
                 else "⚠  ${game.optString("analysis_block_reason").ifBlank { "Analysis unavailable" }}"
-            analysisView.setTextColor(if (game.optBoolean("analyzable")) TEXT_MUTED else ERROR_TEXT)
-            background = touchBackground(if (position % 2 == 0) SURFACE else SHELL_BACKGROUND)
+            analysisView.setTextColor(if (game.optBoolean("analyzable")) 0xff858585.toInt() else 0xff9a6a64.toInt())
+            setBackgroundColor(if (position % 2 == 0) 0xff292824.toInt() else 0xff302f2a.toInt())
             isClickable = game.optBoolean("analyzable")
             isFocusable = isClickable
             alpha = if (isClickable) 1f else .68f
-            contentDescription = "$white ${whiteRating.text}, $black ${blackRating.text}. ${result.text} ${titleView.text}. ${dateView.text}"
             setOnClickListener(if (isClickable) View.OnClickListener {
                 archiveMessage = "Loading game…"
                 nativeBridge.loadArchivedGame(game.optString("id"))
@@ -754,8 +739,7 @@ class MainActivity : ComponentActivity() {
         val state = JSONObject(nativeBridge.getConnectionState())
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            if (navigation.keypadOpen) setPadding(10.dp, 4.dp, 10.dp, 2.dp)
-            else setPadding(18.dp, 20.dp, 18.dp, 12.dp)
+            setPadding(10.dp, 4.dp, 10.dp, 2.dp)
             if (navigation.keypadOpen && !state.optBoolean("paired")) addView(pairingKeypad())
             else {
                 addView(TextView(this@MainActivity).apply {
@@ -899,7 +883,7 @@ class MainActivity : ComponentActivity() {
         addView(LinearLayout(this@MainActivity).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(12.dp, 18.dp, 12.dp, 12.dp)
-            setBackgroundColor(SURFACE)
+            setBackgroundColor(0xff252525.toInt())
             addView(TextView(this@MainActivity).apply {
                 text = "InstinctaZero"
                 setTextColor(Color.WHITE)
@@ -920,16 +904,16 @@ class MainActivity : ComponentActivity() {
         setOnClickListener { action() }
     }.also { it.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 50.dp) }
 
-    private fun shellCard(title: String, subtitle: String, primary: Boolean = false, action: () -> Unit): View = LinearLayout(this).apply {
+    private fun shellCard(title: String, subtitle: String, action: () -> Unit): View = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         isClickable = true
         isFocusable = true
-        setPadding(18.dp, if (primary) 24.dp else 18.dp, 18.dp, if (primary) 24.dp else 18.dp)
-        background = touchBackground(if (primary) 0xff332c22.toInt() else SURFACE, if (primary) 0xff8f734a.toInt() else LINE, 8)
+        setPadding(18.dp, 17.dp, 18.dp, 17.dp)
+        background = roundedBackground(0xff333333.toInt(), 1, 0xff4c4c4c.toInt(), 7)
         addView(TextView(this@MainActivity).apply {
-            text = "$title  ›"
-            setTextColor(if (primary) ACCENT else TEXT_PRIMARY)
-            textSize = if (primary) 22f else 18f
+            text = title
+            setTextColor(Color.WHITE)
+            textSize = 18f
             typeface = Typeface.DEFAULT_BOLD
         })
         addView(TextView(this@MainActivity).apply {
@@ -942,9 +926,7 @@ class MainActivity : ComponentActivity() {
     }.also { it.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT) }
 
     private fun actionButton(label: String, action: () -> Unit): Button = shellButton(label, 15f).apply {
-        backgroundTintList = null
-        background = touchBackground(SURFACE, LINE, 5)
-        minimumHeight = 48.dp
+        backgroundTintList = ColorStateList.valueOf(0xff4b4b4b.toInt())
         setOnClickListener { action() }
     }
 
@@ -952,12 +934,11 @@ class MainActivity : ComponentActivity() {
         text = label
         textSize = size
         isAllCaps = false
-        setTextColor(TEXT_PRIMARY)
+        setTextColor(Color.WHITE)
         minWidth = 0
         minHeight = 0
         setPadding(8.dp, 0, 8.dp, 0)
-        backgroundTintList = null
-        background = touchBackground(Color.TRANSPARENT)
+        backgroundTintList = ColorStateList.valueOf(Color.TRANSPARENT)
     }
 
     private fun roundedBackground(fill: Int, strokeWidth: Int, stroke: Int, radius: Int) = GradientDrawable().apply {
@@ -965,12 +946,6 @@ class MainActivity : ComponentActivity() {
         setStroke(strokeWidth.dp, stroke)
         cornerRadius = radius.dp.toFloat()
     }
-
-    private fun touchBackground(fill: Int, stroke: Int = Color.TRANSPARENT, radius: Int = 0) = RippleDrawable(
-        ColorStateList.valueOf(0x33dbb77c),
-        roundedBackground(fill, if (stroke == Color.TRANSPARENT) 0 else 1, stroke, radius),
-        roundedBackground(Color.WHITE, 0, Color.TRANSPARENT, radius),
-    )
 
     private fun connectionSummary(): String = JSONObject(nativeBridge.getConnectionState()).let { state ->
         if (state.optBoolean("paired")) "Paired as ${state.optString("deviceName").ifBlank { "InstinctaZero Android" }}"
@@ -1021,16 +996,12 @@ class MainActivity : ComponentActivity() {
     )
 
     companion object {
-        private val SHELL_BACKGROUND = 0xff191918.toInt()
-        private val HEADER_BACKGROUND = 0xff191918.toInt()
-        private val SURFACE = 0xff232220.toInt()
-        private val LINE = 0xff3b3934.toInt()
-        private val ACCENT = 0xffdbb77c.toInt()
-        private val TEXT_PRIMARY = 0xffeeeae2.toInt()
-        private val TEXT_MUTED = 0xffada89e.toInt()
+        private val SHELL_BACKGROUND = 0xff2b2b2b.toInt()
+        private val HEADER_BACKGROUND = 0xff222222.toInt()
+        private val TEXT_MUTED = 0xffaaaaaa.toInt()
         private val ERROR_TEXT = 0xffff9e80.toInt()
-        private val GAME_WIN = 0xffa8c783.toInt()
-        private val GAME_LOSS = 0xffe19588.toInt()
+        private val GAME_WIN = 0xff7fa650.toInt()
+        private val GAME_LOSS = 0xffb85c54.toInt()
         private val GAME_DRAW = 0xffa5a5a5.toInt()
     }
 }

@@ -1,7 +1,7 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.5.0). Before producing a release APK, rebuild and verify the two
+(version 0.5.1). Before producing a release APK, rebuild and verify the two
 checked-in browser assets from their retained sources:
 
 ```bash
@@ -38,13 +38,9 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 15 / 0.5.0 release values;
+- versionCode/versionName are the intended 16 / 0.5.1 release values;
 - `npm run check`, `testDebugUnitTest`, release lint, and the signed release
   build all pass;
-- native phone previews and `npm run test:phone` pass; visually inspect the
-  generated Home, games, Leela, moves, book, and settings PNGs at 360–412 px;
-- the connected USB phone is a tethering router, not a test device. Leave its
-  connection untouched; use local previews or an isolated emulator;
 - the APK installs and opens on native Home, while Analysis opens at the
   standard starting position;
 - system dark mode does not recolour the board or turn all pieces white;

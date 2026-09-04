@@ -1,16 +1,13 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.5.0 is a compact, legacy-Lichess-inspired analysis app.
+InstinctaZero Android 0.5.1 is a compact, legacy-Lichess-inspired analysis app.
+
+This release restores the exact pre-redesign v0.4.7 app sources, with a higher
+version number for an in-place update that retains saved studies and pairing.
 It opens on a native Home screen; Analysis opens at the standard starting
 position and provides a legal interactive board, local variation tree, live
 Leela lines and arrows, opening-book results, and move navigation. The
 evaluation-chart tab is intentionally blank in this release.
-
-The phone interface uses warm charcoal surfaces, amber selection, and the familiar
-wooden Chessground board. Labeled tabs and larger touch controls sit below the
-board, while the White-perspective Leela evaluation stays visible in the header.
-Engine variations and book results use larger type; the native game archive shows
-each player and rating on its own line with clear win, loss, and draw results.
 
 The app pairs with one InstinctaZero PC using a short-lived code. It does not
 sign into Lichess directly or contain a Lichess token. Instead, pairing signs the
@@ -109,7 +106,7 @@ account has an ongoing game.
 
 ## Build from source
 
-Requirements: JDK 17, Android SDK (compile SDK 35), Node.js 20+ with npm for the
+Requirements: JDK 17, Android SDK (compile SDK 35), Node.js with npm for the
 checked-in browser bundles.
 
 ```bash
@@ -146,16 +143,3 @@ and `app/src/main/assets/licenses/`. See
 [`web-src/legacy-chessground/PROVENANCE.md`](web-src/legacy-chessground/PROVENANCE.md)
 and [`web-src/chess-rules-PROVENANCE.md`](web-src/chess-rules-PROVENANCE.md) for
 the exact upstream revisions and rebuild procedure.
-
-## Phone previews
-
-`PhonePresentationTest` renders the actual native Home and game-row views using
-Robolectric's native graphics at 360, 390, and 412 dp widths. The test does not
-initialize pairing or network clients. PNGs are written under
-`app/build/reports/phone-preview/`.
-
-For the packaged analysis UI, run `npx playwright install chromium` in `web`,
-then `npm run test:phone`. This serves local APK assets with a fake native bridge,
-checks touch navigation and saved-state restoration at three portrait sizes,
-and writes screenshots to the same directory. `PHONE_PREVIEW_CHROMIUM` can select
-an already installed Chromium executable. No physical device or live service is used.
