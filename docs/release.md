@@ -1,7 +1,7 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.4.6). Before producing a release APK, rebuild and verify the two
+(version 0.4.7). Before producing a release APK, rebuild and verify the two
 checked-in browser assets from their retained sources:
 
 ```bash
@@ -38,7 +38,7 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 13 / 0.4.6 release values;
+- versionCode/versionName are the intended 14 / 0.4.7 release values;
 - `npm run check`, `testDebugUnitTest`, release lint, and the signed release
   build all pass;
 - the APK installs and opens on native Home, while Analysis opens at the
@@ -56,6 +56,9 @@ Before publishing, at minimum verify:
   imported games render immediately, and an archived analysis from the former
   account safely detaches instead of leaving the engine in a 404 error state;
 - Leela streams progressive lines/arrows and cancellation closes its request;
+- DNS-address and TLS-handshake failures advance to another Funnel ingress;
+  read-only requests may retry, while pairing, account selection, archive sync,
+  and analysis cannot replay after request transmission begins;
 - a local study, selected variation, cursor, orientation, and game context are
   restored after Activity/process recreation;
 - advancing through the canonical continuation inherits the cached response arrow

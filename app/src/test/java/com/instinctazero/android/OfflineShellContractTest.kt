@@ -51,6 +51,7 @@ class OfflineShellContractTest {
         val page = projectFile("src/main/assets/analysis/index.html").readText()
         val css = projectFile("src/main/assets/analysis/analysis.css").readText()
         val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
+        val httpPolicy = projectFile("src/main/java/com/instinctazero/android/GatewayHttpPolicy.kt").readText()
 
         assertTrue(manifest.contains("android.permission.INTERNET"))
         assertTrue(manifest.contains("android:usesCleartextTraffic=\"false\""))
@@ -75,8 +76,11 @@ class OfflineShellContractTest {
         assertFalse(activity.contains("requested.optInt(\"multipv\""))
         assertFalse(activity.contains(".putInt(\"multipv\""))
         assertFalse(activity.contains("put(\"multipv\", parsed.optInt"))
-        assertTrue(activity.contains("readTimeout(30, TimeUnit.SECONDS)"))
-        assertTrue(activity.contains("readTimeout(0, TimeUnit.MILLISECONDS)"))
+        assertTrue(activity.contains("GatewayHttpPolicy.restClient()"))
+        assertTrue(activity.contains("GatewayHttpPolicy.streamClient(restHttp)"))
+        assertTrue(httpPolicy.contains("retryOnConnectionFailure(true)"))
+        assertTrue(httpPolicy.contains("readTimeout(30, TimeUnit.SECONDS)"))
+        assertTrue(httpPolicy.contains("readTimeout(0, TimeUnit.MILLISECONDS)"))
         assertTrue(activity.contains("streaming = true"))
         assertTrue(activity.contains("nativeBridge.cancelAll(\"backgrounded\")"))
         assertTrue(activity.contains("calls[id] = pending"))
@@ -84,6 +88,26 @@ class OfflineShellContractTest {
         assertTrue(activity.contains("value.cancel()"))
         assertFalse(activity.contains("exact-sycl"))
         assertFalse(activity.contains("experimental-hetero-int8"))
+    }
+
+    @Test
+    fun gatewayRetriesRoutesWithoutReplayingUnsafeOrLongLivedPosts() {
+        val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
+        val policy = projectFile("src/main/java/com/instinctazero/android/GatewayHttpPolicy.kt").readText()
+        val syncStart = activity.indexOf("private fun refreshArchiveOnWorker")
+        val syncEnd = activity.indexOf("private fun refreshSessionOnWorker", syncStart)
+        val sync = activity.substring(syncStart, syncEnd)
+        val postStart = activity.indexOf("private fun authorizedPost")
+        val postEnd = activity.indexOf("private fun parseStudyRequest", postStart)
+        val authorizedPost = activity.substring(postStart, postEnd)
+
+        assertTrue(policy.contains("retryOnConnectionFailure(true)"))
+        assertTrue(policy.contains("override fun isOneShot(): Boolean = true"))
+        assertTrue(sync.contains(".url(apiUrl(\"sync\"))"))
+        assertTrue(sync.contains("GatewayHttpPolicy.nonReplayable"))
+        assertTrue(authorizedPost.contains("if (streaming) GatewayHttpPolicy.nonReplayable(body) else body"))
+        assertTrue(activity.contains("GatewayHttpPolicy.nonReplayable(\n            JSONObject().put(\"code\""))
+        assertTrue(activity.contains("GatewayHttpPolicy.nonReplayable(\n                JSONObject().put(\"username\""))
     }
 
     @Test

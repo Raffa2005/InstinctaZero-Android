@@ -1,6 +1,6 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.4.6 is a compact, legacy-Lichess-inspired analysis app.
+InstinctaZero Android 0.4.7 is a compact, legacy-Lichess-inspired analysis app.
 It opens on a native Home screen; Analysis opens at the standard starting
 position and provides a legal interactive board, local variation tree, live
 Leela lines and arrows, opening-book results, and move navigation. The
@@ -21,6 +21,12 @@ a dedicated, path-limited InstinctaZero HTTPS gateway at
 `https://rafael-ms-7e34.tail273ae6.ts.net:8443`. It is a public HTTPS endpoint
 despite the hostname: the phone does not need the Tailscale app, Tailscale DNS,
 a VPN connection, or any manual network setup.
+
+The native HTTP client tries the other addresses returned for the Funnel host
+when an ingress route fails during connection or TLS setup. Ordinary read-only
+requests may be retried. Pairing, account selection, archive `/sync`, and live
+analysis requests are never replayed after their request body starts; analysis
+also remains a single long-lived stream rather than being silently restarted.
 
 ## Current scope
 

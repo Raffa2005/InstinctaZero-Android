@@ -44,11 +44,9 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 import okhttp3.Call
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
@@ -1091,18 +1089,11 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     private val executor = Executors.newCachedThreadPool()
     private val calls = ConcurrentHashMap<String, PendingCall>()
     @Volatile private var webView: WebView? = null
-    private val restHttp = OkHttpClient.Builder()
-        .retryOnConnectionFailure(false)
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+    private val restHttp = GatewayHttpPolicy.restClient()
     // The backend heartbeat is every 10 seconds. A read timeout on this long-lived response can
     // race engine startup or ordinary network jitter, so only explicit request/lifecycle
     // cancellation terminates analysis. This client shares the bounded connect/write settings.
-    private val streamHttp = restHttp.newBuilder()
-        .readTimeout(0, TimeUnit.MILLISECONDS)
-        .build()
+    private val streamHttp = GatewayHttpPolicy.streamClient(restHttp)
     private val encryptedPreferences by lazy {
         val key = MasterKey.Builder(activity).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
         EncryptedSharedPreferences.create(
@@ -1357,8 +1348,10 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     }
 
     private fun pairOnWorker(id: String, pending: PendingCall, code: String, deviceName: String) {
-        val body = JSONObject().put("code", code).put("device_name", deviceName).toString()
-            .toRequestBody("application/json; charset=utf-8".toMediaType())
+        val body = GatewayHttpPolicy.nonReplayable(
+            JSONObject().put("code", code).put("device_name", deviceName).toString()
+                .toRequestBody("application/json; charset=utf-8".toMediaType()),
+        )
         val call = restHttp.newCall(
             Request.Builder().url(apiUrl("pair/claim")).post(body).build(),
         )
@@ -1404,7 +1397,9 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
                 pending,
                 Request.Builder().url(apiUrl("sync"))
                     .header("Authorization", "Bearer $token")
-                    .post("{}".toRequestBody("application/json; charset=utf-8".toMediaType()))
+                    .post(GatewayHttpPolicy.nonReplayable(
+                        "{}".toRequestBody("application/json; charset=utf-8".toMediaType()),
+                    ))
                     .build(),
                 256 * 1024,
             )
@@ -1468,8 +1463,10 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
             return
         }
         try {
-            val body = JSONObject().put("username", username).toString()
-                .toRequestBody("application/json; charset=utf-8".toMediaType())
+            val body = GatewayHttpPolicy.nonReplayable(
+                JSONObject().put("username", username).toString()
+                    .toRequestBody("application/json; charset=utf-8".toMediaType()),
+            )
             val session = executeJson(
                 pending,
                 Request.Builder().url(apiUrl("account/select"))
@@ -1657,12 +1654,13 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     private fun authorizedPost(path: String, payload: JSONObject, streaming: Boolean = false): Call? {
         val token = encryptedPreferences.getString(TOKEN_KEY, null) ?: return null
         val body = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+        val requestBody = if (streaming) GatewayHttpPolicy.nonReplayable(body) else body
         return (if (streaming) streamHttp else restHttp).newCall(
             Request.Builder()
                 .url(apiUrl(path))
                 .header("Authorization", "Bearer $token")
                 .header("Accept", "application/json, text/event-stream")
-                .post(body)
+                .post(requestBody)
                 .build(),
         )
     }
