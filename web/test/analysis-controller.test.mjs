@@ -409,7 +409,8 @@ test('all positive-visit engine lines remain visible and the prior/visit bar is 
 
 test('navigation buttons blur, stop globally, and repeat quickly until the tree boundary', async () => {
   const [controller, style] = await Promise.all([readFile(controllerUrl, 'utf8'), readFile(styleUrl, 'utf8')]);
-  const source = controller.slice(controller.indexOf('function stopActiveNavigation'), controller.indexOf("  document.querySelectorAll('.tabs [data-tab]')"));
+  const navigationStart = controller.indexOf('function stopActiveNavigation');
+  const source = controller.slice(navigationStart, controller.indexOf("  document.querySelectorAll('.tabs [data-tab]')", navigationStart));
   let activeNavigationStop = null, delayed = null, repeating = null, clearedIntervals = 0, restored = [];
   const button = { disabled:false, blurCount:0, blur() { this.blurCount += 1; }, setPointerCapture() {} };
   const targets = [{id:1},{id:2},null];

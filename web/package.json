@@ -10,10 +10,12 @@
     "check:legacy-chessground": "tsc --project ../web-src/legacy-chessground/tsconfig.json --noEmit && node build-legacy-chessground.mjs --check",
     "check:chess-rules": "node build-chess-rules.mjs --check",
     "check": "npm run check:legacy-chessground && npm run check:chess-rules && npm run test:analysis-controller",
-    "test:analysis-controller": "node --test test/analysis-controller.test.mjs"
+    "test:analysis-controller": "node --test test/analysis-controller.test.mjs",
+    "test:phone": "node test/phone-preview.mjs"
   },
   "devDependencies": {
     "esbuild": "0.25.0",
+    "playwright": "1.62.1",
     "typescript": "2.8.1"
   },
   "dependencies": {
