@@ -1,27 +1,16 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.6.2 is the restored simple analysis app from v0.5.1.
+InstinctaZero Android 0.6.3 is the restored simple analysis app from v0.5.1.
 
 The entire v0.6.0/v0.6.1 feature batch is reverted. Board assets, interface,
 navigation, Return to mainline symbol and portrait activity configuration match
 v0.5.1 (whose app sources matched v0.4.7). The higher version number permits an
 in-place update; do not uninstall or clear app data.
 
-One native storage safeguard differs from that baseline: the simple board writes
-to `simple_analysis_after_rollback_v1`, not to the richer version's
-`local_study_state` preferences. On first use it copies the preserved
-`study_library/legacy-analysis.json` board when available, otherwise a compatible
-active state. Custom-FEN studies without a stored-game identity are retained but
-not opened by the old standard-start analysis client.
+Production app sources match v0.5.1 exactly. No additional migration or protection
+of newer in-app study/repertoire state is included, as requested. Local PGN files
+are not deleted or modified. Pairing and the PC archive are unchanged.
 
-All `study_library` chapter/repertoire files (including recovery sidecars) and the
-original active-state preferences are left untouched. New studies, comments, PGN
-metadata and repertoire flags are therefore recoverable, although this simple UI
-cannot browse them. Recovery would require a compatible data-recovery build signed
-with the same key and an equal/higher version code. Installing an older APK is not
-the normal Android update path. External PGN files, pairing and the PC archive are
-unchanged. The simple editor may expose only its original limited tree view; that
-does not truncate or overwrite the preserved richer originals.
 It opens on a native Home screen; Analysis opens at the standard starting
 position and provides a legal interactive board, local variation tree, live
 Leela lines and arrows, opening-book results, and move navigation. The

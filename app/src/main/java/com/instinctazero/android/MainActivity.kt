@@ -1108,7 +1108,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         activity.getSharedPreferences("study_ui_settings", Context.MODE_PRIVATE)
     }
     private val studyPreferences by lazy {
-        RollbackStudyPreservation.open(activity)
+        activity.getSharedPreferences("local_study_state", Context.MODE_PRIVATE)
     }
     private val archivePreferences by lazy {
         activity.getSharedPreferences("completed_game_cache", Context.MODE_PRIVATE)
