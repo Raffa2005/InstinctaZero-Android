@@ -1,51 +1,27 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.6.1 is a compact, legacy-Lichess-inspired analysis app.
+InstinctaZero Android 0.6.2 is the restored simple analysis app from v0.5.1.
 
-This release keeps the simple interface restored in v0.5.1 and adds saved studies,
-chapter navigation, PGN import/export and local repertoire matching. Install over
-the existing app to retain its board, settings and pairing.
+The entire v0.6.0/v0.6.1 feature batch is reverted. Board assets, interface,
+navigation, Return to mainline symbol and portrait activity configuration match
+v0.5.1 (whose app sources matched v0.4.7). The higher version number permits an
+in-place update; do not uninstall or clear app data.
 
-### Studies and repertoire
+One native storage safeguard differs from that baseline: the simple board writes
+to `simple_analysis_after_rollback_v1`, not to the richer version's
+`local_study_state` preferences. On first use it copies the preserved
+`study_library/legacy-analysis.json` board when available, otherwise a compatible
+active state. Custom-FEN studies without a stored-game identity are retained but
+not opened by the old standard-start analysis client.
 
-The chapter control is on the left and its drawer slides from the physical left
-edge. New file imports use the PGN filename (without its extension) as the study
-name. Existing study names are preserved. See [ChessTempo transfer](docs/chesstempo-transfer.md)
-for official export options and the current large-repertoire limits.
-
-Open **Studies / PGN** on Home or the chapter icon on the analysis board. Create
-independent studies and chapters; each chapter autosaves in its own private file.
-Opening a PGN creates a new study, with each game as a chapter. Use **More → PGN
-files** to import or export. Variations, comments, annotations and headers survive
-round trips. Android's file picker and PGN Open/Share intents are supported. There
-are no in-app text-entry fields. Current limits: 1 MB per import/chapter, 100 games
-per import, 4096 nodes, 512 plies per line. Unopened chapter trees are not retained
-in memory. Studies are **local to this phone**, not synchronized to the PC; export
-PGN for a portable backup. Uninstalling clears private local storage.
-
-Under **More → Repertoire**, mark the study's chapters for White or Black. Edit
-the chapter using normal moves and variation deletion. The local position graph
-recognizes transpositions and shows whose move first leaves the repertoire; tap
-the status strip to switch the comparison side. Archived Lichess game PGNs are
-never written or changed; their analysis remains a scratch board.
-
-Mainline moves are bold and unindented; side lines are subordinate. Long-press a
-branch to promote it one sibling position, make it mainline, or delete it. Ordinary
-Forward still chooses the canonical first child. Return to mainline is unchanged.
-
-### Analysis resilience and reply preparation
-
-An interrupted or stalled stream offers **Retry Leela** directly on the engine
-panel. A started analysis is never silently replayed. After a completed search,
-optional **More → Prepare reply arrows** prepares the top move's replies with one
-short search capped at 200 nodes. It does not recursively search further positions,
-and navigation/backgrounding cancels it. Multiple cached reply arrows can then
-appear instantly; the normal full search replaces the shallow snapshot. This uses
-the shared PC engine. It is not possible to show unsearched alternatives instantly.
-
-Custom-FEN PGNs can be edited and exported locally. The existing PC gateway accepts
-standard-start studies or stored games only; custom-FEN engine/book requests are
-explicitly disabled rather than sent with an incorrect starting position.
+All `study_library` chapter/repertoire files (including recovery sidecars) and the
+original active-state preferences are left untouched. New studies, comments, PGN
+metadata and repertoire flags are therefore recoverable, although this simple UI
+cannot browse them. Recovery would require a compatible data-recovery build signed
+with the same key and an equal/higher version code. Installing an older APK is not
+the normal Android update path. External PGN files, pairing and the PC archive are
+unchanged. The simple editor may expose only its original limited tree view; that
+does not truncate or overwrite the preserved richer originals.
 It opens on a native Home screen; Analysis opens at the standard starting
 position and provides a legal interactive board, local variation tree, live
 Leela lines and arrows, opening-book results, and move navigation. The
