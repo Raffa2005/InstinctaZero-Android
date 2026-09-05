@@ -3,6 +3,8 @@ package com.instinctazero.android
 import android.annotation.SuppressLint
 import android.content.res.ColorStateList
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -30,6 +32,7 @@ import android.widget.ListView
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import androidx.webkit.WebSettingsCompat
@@ -83,6 +86,59 @@ class MainActivity : ComponentActivity() {
     private var archiveMessage: String? = null
     private var archiveAdapter: GameArchiveAdapter? = null
     private var pendingArchivedGame: JSONObject? = null
+    private var pendingPgn: String? = null
+    private var pendingLibrary = false
+    private var pendingExport: String? = null
+    private var renderedScreen: ShellScreen? = null
+    private val documentWorker = Executors.newSingleThreadExecutor()
+    private val openPgn = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) readPgnDocument(uri)
+    }
+    private val savePgn = registerForActivityResult(ActivityResultContracts.CreateDocument("application/x-chess-pgn")) { uri ->
+        val pgn = pendingExport
+        pendingExport = null
+        if (uri != null && pgn == null) android.widget.Toast.makeText(this, "Export interrupted. Your chapter is still saved; export it again.", android.widget.Toast.LENGTH_LONG).show()
+        if (uri != null && pgn != null) documentWorker.execute {
+            val result = runCatching { contentResolver.openOutputStream(uri, "wt")!!.bufferedWriter().use { it.write(pgn) } }
+            runOnUiThread { android.widget.Toast.makeText(this, if (result.isSuccess) "PGN saved" else "Could not save PGN", android.widget.Toast.LENGTH_LONG).show() }
+        }
+    }
+
+    fun importPgnDocument() { openPgn.launch(arrayOf("application/x-chess-pgn", "application/vnd.chess-pgn", "text/plain", "application/octet-stream")) }
+    fun exportPgnDocument(pgn: String) { pendingExport=pgn; savePgn.launch("InstinctaZero-study.pgn") }
+    private fun readPgnDocument(uri: Uri) {
+        if (uri.scheme != "content") return
+        documentWorker.execute {
+            val result=runCatching {
+                val bytes=contentResolver.openInputStream(uri)!!.use { input ->
+                    val out=java.io.ByteArrayOutputStream(); val buffer=ByteArray(8192)
+                    while (out.size() <= 1024 * 1024) { val count=input.read(buffer); if(count<0) break; out.write(buffer,0,count) }
+                    out.toByteArray()
+                }
+                require(bytes.size <= 1024 * 1024) { "PGN exceeds 1 MB." }
+                bytes.toString(Charsets.UTF_8)
+            }
+            runOnUiThread {
+                result.onSuccess { pendingPgn=it; showAnalysisScreen(); deliverPendingPgn() }
+                    .onFailure { android.widget.Toast.makeText(this, it.message ?: "Cannot open PGN", android.widget.Toast.LENGTH_LONG).show() }
+            }
+        }
+    }
+    private fun deliverPendingPgn() {
+        if (!webPageLoaded) return
+        val pgn=pendingPgn ?: return
+        pendingPgn=null
+        showAnalysisScreen()
+        webView.evaluateJavascript("window.InstinctaZero.importPgn(${JSONObject.quote(pgn)});void 0;", null)
+    }
+    private fun acceptPgnIntent(source: Intent?) {
+        if (source?.action == Intent.ACTION_VIEW) source.data?.let(::readPgnDocument)
+        else if (source?.action == Intent.ACTION_SEND) {
+            @Suppress("DEPRECATION") val uri=source.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+            if (uri != null) readPgnDocument(uri)
+            else source.getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.length <= 1024 * 1024 }?.let { pendingPgn=it }
+        }
+    }
     private val iconTypeface by lazy {
         Typeface.createFromAsset(assets, "analysis/fonts/fontawesome-webfont.ttf")
     }
@@ -162,7 +218,10 @@ class MainActivity : ComponentActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = handleShellBack()
         })
+        if (savedInstanceState == null) acceptPgnIntent(intent)
     }
+
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); acceptPgnIntent(intent); deliverPendingPgn() }
 
     override fun onResume() {
         super.onResume()
@@ -191,6 +250,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        documentWorker.shutdown()
         if (::nativeBridge.isInitialized) nativeBridge.close()
         if (::webView.isInitialized) {
             webView.removeJavascriptInterface(NativeAnalysisBridge.JS_OBJECT)
@@ -398,6 +458,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun renderNativeScreen() {
+        val enteringScreen = renderedScreen != navigation.screen
+        renderedScreen = navigation.screen
         if (navigation.screen != ShellScreen.GAMES) archiveAdapter = null
         nativeLayer.removeAllViews()
         val page = LinearLayout(this).apply {
@@ -411,6 +473,10 @@ class MainActivity : ComponentActivity() {
             else -> page.addView(homeContent(), weighted())
         }
         nativeLayer.addView(page, matchFrame())
+        if (enteringScreen && android.animation.ValueAnimator.areAnimatorsEnabled()) {
+            page.alpha = 0.65f
+            page.animate().alpha(1f).setDuration(110).start()
+        }
         if (navigation.drawerOpen) nativeLayer.addView(drawerOverlay(), matchFrame())
     }
 
@@ -466,8 +532,7 @@ class MainActivity : ComponentActivity() {
         }
     }.also { it.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 56.dp) }
 
-    private fun homeContent(): View {
-        val paired = nativeBridge.isPaired()
+    private fun homeContent(paired: Boolean = nativeBridge.isPaired(), summary: String = connectionSummary()): View {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(18.dp, 24.dp, 18.dp, 18.dp)
@@ -484,6 +549,11 @@ class MainActivity : ComponentActivity() {
                 setPadding(0, 6.dp, 0, 20.dp)
             })
             addView(shellCard("Analysis board", "Continue the board where you left it") { showAnalysisScreen() })
+            addView(shellCard("Studies / PGN", "Saved boards, chapters and repertoires") {
+                showAnalysisScreen()
+                if (webPageLoaded) webView.evaluateJavascript("window.InstinctaZero.openLibrary();void 0;", null)
+                else pendingLibrary = true
+            }.apply { (layoutParams as? LinearLayout.LayoutParams)?.topMargin = 12.dp })
             addView(shellCard(
                 "Games",
                 if (paired) archiveAccount.takeIf(String::isNotBlank)?.let { "Completed games · $it" }
@@ -492,7 +562,7 @@ class MainActivity : ComponentActivity() {
             ) { if (paired) showGamesScreen() else showProfileScreen() }.apply {
                 (layoutParams as? LinearLayout.LayoutParams)?.topMargin = 12.dp
             })
-            addView(shellCard("Account / PC", connectionSummary()) { showProfileScreen() }.apply {
+            addView(shellCard("Account / PC", summary) { showProfileScreen() }.apply {
                 (layoutParams as? LinearLayout.LayoutParams)?.topMargin = 12.dp
             })
         }
@@ -982,6 +1052,8 @@ class MainActivity : ComponentActivity() {
                 webPageLoaded = true
                 setAnalysisActive(navigation.screen == ShellScreen.ANALYSIS)
                 deliverPendingArchivedGame()
+                if (pendingLibrary) { pendingLibrary=false; webView.evaluateJavascript("window.InstinctaZero.openLibrary();void 0;", null) }
+                if (pendingPgn != null) { showAnalysisScreen(); deliverPendingPgn() }
             }
         }
     }
@@ -1079,7 +1151,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         private const val ACCOUNT_LIST_KEY = "paired_account_list"
         private const val MAX_REQUEST_JSON = 16 * 1024
         private const val MAX_SETTINGS_JSON = 2 * 1024
-        private const val MAX_STUDY_JSON = 256 * 1024
+        private const val MAX_STUDY_JSON = 1024 * 1024
         private const val MAX_ARCHIVE_JSON = 2 * 1024 * 1024
         private const val MAX_CACHED_ARCHIVE_JSON = 256 * 1024
         private val BOOK_SPEEDS = listOf("bullet", "blitz", "rapid", "classical", "correspondence")
@@ -1110,6 +1182,8 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     private val studyPreferences by lazy {
         activity.getSharedPreferences("local_study_state", Context.MODE_PRIVATE)
     }
+    private val studyLibrary by lazy { StudyLibrary(java.io.File(activity.filesDir, "study_library")) }
+    private var studySaveFailed = false
     private val archivePreferences by lazy {
         activity.getSharedPreferences("completed_game_cache", Context.MODE_PRIVATE)
     }
@@ -1175,6 +1249,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
             .putInt("nodes", nodes)
             .putInt("arrowCount", arrowCount)
             .putBoolean("leelaEnabled", leelaEnabled)
+            .putBoolean("prefetchEnabled", requested.optBoolean("prefetchEnabled", true))
             .putBoolean("arrowsEnabled", arrowsEnabled)
             .putString("engineBackend", engineBackend)
             .putString("appearance", appearance)
@@ -1189,7 +1264,25 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     }
 
     @JavascriptInterface
-    fun getStudyState(): String = studyPreferences.getString("state_v1", "{}") ?: "{}"
+    fun getStudyState(): String {
+        val raw=studyPreferences.getString("state_v1", "{}") ?: "{}"
+        return runCatching {
+            val state=JSONObject(raw)
+            if (state.optInt("v") == 1 && state.optString("gameId", "").let { it.isBlank() || it == "null" } && !state.has("boardId")) {
+                state.put("boardId", "legacy-analysis").put("studyId", "legacy-analysis").put("chapterTitle", "Chapter 1")
+                studyLibrary.save(state.toString())
+                studyPreferences.edit().putString("state_v1", state.toString()).apply()
+            }
+            state.toString()
+        }.getOrDefault(raw)
+    }
+
+    @JavascriptInterface fun listBoards(): String = runCatching { studyLibrary.list().toString() }.getOrDefault("[]")
+    @JavascriptInterface fun readBoard(id: String): String = runCatching { studyLibrary.read(id) }.getOrDefault("{}")
+    @JavascriptInterface fun saveBoard(raw: String): Boolean = runCatching { studyLibrary.save(raw) }.getOrDefault(false)
+    @JavascriptInterface fun deleteBoard(id: String): Boolean = runCatching { studyLibrary.delete(id); true }.getOrDefault(false)
+    @JavascriptInterface fun importPgn() { activity.runOnUiThread { activity.importPgnDocument() } }
+    @JavascriptInterface fun exportPgn(raw: String) { if (raw.length <= 2 * 1024 * 1024) activity.runOnUiThread { activity.exportPgnDocument(raw) } }
 
     @JavascriptInterface
     fun saveStudyState(rawState: String?): Boolean = try {
@@ -1198,9 +1291,15 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         require(parsed.optInt("v") == 1) { "Unsupported study state." }
         val cursor = parsed.optJSONArray("cursor") ?: JSONArray()
         require(cursor.length() <= 512) { "Study cursor is too long." }
+        if (parsed.has("boardId") && parsed.optString("gameId", "").let { it.isBlank() || it == "null" }) studyLibrary.save(parsed.toString())
         studyPreferences.edit().putString("state_v1", parsed.toString()).apply()
+        studySaveFailed = false
         true
     } catch (_: Exception) {
+        if (!studySaveFailed) activity.runOnUiThread {
+            android.widget.Toast.makeText(activity, "Could not save this chapter. Export PGN to keep a copy.", android.widget.Toast.LENGTH_LONG).show()
+        }
+        studySaveFailed = true
         false
     }
 
@@ -1208,7 +1307,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         val state = runCatching {
             JSONObject(studyPreferences.getString("state_v1", "{}") ?: "{}")
         }.getOrNull() ?: return
-        if (state.optString("gameId").isNotBlank()) {
+        if (state.optString("gameId").matches(Regex("[A-Za-z0-9]{8,16}"))) {
             studyPreferences.edit().remove("state_v1").apply()
         }
     }
@@ -1594,6 +1693,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
                 }
                 val source = response.body?.source() ?: throw IOException("Analysis gateway returned no stream.")
                 var event = "message"
+                var finished = false
                 val data = StringBuilder()
                 fun dispatchFrame() {
                     if (data.isEmpty()) return
@@ -1602,6 +1702,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
                     val wrapped = JSONObject()
                         .put("event", event)
                         .put("data", JSONObject(data.toString().trim()))
+                    if (event == "done" || event == "error" || event == "engine-error") finished = true
                     emit("onNativeAnalysis", id, wrapped.toString())
                     event = "message"
                     data.setLength(0)
@@ -1615,6 +1716,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
                     }
                 }
                 dispatchFrame()
+                if (!finished && !call.isCanceled()) emit("onNativeAnalysis", id, errorPayload("Analysis connection ended. Tap Retry Leela to reconnect."))
             }
         } catch (error: Exception) {
             if (!call.isCanceled()) emit("onNativeAnalysis", id, errorPayload(error.safeMessage(), error.gatewayCode()))
@@ -1733,6 +1835,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         .put("nodes", uiPreferences.getInt("nodes", 1000))
         .put("arrowCount", uiPreferences.getInt("arrowCount", 8).coerceIn(1, 8))
         .put("leelaEnabled", uiPreferences.getBoolean("leelaEnabled", true))
+        .put("prefetchEnabled", uiPreferences.getBoolean("prefetchEnabled", true))
         .put("arrowsEnabled", uiPreferences.getBoolean("arrowsEnabled", true))
         .put("engineBackend", uiPreferences.getString("engineBackend", "cpu"))
         .put("appearance", uiPreferences.getString("appearance", "brown"))

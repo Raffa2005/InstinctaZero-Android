@@ -1,7 +1,7 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.5.1). Before producing a release APK, rebuild and verify the two
+(version 0.6.0). Before producing a release APK, rebuild and verify the two
 checked-in browser assets from their retained sources:
 
 ```bash
@@ -38,7 +38,12 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 16 / 0.5.1 release values;
+- versionCode/versionName are the intended 17 / 0.6.0 release values;
+- `npm run test:phone` (Node 20+) covers studies, PGNs, chapters, repertoire,
+  mainline promotion, cached replies and explicit retry at 360–412 px. Inspect
+  the generated `app/build/reports/study-preview` PNGs. Never use the USB tethering
+  phone for testing;
+- atomic per-chapter persistence and archive-write rejection pass the native tests;
 - `npm run check`, `testDebugUnitTest`, release lint, and the signed release
   build all pass;
 - the APK installs and opens on native Home, while Analysis opens at the

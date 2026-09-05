@@ -124,6 +124,8 @@ class GatewayHttpPolicyTest {
             } catch (_: java.io.IOException) {
                 // Expected: the server saw request bytes, so retrying could duplicate the effect.
             }
+            // The client can observe disconnection before the mock server records the request.
+            assertNotNull(server.takeRequest(1, TimeUnit.SECONDS))
             assertEquals(1, server.requestCount)
         }
     }

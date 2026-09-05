@@ -277,7 +277,7 @@ class OfflineShellContractTest {
     fun localStudyStateIsBoundedVersionedAndStoredWithoutWebStorage() {
         val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
         val controller = projectFile("src/main/assets/analysis/analysis.js").readText()
-        assertTrue(activity.contains("MAX_STUDY_JSON = 256 * 1024"))
+        assertTrue(activity.contains("MAX_STUDY_JSON = 1024 * 1024"))
         assertTrue(activity.contains("fun getStudyState()"))
         assertTrue(activity.contains("fun saveStudyState"))
         assertTrue(activity.contains("require(parsed.optInt(\"v\") == 1)"))

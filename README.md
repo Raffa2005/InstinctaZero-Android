@@ -1,9 +1,46 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.5.1 is a compact, legacy-Lichess-inspired analysis app.
+InstinctaZero Android 0.6.0 is a compact, legacy-Lichess-inspired analysis app.
 
-This release restores the exact pre-redesign v0.4.7 app sources, with a higher
-version number for an in-place update that retains saved studies and pairing.
+This release keeps the simple interface restored in v0.5.1 and adds saved studies,
+chapter navigation, PGN import/export and local repertoire matching. Install over
+the existing app to retain its board, settings and pairing.
+
+### Studies and repertoire
+
+Open **Studies / PGN** on Home or the chapter icon on the analysis board. Create
+independent studies and chapters; each chapter autosaves in its own private file.
+Opening a PGN creates a new study, with each game as a chapter. Use **More → PGN
+files** to import or export. Variations, comments, annotations and headers survive
+round trips. Android's file picker and PGN Open/Share intents are supported. There
+are no in-app text-entry fields. Current limits: 1 MB per import/chapter, 100 games
+per import, 4096 nodes, 512 plies per line. Unopened chapter trees are not retained
+in memory. Studies are **local to this phone**, not synchronized to the PC; export
+PGN for a portable backup. Uninstalling clears private local storage.
+
+Under **More → Repertoire**, mark the study's chapters for White or Black. Edit
+the chapter using normal moves and variation deletion. The local position graph
+recognizes transpositions and shows whose move first leaves the repertoire; tap
+the status strip to switch the comparison side. Archived Lichess game PGNs are
+never written or changed; their analysis remains a scratch board.
+
+Mainline moves are bold and unindented; side lines are subordinate. Long-press a
+branch to promote it one sibling position, make it mainline, or delete it. Ordinary
+Forward still chooses the canonical first child. Return to mainline is unchanged.
+
+### Analysis resilience and reply preparation
+
+An interrupted or stalled stream offers **Retry Leela** directly on the engine
+panel. A started analysis is never silently replayed. After a completed search,
+optional **More → Prepare reply arrows** prepares the top move's replies with one
+short search capped at 200 nodes. It does not recursively search further positions,
+and navigation/backgrounding cancels it. Multiple cached reply arrows can then
+appear instantly; the normal full search replaces the shallow snapshot. This uses
+the shared PC engine. It is not possible to show unsearched alternatives instantly.
+
+Custom-FEN PGNs can be edited and exported locally. The existing PC gateway accepts
+standard-start studies or stored games only; custom-FEN engine/book requests are
+explicitly disabled rather than sent with an incorrect starting position.
 It opens on a native Home screen; Analysis opens at the standard starting
 position and provides a legal interactive board, local variation tree, live
 Leela lines and arrows, opening-book results, and move navigation. The

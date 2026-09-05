@@ -26,7 +26,7 @@ test('notation is an inline mainline and introduces structure only for real sibl
   const e5 = { id:2, color:'b', number:1, san:'e5', children:[] };
   const nf3 = { id:3, color:'w', number:2, san:'Nf3', children:[] };
   root.children = [e4]; e4.children = [e5]; e5.children = [nf3];
-  const render = new Function('safe', 'cursor', `${source}; return renderMoves;`)(String, nf3);
+  const render = new Function('safe', 'cursor', 'root', `${source}; return renderMoves;`)(String, nf3, root);
   const mainline = render(root);
   assert.doesNotMatch(mainline, /class="variations"/);
   assert.match(mainline, />1\.<\/span>e4/);
@@ -37,8 +37,9 @@ test('notation is an inline mainline and introduces structure only for real sibl
   const c5 = { id:4, color:'b', number:1, san:'c5', children:[] };
   e4.children = [e5, c5];
   const branches = render(root);
-  assert.equal((branches.match(/class="variation"/g) || []).length, 2);
-  assert.equal((branches.match(/1\.\.\./g) || []).length, 2);
+  assert.equal((branches.match(/class="variation"/g) || []).length, 1);
+  assert.equal((branches.match(/1\.\.\./g) || []).length, 1);
+  assert.equal((branches.match(/class="main-line"/g) || []).length, 3);
   assert.match(style, /\.variations\{display:block;/);
   assert.match(style, /\.variation\{display:block\}/);
 });
@@ -267,7 +268,7 @@ test('menus are touch-first full-panel views and Back dismisses them', async () 
 
   assert.match(controller, /function panelViewHtml\(\)/);
   assert.match(controller, /panel\.innerHTML = panelView \? panelViewHtml\(\)/);
-  assert.match(controller, /handleAndroidBack = function \(\) \{ if \(promotionPicker\)[^\n]*if \(panelView\) \{ closePanelView\(\); return true; \}/);
+  assert.match(controller, /handleAndroidBack = function \(\) \{[^\n]*if \(panelView\) \{ closePanelView\(\); return true; \}/);
   assert.doesNotMatch(controller, /study-overlay|overlay-card|document\.body\.appendChild\(overlay\)/);
   assert.match(style, /\.panel-view\{width:100%/);
   assert.match(style, /\.panel-buttons button\{min-height:40px/);
@@ -375,7 +376,7 @@ test('played PV is projected into a nodes-and-backend-keyed child cache until a 
   const engine = { lines:[], stats:null };
   const cursor = { analysisCache:inherited };
   let arrowLines = null;
-  const restore = new Function('engine', 'cursor', 'settings', 'finiteMetric', 'renderArrows', `${cacheSource}; return restoreCachedAnalysis;`)(engine, cursor, {nodes:4000,backend:'cpu'}, finiteMetric, lines => { arrowLines = lines; });
+  const restore = new Function('engine', 'cursor', 'settings', 'finiteMetric', 'renderArrows', `const responseCache=new Map(),cacheKey=()=>'',history=()=>[];${cacheSource}; return restoreCachedAnalysis;`)(engine, cursor, {nodes:4000,backend:'cpu'}, finiteMetric, lines => { arrowLines = lines; });
   restore();
   assert.deepEqual(engine.lines[0].pv, ['c7c5','g1f3']);
   assert.equal(engine.status, 'inherited');
