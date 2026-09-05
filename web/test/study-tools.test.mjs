@@ -6,6 +6,14 @@ import {readFile} from 'node:fs/promises';
 const require=createRequire(import.meta.url);
 const tools=require('../../app/src/main/assets/analysis/study-tools.js');
 const pgn='[Event "Training"]\n[White "Rafael"]\n[Black "Opponent"]\n\n1. e4 {Main idea} e5 (1... c5 2. Nf3 (2. Nc3) d6) (1... e6) 2. Nf3 $1 Nc6 *';
+test('study names prefer real PGN filenames and safely fall back for shared text',()=>{
+  assert.equal(tools.pgnStudyName('My Sicilian.PGN','Wrong event'),'My Sicilian');
+  assert.equal(tools.pgnStudyName('folder/White repertoire.pgn','?'),'White repertoire');
+  assert.equal(tools.pgnStudyName('C:\\chess\\Black.pgn','?'),'Black');
+  assert.equal(tools.pgnStudyName(null,'Training'),'Training');
+  assert.equal(tools.pgnStudyName('', '?'),'Imported study');
+  assert.equal(tools.pgnStudyName('Übung "e4".pgn','?'),'Übung "e4"');
+});
 test('PGN imports branches in canonical order and preserves comments, NAGs and headers',()=>{
   const [state]=tools.parsePgn(pgn,Chess);
   assert.deepEqual(state.tree[0].c.map(n=>n.u),['e7e5','c7c5','e7e6']);

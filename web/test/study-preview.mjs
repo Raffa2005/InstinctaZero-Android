@@ -161,9 +161,15 @@ try {
     await shot('study-menu');
     await page.getByRole('button',{name:'New study',exact:true}).tap();
     assert.deepEqual(await history(),[]);
-    await page.evaluate(()=>window.InstinctaZero.importPgn('[Event "Sicilian"]\n\n1. e4 e5 (1... c5 2. Nf3) (1... e6) *\n\n[Event "Second"]\n\n1. d4 d5 *'));
+    await page.evaluate(()=>window.InstinctaZero.importPgn('[Event "Sicilian"]\n\n1. e4 e5 (1... c5 2. Nf3) (1... e6) *\n\n[Event "Second"]\n\n1. d4 d5 *','My White Repertoire.pgn'));
     assert.equal(await page.locator('.library-item').count(),2);
+    assert.equal(await page.evaluate(()=>JSON.parse(window.__preview.saved).title),'My White Repertoire');
     await shot('chapters');
+    assert.equal((await page.locator('.chapter-sidebar').boundingBox()).x,0);
+    assert.ok((await page.locator('[data-chapters]').boundingBox()).x<width/2);
+    await page.evaluate(()=>document.documentElement.dir='rtl');
+    assert.equal((await page.locator('.chapter-sidebar').boundingBox()).x,0);
+    await page.evaluate(()=>document.documentElement.dir='ltr');
     await page.locator('.library-item').first().tap();
     assert.deepEqual(await history(),[]);
     await page.getByRole('button',{name:'More',exact:true}).tap();

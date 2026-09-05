@@ -1,4 +1,6 @@
 /* Small additions to the familiar grey/brown interface, not a replacement theme. */
+.library-shade>.chapter-sidebar{position:absolute;left:0;right:auto;top:0;bottom:0;direction:ltr;animation-name:chapter-from-left}
+@keyframes chapter-from-left{from{transform:translateX(-100%)}to{transform:translateX(0)}}
 .game-title strong,.game-title small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .panel-readout{min-height:32px}.panel-buttons-stack{gap:5px}.study-menu{overflow:hidden!important}.menu-grid+.panel-buttons button{padding:6px;min-height:40px;font-size:12px}
 .main-line>.move{font-size:14px;font-weight:bold;color:#f0ece2}.main-line>.move.current{color:white}.side-line>.move,.variation>.move{font-size:12px;color:#bbb}.notation-label{font-size:10px;letter-spacing:.06em;color:#c4a86f;margin:2px 4px 5px;text-transform:uppercase}.variations{margin:3px 0 5px 8px;border-left:2px solid #555;padding:1px 0 1px 8px}.variation{padding:2px 0}.moves{line-height:2}.move{min-height:28px}.move.current{color:white!important}.chapter-button{width:44px;height:48px;border:0;background:transparent;color:#aaa;font-size:19px;flex:none}

@@ -48,10 +48,10 @@
       if(!native().saveBoard(JSON.stringify(state))){message='Could not save the new chapter.';return open(studyId);}
       api.load(state);api.save();close();
     }
-    function importPgn(raw) {
+    function importPgn(raw, filename) {
       try {
         const games=tools.parsePgn(raw,Chess); api.save();
-        const studyId=id(), studyTitle=games[0].headers.Event && games[0].headers.Event!=='?'?games[0].headers.Event:'Imported study';
+        const studyId=id(), studyTitle=tools.pgnStudyName(filename,games[0].headers.Event);
         const states=games.map((g,i)=>Object.assign({v:1,boardId:i?id():studyId,studyId,title:studyTitle,chapterTitle:g.headers.White&&g.headers.Black?g.headers.White+' – '+g.headers.Black:'Chapter '+(i+1),cursor:[],tab:'moves'},g));
         const written=[];
         for(const state of states) {

@@ -86,7 +86,8 @@ class MainActivity : ComponentActivity() {
     private var archiveMessage: String? = null
     private var archiveAdapter: GameArchiveAdapter? = null
     private var pendingArchivedGame: JSONObject? = null
-    private var pendingPgn: String? = null
+    private data class ImportedPgn(val text: String, val filename: String?)
+    private var pendingPgn: ImportedPgn? = null
     private var pendingLibrary = false
     private var pendingExport: String? = null
     private var renderedScreen: ShellScreen? = null
@@ -116,7 +117,13 @@ class MainActivity : ComponentActivity() {
                     out.toByteArray()
                 }
                 require(bytes.size <= 1024 * 1024) { "PGN exceeds 1 MB." }
-                bytes.toString(Charsets.UTF_8)
+                val filename = runCatching {
+                    contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                        val column=cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        if (column >= 0 && cursor.moveToFirst()) cursor.getString(column)?.take(255) else null
+                    }
+                }.getOrNull()
+                ImportedPgn(bytes.toString(Charsets.UTF_8), filename)
             }
             runOnUiThread {
                 result.onSuccess { pendingPgn=it; showAnalysisScreen(); deliverPendingPgn() }
@@ -129,14 +136,14 @@ class MainActivity : ComponentActivity() {
         val pgn=pendingPgn ?: return
         pendingPgn=null
         showAnalysisScreen()
-        webView.evaluateJavascript("window.InstinctaZero.importPgn(${JSONObject.quote(pgn)});void 0;", null)
+        webView.evaluateJavascript("window.InstinctaZero.importPgn(${JSONObject.quote(pgn.text)},${JSONObject.quote(pgn.filename ?: "")});void 0;", null)
     }
     private fun acceptPgnIntent(source: Intent?) {
         if (source?.action == Intent.ACTION_VIEW) source.data?.let(::readPgnDocument)
         else if (source?.action == Intent.ACTION_SEND) {
             @Suppress("DEPRECATION") val uri=source.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
             if (uri != null) readPgnDocument(uri)
-            else source.getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.length <= 1024 * 1024 }?.let { pendingPgn=it }
+            else source.getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.length <= 1024 * 1024 }?.let { pendingPgn=ImportedPgn(it, null) }
         }
     }
     private val iconTypeface by lazy {

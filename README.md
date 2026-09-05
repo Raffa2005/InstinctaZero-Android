@@ -1,12 +1,17 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.6.0 is a compact, legacy-Lichess-inspired analysis app.
+InstinctaZero Android 0.6.1 is a compact, legacy-Lichess-inspired analysis app.
 
 This release keeps the simple interface restored in v0.5.1 and adds saved studies,
 chapter navigation, PGN import/export and local repertoire matching. Install over
 the existing app to retain its board, settings and pairing.
 
 ### Studies and repertoire
+
+The chapter control is on the left and its drawer slides from the physical left
+edge. New file imports use the PGN filename (without its extension) as the study
+name. Existing study names are preserved. See [ChessTempo transfer](docs/chesstempo-transfer.md)
+for official export options and the current large-repertoire limits.
 
 Open **Studies / PGN** on Home or the chapter icon on the analysis board. Create
 independent studies and chapters; each chapter autosaves in its own private file.

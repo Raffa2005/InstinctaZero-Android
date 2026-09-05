@@ -2,6 +2,10 @@
 (function (scope) {
   'use strict';
   const MAX_NODES = 4096, MAX_DEPTH = 512;
+  function pgnStudyName(filename, event) {
+    const name=String(filename || '').split(/[\\/]/).pop().replace(/[\u0000-\u001f\u007f]/g,'').trim().replace(/\.pgn$/i,'').trim();
+    return (name || (event && event !== '?' ? String(event) : 'Imported study')).slice(0,255);
+  }
   function positionKey(fen) { return fen.split(/\s+/).slice(0, 4).join(' '); }
   function parsePgn(text, Chess) {
     if (typeof text !== 'string' || text.length > 1048576) throw Error('PGN exceeds the 1 MB import limit.');
@@ -97,6 +101,6 @@
     const next=positions[positionKey(board.fen())];
     return {first,known:!!next,next:next || [],transposed:!!next && !!first};
   }
-  const api={parsePgn,exportPgn,positionKey,repertoireIndex,deviation,MAX_NODES,MAX_DEPTH};
+  const api={pgnStudyName,parsePgn,exportPgn,positionKey,repertoireIndex,deviation,MAX_NODES,MAX_DEPTH};
   if (typeof module !== 'undefined') module.exports=api; else scope.InstinctaZeroStudyTools=api;
 }(typeof window === 'undefined' ? globalThis : window));
