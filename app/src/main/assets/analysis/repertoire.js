@@ -45,7 +45,7 @@
         if (choosing || help || adjusting) api.status(); else api.render();
       });
     }
-    function badge(move) { return '<span class="rep-badge ' + (move.theory ? move.alternative ? 'optional' : 'active' : 'info') + '">' + escape(move.theory ? move.alternative ? 'Alternative' : 'Repertoire' : labels[move.kind] || 'Informational') + '</span>'; }
+    function badge(move) { return '<span class="rep-badge ' + (move.theory ? move.alternative ? 'optional' : 'active' : 'info') + '">' + escape(move.theory ? move.kind === 'alternative' ? 'Alternative' : move.alternative ? 'Reply · optional line' : 'Repertoire' : labels[move.kind] || 'Informational') + '</span>'; }
     const button = (action, text, extra = '') => '<button class="rep-button" data-rep-action="' + action + '" ' + extra + '>' + text + '</button>';
     function status(rep) {
       if (rep.theory) return rep.alternative ? 'In repertoire · optional line' : 'In repertoire';

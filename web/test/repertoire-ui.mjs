@@ -37,7 +37,7 @@ try {
           if(request.action==='catalog')result={installed,repertoires:catalog};
           if(request.action==='edit'){window.__test.edits.push(request);result={saved:true};}
           if(request.action==='lookup')result={results:request.selected.map(rep=>({...catalog.find(r=>r.id===rep),theory:request.history.length<3,alternative:false,deviation:request.history.length>=3?3:0,candidates:0,moves:[
-            {uci:request.history.length===0?'e2e4':'c7c5',san:request.history.length===0?'e4':'c5',theory:true,alternative:false,own:rep==='white',reason:'Source annotation',comment:'Review this move in its own repertoire.',kind:'repertoire'},
+            {uci:request.history.length===0?'e2e4':'c7c5',san:request.history.length===0?'e4':'c5',theory:true,alternative:request.history.length>0,own:request.history.length===0?rep==='white':rep!=='white',reason:'Source annotation',comment:'Review this move in its own repertoire.',kind:request.history.length>0&&rep!=='white'?'alternative':'repertoire'},
             {uci:request.history.length===0?'d2d4':'e7e5',san:request.history.length===0?'d4':'e5',theory:false,alternative:false,own:false,kind:'analysis',reason:'Informational only; does not reactivate theory',comment:''}
           ]}))};
           setTimeout(()=>window.InstinctaZero.onNativeRepertoire(id,result),12);return id;
@@ -67,6 +67,7 @@ try {
     const edit=await page.evaluate(()=>window.__test.edits[0]);assert.equal(edit.id,'white');assert.equal(edit.kind,'alternative');assert.deepEqual(edit.history,['e2e4']);
     await page.locator('[data-rep-play=e2e4]').tap();
     await page.waitForFunction(()=>JSON.parse(window.__test.saved).cursor?.length===1);
+    await page.getByText('Reply · optional line',{exact:true}).waitFor();
     await page.locator('[data-action=prev]').tap();
     await page.locator('[data-action=next]').tap();
     await page.waitForFunction(()=>window.__test.requests.at(-1).history?.at(-1)==='e2e4');
