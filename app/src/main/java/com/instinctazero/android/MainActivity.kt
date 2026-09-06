@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
     private val navigation = ShellNavigation()
     private val pairingCode = PairingCodeBuffer()
     private var webPageLoaded = false
+    private var pendingRepertoires = false
     private var connectionMessage: String? = null
     private val archiveGames = mutableListOf<JSONObject>()
     private var archiveAccount = ""
@@ -288,6 +289,17 @@ class MainActivity : ComponentActivity() {
         if (webPageLoaded) setAnalysisActive(true)
     }
 
+    private fun showRepertoires() {
+        pendingRepertoires = true
+        showAnalysisScreen()
+        if (webPageLoaded) openRepertoirePage()
+    }
+
+    private fun openRepertoirePage() {
+        pendingRepertoires = false
+        webView.evaluateJavascript("window.InstinctaZero&&window.InstinctaZero.openRepertoires&&window.InstinctaZero.openRepertoires();void 0;", null)
+    }
+
     private fun refreshArchive() {
         if (archiveLoading || navigation.screen != ShellScreen.GAMES || !nativeBridge.isPaired()) return
         archiveRefreshedThisSession = true
@@ -495,7 +507,10 @@ class MainActivity : ComponentActivity() {
             addView(shellCard("Account / PC", connectionSummary()) { showProfileScreen() }.apply {
                 (layoutParams as? LinearLayout.LayoutParams)?.topMargin = 12.dp
             })
-        }
+            addView(shellCard("Repertoires", "Your openings · compare, explore, adjust") { showRepertoires() }.apply {
+                (layoutParams as? LinearLayout.LayoutParams)?.topMargin = 12.dp
+            })
+        }.let { content -> android.widget.ScrollView(this).apply { isFillViewport = true; addView(content) } }
     }
 
     private fun gamesContent(): View {
@@ -893,6 +908,7 @@ class MainActivity : ComponentActivity() {
             })
             addView(drawerButton("Home") { showHomeScreen() })
             addView(drawerButton("Analysis board") { showAnalysisScreen() })
+            addView(drawerButton("Repertoires") { showRepertoires() })
             addView(drawerButton("Games") { if (nativeBridge.isPaired()) showGamesScreen() else showProfileScreen() })
             addView(drawerButton("Account / PC") { showProfileScreen() })
         }, FrameLayout.LayoutParams(292.dp, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START))
@@ -909,7 +925,7 @@ class MainActivity : ComponentActivity() {
         isClickable = true
         isFocusable = true
         setPadding(18.dp, 17.dp, 18.dp, 17.dp)
-        background = roundedBackground(0xff333333.toInt(), 1, 0xff4c4c4c.toInt(), 7)
+        background = android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x33c4af75), roundedBackground(0xff33342f.toInt(), 1, 0xff505148.toInt(), 12), null)
         addView(TextView(this@MainActivity).apply {
             text = title
             setTextColor(Color.WHITE)
@@ -926,7 +942,8 @@ class MainActivity : ComponentActivity() {
     }.also { it.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT) }
 
     private fun actionButton(label: String, action: () -> Unit): Button = shellButton(label, 15f).apply {
-        backgroundTintList = ColorStateList.valueOf(0xff4b4b4b.toInt())
+        backgroundTintList = null
+        background = android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x33ffffff), roundedBackground(0xff4a473a.toInt(), 1, 0xff71674e.toInt(), 10), null)
         setOnClickListener { action() }
     }
 
@@ -982,6 +999,7 @@ class MainActivity : ComponentActivity() {
                 webPageLoaded = true
                 setAnalysisActive(navigation.screen == ShellScreen.ANALYSIS)
                 deliverPendingArchivedGame()
+                if (pendingRepertoires) openRepertoirePage()
             }
         }
     }
@@ -1035,6 +1053,8 @@ internal object AnalysisWebPolicy {
             "/api/mobile/v1/sync",
             "/api/mobile/v1/study/analysis/stream",
             "/api/mobile/v1/study/explorer",
+            "/api/mobile/v1/repertoires",
+            "/api/mobile/v1/repertoires/index",
         ) && uri.rawQuery == null
         val gamesList = uri.rawPath == "/api/mobile/v1/games" &&
             (uri.rawQuery == null || Regex("limit=20(?:&cursor=[A-Za-z0-9_-]{1,256})?").matches(uri.rawQuery))
@@ -1094,6 +1114,55 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     // race engine startup or ordinary network jitter, so only explicit request/lifecycle
     // cancellation terminates analysis. This client shares the bounded connect/write settings.
     private val streamHttp = GatewayHttpPolicy.streamClient(restHttp)
+    private val repertoireStore = RepertoireStore(activity)
+    private val repertoireExecutor = Executors.newSingleThreadExecutor()
+    private val repertoireDownloading = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val repertoireLookupGeneration = java.util.concurrent.atomic.AtomicLong(0)
+
+    @JavascriptInterface fun getRepertoireSettings(): String = repertoireStore.settings()
+    @JavascriptInterface fun saveRepertoireSettings(raw: String) { runCatching { repertoireStore.saveSettings(raw) } }
+    @JavascriptInterface fun requestRepertoire(requestJson: String): String = newRequestId().also { id ->
+        val lookup = requestJson.length <= 128 * 1024 && runCatching { JSONObject(requestJson).optString("action") == "lookup" }.getOrDefault(false)
+        val generation = if (lookup) repertoireLookupGeneration.incrementAndGet() else 0
+        repertoireExecutor.execute {
+            try {
+                if (lookup && generation != repertoireLookupGeneration.get()) {
+                    emit("onNativeRepertoire", id, "{\"obsolete\":true}")
+                    return@execute
+                }
+                require(requestJson.length <= 128 * 1024)
+                val request = JSONObject(requestJson)
+                val result = when (request.optString("action")) {
+                    "catalog" -> repertoireStore.catalog()
+                    "edit" -> { repertoireStore.edit(request); JSONObject().put("saved", true) }
+                    "lookup" -> repertoireStore.lookup(request)
+                    else -> throw IllegalArgumentException("Unknown repertoire action")
+                }
+                emit("onNativeRepertoire", id, result.toString())
+            } catch (error: Exception) { emit("onNativeRepertoire", id, errorPayload(error.safeMessage())) }
+        }
+    }
+    @JavascriptInterface fun downloadRepertoires(): String = newRequestId().also { id ->
+        val pending = PendingCall(); calls[id] = pending
+        if (!repertoireDownloading.compareAndSet(false, true)) {
+            calls.remove(id, pending)
+            activity.runOnUiThread { emit("onNativeRepertoire", id, errorPayload("A repertoire download is already running")) }
+        } else executor.execute {
+            try {
+                val token = encryptedPreferences.getString(TOKEN_KEY, null) ?: throw IOException("Pair this phone with your PC first")
+                val call = restHttp.newBuilder().readTimeout(90, java.util.concurrent.TimeUnit.SECONDS).callTimeout(180, java.util.concurrent.TimeUnit.SECONDS).build().newCall(
+                    Request.Builder().url(apiUrl("repertoires/index")).header("Authorization", "Bearer $token").get().build())
+                if (!pending.attach(call)) throw IOException("Download cancelled")
+                call.execute().use { response ->
+                    if (!response.isSuccessful) throw IOException("PC repertoire unavailable (${response.code}). Your saved copy is unchanged.")
+                    val body = response.body ?: throw IOException("Empty repertoire download")
+                    body.byteStream().use { repertoireStore.install(it, response.header("X-Repertoire-SHA256").orEmpty()) }
+                }
+                emit("onNativeRepertoire", id, repertoireStore.catalog().put("downloaded", true).toString())
+            } catch (error: Exception) { emit("onNativeRepertoire", id, errorPayload(error.safeMessage())) }
+            finally { calls.remove(id, pending); repertoireDownloading.set(false) }
+        }
+    }
     private val encryptedPreferences by lazy {
         val key = MasterKey.Builder(activity).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
         EncryptedSharedPreferences.create(
@@ -1343,6 +1412,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     fun close() {
         cancelAll("destroyed")
         executor.shutdownNow()
+        repertoireExecutor.shutdownNow()
         restHttp.dispatcher.executorService.shutdown()
         restHttp.connectionPool.evictAll()
     }

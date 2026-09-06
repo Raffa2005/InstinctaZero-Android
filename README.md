@@ -1,15 +1,20 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.6.3 is the restored simple analysis app from v0.5.1.
+InstinctaZero Android 0.7.0 adds an annotated repertoire companion to the simple analysis app.
 
-The entire v0.6.0/v0.6.1 feature batch is reverted. Board assets, interface,
-navigation, Return to mainline symbol and portrait activity configuration match
-v0.5.1 (whose app sources matched v0.4.7). The higher version number permits an
-in-place update; do not uninstall or clear app data.
+The board, arrows, mainline navigation and portrait configuration remain unchanged
+from the simple version. This is not a return of the reverted multi-study redesign.
 
-Production app sources match v0.5.1 exactly. No additional migration or protection
-of newer in-app study/repertoire state is included, as requested. Local PGN files
-are not deleted or modified. Pairing and the PC archive are unchanged.
+Open **Repertoires** from Home or the side menu, download the annotated library
+from the paired PC, and choose which repertoires to compare. The analysis tab has
+both a combined view and per-repertoire filters. Selections are saved independently
+for each archived game and the local board. All checks after download run against
+an indexed on-device database; the corpus is not loaded into the WebView or shipped
+in this repository/APK. See [Repertoires](docs/repertoires.md) for meaning, edits and
+limits. The in-app **?** opens the same usage guidance.
+
+Menus use quieter warm accents, rounded touch controls and short tab transitions.
+No local PGN files, archived game PGNs, pairing or PC annotations are modified.
 
 It opens on a native Home screen; Analysis opens at the standard starting
 position and provides a legal interactive board, local variation tree, live

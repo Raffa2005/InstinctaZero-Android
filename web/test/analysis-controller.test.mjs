@@ -464,13 +464,16 @@ test('active full-panel forms are not rebuilt by streamed engine updates', async
   const source = functionSource(controller, 'renderActivePanel', 'scheduleAnalysis');
   let renders = 0;
   let headings = 0;
-  const hidden = new Function('panelView', 'renderPanel', 'heading', `${source}; return renderActivePanel;`)('settings', () => { renders += 1; }, () => { headings += 1; });
+  const hidden = new Function('panelView', 'renderPanel', 'heading', 'tab', `${source}; return renderActivePanel;`)('settings', () => { renders += 1; }, () => { headings += 1; }, 'engine');
   hidden();
   assert.equal(renders, 0);
   assert.equal(headings, 1);
-  const visible = new Function('panelView', 'renderPanel', 'heading', `${source}; return renderActivePanel;`)(null, () => { renders += 1; }, () => { headings += 1; });
+  const visible = new Function('panelView', 'renderPanel', 'heading', 'tab', `${source}; return renderActivePanel;`)(null, () => { renders += 1; }, () => { headings += 1; }, 'engine');
   visible();
   assert.equal(renders, 1);
+  const repertoire = new Function('panelView', 'renderPanel', 'heading', 'tab', `${source}; return renderActivePanel;`)(null, () => { renders += 1; }, () => { headings += 1; }, 'repertoire');
+  repertoire();
+  assert.equal(renders, 1, 'engine updates must not replace a repertoire control during a tap');
   assert.match(controller, /onNativeAnalysis[^\n]*renderActivePanel/);
   assert.match(controller, /settings\.showArrows = !settings\.showArrows/);
   assert.match(controller, /renderArrows\(engine\.lines\)/);

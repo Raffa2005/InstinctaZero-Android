@@ -1,7 +1,7 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.6.3). Before producing a release APK, rebuild and verify the two
+(version 0.7.0). Before producing a release APK, rebuild and verify the two
 checked-in browser assets from their retained sources:
 
 ```bash
@@ -38,12 +38,18 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 20 / 0.6.3 release values;
-- no local PGN files are deleted or modified by the rollback;
-- analysis assets and portrait manifest match v0.5.1 exactly. Do not use the USB
+- versionCode/versionName are the intended 21 / 0.7.0 release values;
+- no local PGN files or source annotations are deleted or modified;
+- board/piece assets, arrow metrics and portrait manifest retain the simple version. Do not use the USB
   tethering phone for testing or disconnect it;
 - `npm run check`, `testDebugUnitTest`, release lint, and the signed release
   build all pass;
+- run `npm run test:repertoire-ui` under Node 20+ with `PHONE_PREVIEW_CHROMIUM`
+  pointing at a local headless Chromium. No real account or phone is used;
+- optionally set `REPERTOIRE_TEST_INDEX` and `REPERTOIRE_TEST_CASES` for native
+  integration checks against private reference lookups. Do not commit those files;
+- verify the paired PC serves the read-only repertoire endpoints, rejects
+  unauthenticated access and preserves the gateway/Funnel configuration;
 - the APK installs and opens on native Home, while Analysis opens at the
   standard starting position;
 - system dark mode does not recolour the board or turn all pieces white;
