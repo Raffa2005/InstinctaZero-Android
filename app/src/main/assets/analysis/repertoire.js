@@ -26,8 +26,8 @@
       busy = true; error = ''; api.render();
       request({action:'catalog'}, data => {
         busy = false;
-        if (data.event === 'error') error = data.message;
-        else { catalog = data.repertoires || []; installed = data.installed; }
+        if (data.event === 'error') { error = data.message; api.render(); return; }
+        catalog = data.repertoires || []; installed = data.installed;
         api.render();
         refresh();
       }, download);

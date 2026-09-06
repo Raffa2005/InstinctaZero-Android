@@ -84,8 +84,10 @@ try {
     assert.match(await page.locator('.rep-guide').innerText(),/full history/);
     await page.getByRole('button',{name:'Choose repertoires'}).tap();
     await page.evaluate(()=>{window.__test.failDownload=true;});
+    const beforeFailure = await page.evaluate(()=>window.__test.requests.length);
     await page.getByRole('button',{name:/Update from PC/}).tap();
     await page.getByRole('alert').waitFor();
+    assert.equal(await page.evaluate(()=>window.__test.requests.length),beforeFailure,'download errors must not be immediately replaced by successful local lookups');
     assert.equal(await page.locator('.rep-card.checked').count(),1);
     const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth);assert.equal(overflow,false);
     assert.deepEqual(errors,[]);
