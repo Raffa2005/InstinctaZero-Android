@@ -125,6 +125,19 @@ class RepertoireTranspositionTest {
         assertEquals(setOf("f1d1","e3e4"),active(lookup("canonical")))
         assertFalse(lookup("addition",18).getBoolean("theory"))
     }
+    @Test fun aSharedOutsidePositionKeepsItsOwnDepartureAndAdditionContext() {
+        val line = request("addition",18)
+        val first = store.lookup(line).getJSONArray("results").getJSONObject(0)
+        assertEquals(17,first.getInt("deviation")); assertEquals(2,first.getInt("add_count"))
+        // Same board opened as a standalone FEN has no covered prefix to extend.
+        val standalone = JSONObject(line.toString()).put("root",line.getString("fen"))
+            .put("history",JSONArray()).put("entries",JSONArray())
+        val second = store.lookup(standalone).getJSONArray("results").getJSONObject(0)
+        assertEquals(first.getString("fen"),second.getString("fen"))
+        assertEquals(0,second.getInt("deviation")); assertFalse(second.getBoolean("can_add"))
+        val again = store.lookup(line).getJSONArray("results").getJSONObject(0)
+        assertEquals(first.toString(),again.toString())
+    }
     @Test fun legacyPathAdditionsAndTheirExistingUndoSurviveThePositionBookUpgrade() {
         val line = fixture.getJSONObject("addition"); val root = line.getString("root")
         val history = (0 until 18).map { line.getJSONArray("history").getString(it) }

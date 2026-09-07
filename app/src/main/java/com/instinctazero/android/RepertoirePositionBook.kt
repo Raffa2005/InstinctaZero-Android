@@ -13,7 +13,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase, private va
     }
     data class Node(val id: Long, val parent: Long, val path: String, val uci: String, val san: String,
         val fen: String, val before: String, val theory: Boolean, val optional: Boolean, val kind: String,
-        val reason: String, val comment: String, val introduction: String, val added: Boolean = false)
+        val reason: String, val comment: String, val introduction: String, val added: Boolean = false, val sourceOrder: Int = 0)
     data class Flags(val active: Boolean, val optional: Boolean = false)
     data class Edge(val uci: String, val san: String, val fen: String, val before: String,
         val active: Boolean, val optional: Boolean, val kind: String, val reason: String,
@@ -25,28 +25,43 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase, private va
     private val paths = mutableMapOf<String,List<Node>>()
     private val inherited = mutableMapOf<Long,Flags>()
     private val edgeCache = mutableMapOf<String,List<Edge>>()
+    private val activeCache = mutableMapOf<String,Boolean>()
     private val hasLabels = local.keys().asSequence().any { local.getJSONObject(it).optString("kind") in listOf("analysis","alternative") }
-    private val intro = db.rawQuery("PRAGMA table_info(nodes)",null).use { rows ->
-        var found = false
-        while (rows.moveToNext()) if (rows.getString(1) == "starting_comment") found = true
-        if (found) "n.starting_comment" else "''"
+    private val columns = db.rawQuery("PRAGMA table_info(nodes)",null).use { rows ->
+        buildSet { while (rows.moveToNext()) add(rows.getString(1)) }
     }
-    private fun read(where: String, args: Array<String>): List<Node> = db.rawQuery(
-        "SELECT n.id,n.parent_id,n.path_id,n.uci,n.san,n.fen,p.fen,n.theory,n.line_alternative,n.kind,n.reason,n.comment,$intro " +
-            "FROM nodes n LEFT JOIN nodes p ON p.id=n.parent_id WHERE n.repertoire_id=? AND $where", arrayOf(rep,*args)).use { rows ->
+    private val intro = if ("starting_comment" in columns) "n.starting_comment" else "''"
+    private val sourceOrder = if ("srs" in columns) "n.srs" else "0"
+    private val select = "SELECT n.id,n.parent_id,n.path_id,n.uci,n.san,n.fen,p.fen,n.theory,n.line_alternative,n.kind,n.reason,n.comment,$intro,$sourceOrder " +
+        "FROM nodes n LEFT JOIN nodes p ON p.id=n.parent_id WHERE n.repertoire_id=? AND "
+    private fun read(where: String, args: Array<String>): List<Node> = readQuery(select+where,arrayOf(rep,*args))
+    private fun readQuery(sql: String, args: Array<String>): List<Node> = db.rawQuery(sql,args).use { rows ->
         buildList { while (rows.moveToNext()) {
             val node = Node(rows.getLong(0),if(rows.isNull(1))0 else rows.getLong(1),rows.getString(2),rows.getString(3) ?: "",
                 rows.getString(4) ?: "",rows.getString(5),rows.getString(6) ?: "",rows.getInt(7)==1,rows.getInt(8)==1,
-                rows.getString(9),rows.getString(10) ?: "",rows.getString(11) ?: "",rows.getString(12) ?: "")
+                rows.getString(9),rows.getString(10) ?: "",rows.getString(11) ?: "",rows.getString(12) ?: "",sourceOrder=rows.getInt(13))
             nodesById[node.id] = node; add(node)
         } }
     }
     private fun at(fen: String) = positions.getOrPut(fen) { read("n.fen=?",arrayOf(fen)) }
     private fun path(key: String) = paths.getOrPut(key) { read("n.path_id=?",arrayOf(key)) }
     private fun node(id: Long) = nodesById[id] ?: read("n.id=?",arrayOf(id.toString())).firstOrNull()
-    private fun sourceChildren(fen: String) = children.getOrPut(fen) {
-        read("n.parent_id IN (SELECT id FROM nodes WHERE repertoire_id=? AND fen=?)",arrayOf(rep,fen))
+    internal fun childQuery(fen: String, uci: String? = null): Pair<String,Array<String>> {
+        // The parent subquery makes SQLite scan the repertoire through nodes_training.
+        // The installed index already stores the normalized pre-move FEN on every edge.
+        // Preserve the occurrence order of the old nodes_training scan: it also sets
+        // stable move/comment ordering and the fallback reason for duplicate edges.
+        // Sort only the matched rows here: SQL ORDER BY srs would select the slow index again.
+        val condition = if("fen_before" in columns) "n.fen_before=?" else "n.parent_id IN (SELECT id FROM nodes WHERE repertoire_id=? AND fen=?)"
+        val args = if("fen_before" in columns) arrayOf(fen) else arrayOf(rep,fen)
+        return (select + condition + if(uci==null) "" else " AND n.uci=?") to if(uci==null) arrayOf(rep,*args) else arrayOf(rep,*args,uci)
     }
+    private fun readChildren(fen: String, uci: String? = null): List<Node> {
+        val (sql,args) = childQuery(fen,uci)
+        val nodes = readQuery(sql,args)
+        return if("fen_before" in columns) nodes.sortedWith(compareBy<Node> { it.sourceOrder }.thenBy { it.id }) else nodes
+    }
+    private fun sourceChildren(fen: String) = children.getOrPut(fen) { readChildren(fen) }
     private fun positionEdit(n: Node): JSONObject? = local.optJSONObject(edgeKey(n.before,n.uci))?.takeIf { it.optString("scope") == "position" }
     // Existing path-scoped exclusions and optional labels still mask their source subtree.
     // A separately active occurrence at the same board position can nevertheless supply book moves.
@@ -125,9 +140,14 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase, private va
     }
     private fun effective(n: Node) = if(n.added)localFlags[n.path] ?: Flags(false) else flags(n)
     private fun allAt(fen: String) = at(fen) + localNodes.filter { it.fen==fen }
-    fun active(fen: String) = allAt(fen).any { effective(it).active }
-    fun edges(fen: String): List<Edge> = edgeCache.getOrPut(fen) {
-        (sourceChildren(fen) + localNodes.filter { it.before==fen }).filter { it.uci.matches(Regex("[a-h][1-8][a-h][1-8][qrbn]?")) }
+    fun active(fen: String) = activeCache.getOrPut(fen) {
+        // Departure/extension checks only need existence. Do not load hundreds of
+        // duplicate occurrence comments at every historical position in an unedited book.
+        if(local.length()==0) db.rawQuery("SELECT 1 FROM nodes WHERE repertoire_id=? AND fen=? AND theory=1 LIMIT 1",arrayOf(rep,fen)).use { it.moveToFirst() }
+        else allAt(fen).any { effective(it).active }
+    }
+    private fun mergeEdges(fen: String, nodes: List<Node>): List<Edge> =
+        nodes.filter { it.uci.matches(Regex("[a-h][1-8][a-h][1-8][qrbn]?")) }
             .groupBy { it.uci }.map { (uci,nodes) ->
                 val eligible = nodes.filter { effective(it).active }
                 val best = eligible.firstOrNull { !effective(it).optional } ?: eligible.firstOrNull() ?: nodes.first()
@@ -137,6 +157,15 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase, private va
                     if(edit?.optString("kind")=="analysis")"Excluded on this phone. The original remains unchanged." else best.reason,
                     nodes,edit!=null || nodes.any { local.has(it.path) })
             }
+    fun edges(fen: String): List<Edge> = edgeCache.getOrPut(fen) {
+        mergeEdges(fen,sourceChildren(fen) + localNodes.filter { it.before==fen })
+    }
+    private fun edge(fen: String, uci: String): Edge? {
+        edgeCache[fen]?.let { return it.find { e -> e.uci==uci } }
+        // Extension validation needs just the played edge, not all alternative source
+        // occurrences/comments at each earlier position (often the initial position).
+        val source = children[fen]?.filter { it.uci==uci } ?: readChildren(fen,uci)
+        return mergeEdges(fen,source + localNodes.filter { it.before==fen && it.uci==uci }).firstOrNull()
     }
     private fun comments(nodes: List<Node>, introduction: Boolean = false) = JSONArray(nodes.map { if(introduction)it.introduction else it.comment }.filter { it.isNotBlank() }.distinct())
     fun status(fen: String): JSONObject {
@@ -159,13 +188,12 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase, private va
             .put("position",target).put("end_of_line",target.getBoolean("end_of_line"))
     }
     /** Extend from the most recent covered position, not from an unrelated earlier move order. */
-    fun additions(positions: List<String>, moves: List<String>, entries: JSONArray): List<Addition>? {
+    fun additions(positions: List<String>, moves: List<String>, entries: JSONArray, anchor: Int = positions.indexOfLast(::active)): List<Addition>? {
         if (positions.size != moves.size+1 || entries.length()!=moves.size) return null
-        val anchor = positions.indexOfLast(::active)
         if (anchor < 0) return null
         val additions = linkedMapOf<String,Addition>()
         for (ply in anchor until moves.size) {
-            val edge = edges(positions[ply]).find { it.uci==moves[ply] }
+            val edge = edge(positions[ply],moves[ply])
             // Re-adding a missing local prefix may reconnect its saved descendants. This
             // does not authorize an explicit exclusion or an informational source edge.
             if (edge!=null && !edge.active && !edge.nodes.all { it.added && it.kind!="analysis" }) return null

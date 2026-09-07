@@ -15,6 +15,7 @@ internal class RepertoireStore(context: Context) {
     private val file = File(context.filesDir, "mobile_repertoire.sqlite")
     private val prefs = context.getSharedPreferences("mobile_repertoire_preferences", Context.MODE_PRIVATE)
     private val editsFile = AtomicFile(File(context.filesDir, "mobile_repertoire_edits.json"))
+    private val positionCache = RepertoireLookupCache()
     private var undoRecord: JSONObject? = null
     private val edits: JSONObject by lazy {
         val saved = runCatching { JSONObject(String(editsFile.readFully(), Charsets.UTF_8)) }.getOrDefault(JSONObject())
@@ -63,6 +64,7 @@ internal class RepertoireStore(context: Context) {
             }
             synchronized(this) {
                 check(temporary.renameTo(file)) { "Unable to install repertoire download" }
+                positionCache.clear()
                 prefs.edit().putString("fingerprint", expected).apply()
             }
         } finally { temporary.delete() }
@@ -115,6 +117,7 @@ internal class RepertoireStore(context: Context) {
             persistEdits(null)
             undoRecord = null
         } catch (error: Exception) { restoreEdits(before); throw error }
+        finally { positionCache.clear() }
     }
     @Synchronized fun settings(): String = prefs.getString("settings", "{}") ?: "{}"
     @Synchronized fun saveSettings(raw: String) {
@@ -155,17 +158,22 @@ internal class RepertoireStore(context: Context) {
         if (!file.isFile) return JSONObject().put("results", results)
         open().use { db ->
             for (index in 0 until selected.length()) {
-                val rep = selected.getString(index); val identity = identity(db,rep)
-                val book = RepertoirePositionBook(db,rep,overrides(rep))
-                val current = book.status(fen)
-                val additions = if(current.getBoolean("theory"))emptyList() else book.additions(history,moves,request.optJSONArray("entries") ?: JSONArray())
+                val rep = selected.getString(index)
+                val book by lazy { RepertoirePositionBook(db,rep,overrides(rep)) }
+                val current = positionCache.get(rep,fen) ?: run {
+                    val identity = identity(db,rep)
+                    book.status(fen).put("id",rep).put("name",identity.first).put("side",identity.second)
+                        .put("moves",JSONArray(book.edges(fen).map { book.moveJson(it,identity.second) }))
+                        .also { positionCache.put(rep,fen,it) }
+                }
+                // Identical positions may have different departure points and missing local
+                // prefixes. Recompute these from this request, even on a position-cache hit.
+                val anchor = if(current.getBoolean("theory")) -1 else history.indexOfLast(book::active)
+                val additions = if(current.getBoolean("theory"))emptyList() else book.additions(history,moves,request.optJSONArray("entries") ?: JSONArray(),anchor)
                 if (!current.getBoolean("theory") && moves.isNotEmpty()) {
-                    val anchor = history.indexOfLast(book::active)
                     current.put("deviation",if(anchor>=0)anchor+1 else 1)
                 }
-                results.put(current.put("id",rep).put("name",identity.first).put("side",identity.second)
-                    .put("can_add",!additions.isNullOrEmpty()).put("add_count",additions?.size ?: 0)
-                    .put("moves",JSONArray(book.edges(fen).map { book.moveJson(it,identity.second) })))
+                results.put(current.put("can_add",!additions.isNullOrEmpty()).put("add_count",additions?.size ?: 0))
             }
         }
         return JSONObject().put("results",results)
@@ -240,6 +248,6 @@ internal class RepertoireStore(context: Context) {
         } catch (error: Exception) {
             restoreEdits(before)
             throw error
-        }
+        } finally { positionCache.clear() }
     }
 }

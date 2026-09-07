@@ -1,14 +1,19 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.7.5 makes the repertoire book position-based. Transpositions
+InstinctaZero Android 0.7.6 speeds up offline repertoire navigation with direct indexed
+lookups, narrower extension checks and a bounded position cache. It uses your existing
+download; no repertoire redownload, re-pairing or migration is needed. See the
+[verification and host benchmarks](docs/repertoire-performance.md).
+
+The repertoire book remains position-based, as in 0.7.5. Transpositions
 automatically show covered continuations and merged position comments, without
 changing the played game's move history. Terminal source references no longer hide
 lines recorded under another move order. Existing downloaded libraries, selections,
 local edits and Undo remain usable; no repertoire redownload is needed for this fix.
 
 The PC library now also includes **Symmetrical English for Black**. To add it to
-the existing v0.7.5 app, open Repertoires → settings → **Update from PC**, then
-select it. No APK update or re-pairing is required. Its 333 records, chapter/lesson
+an older downloaded library, open Repertoires → settings → **Update from PC**, then
+select it. This library addition also works on v0.7.5. Its 333 records, chapter/lesson
 metadata, comments and variations are retained in the downloaded index; the phone
 continues to browse them as a position-based book, not a separate chapter library.
 The …Bf5 system is an optional Black alternative. Source training contexts and

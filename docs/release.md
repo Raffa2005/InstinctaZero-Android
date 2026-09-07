@@ -1,8 +1,8 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.7.5). The six-repertoire library, including Symmetrical English for
-Black, uses the existing APK; do not bump the app solely for that data update.
+(version 0.7.6). This update accelerates lookups against the existing six-repertoire
+library. It requires no repertoire redownload or data migration.
 Before producing a release APK, rebuild and verify the two
 checked-in browser assets from their retained sources:
 
@@ -40,7 +40,11 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 26 / 0.7.5 release values;
+- versionCode/versionName are the intended 27 / 0.7.6 release values;
+- verify the optional real-corpus performance/regression procedure in
+  [`repertoire-performance.md`](repertoire-performance.md), including index plans,
+  complete response equivalence, independent deviation context, and warmed-cache
+  invalidation after edits, Undo and library installation;
 - QGA reproduction and the alternate source move order both show Rd1/e4, their
   continuations and deduplicated position comments. Terminal transposition references
   must not hide coverage, and inactive duplicates must not veto active moves;

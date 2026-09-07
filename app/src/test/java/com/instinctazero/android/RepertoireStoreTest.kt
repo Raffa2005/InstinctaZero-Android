@@ -65,6 +65,29 @@ class RepertoireStoreTest {
         bytes = fixture.readBytes(); store = RepertoireStore(context)
         store.install(bytes.inputStream(), RepertoireStore.hash(bytes))
     }
+    @Test fun upgradingTheIndexInvalidatesWarmFactsWithoutErasingEditsOrComments() {
+        val before = result(emptyList()) // Populate the native cache with the old package.
+        val upgraded = File(context.cacheDir,"upgraded.sqlite")
+        upgraded.writeBytes(bytes)
+        SQLiteDatabase.openDatabase(upgraded.path,null,SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("ALTER TABLE nodes ADD COLUMN fen_before TEXT")
+            db.execSQL("ALTER TABLE nodes ADD COLUMN srs INTEGER DEFAULT 0")
+            db.execSQL("UPDATE nodes SET fen_before=(SELECT p.fen FROM nodes p WHERE p.id=nodes.parent_id)")
+            db.execSQL("CREATE INDEX nodes_before ON nodes(repertoire_id,fen_before)")
+            db.execSQL("UPDATE nodes SET comment='Complete new source comment' WHERE repertoire_id='white'")
+        }
+        val updated = upgraded.readBytes()
+        store.install(updated.inputStream(),RepertoireStore.hash(updated))
+        val after = result(emptyList())
+        assertNotEquals(before.toString(),after.toString())
+        assertEquals("Complete new source comment",after.getJSONArray("comments").getString(0))
+        assertEquals(before.getJSONArray("moves").length(),after.getJSONArray("moves").length())
+        edit(listOf("e2e4"),"analysis")
+        assertFalse(result(listOf("e2e4")).getBoolean("theory"))
+        store.undo(store.undoInfo()!!.getString("token"))
+        assertTrue(result(listOf("e2e4")).getBoolean("theory"))
+        assertEquals("Complete new source comment",result(listOf("e2e4")).getJSONArray("comments").getString(0))
+    }
     private fun request(moves: List<String>, selected: List<String> = listOf("white")) = JSONObject()
         .put("root",root).put("fen",fen(moves)).put("entries",entries(moves)).put("history",JSONArray(moves)).put("selected",JSONArray(selected))
     private fun result(moves: List<String>) = store.lookup(request(moves)).getJSONArray("results").getJSONObject(0)
