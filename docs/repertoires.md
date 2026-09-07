@@ -23,11 +23,11 @@ match the derived SQLite index before it can be downloaded.
    continuations; tap the preview to expand it. Forward/back navigation updates it.
    Introductions to a variation appear with a **Before move** label, separately
    from the after-move comments. Older downloaded packages remain readable.
-5. The header reports coverage and the first deviation, not an engine verdict.
-   A filled book on the destination square means the move is in a selected repertoire.
-   An outlined book means a position match by a different history; it does not
-   reactivate theory. Locally excluded/removed candidate lines do not qualify.
-   **Book marker on board** in settings toggles both markers (default on).
+5. The header reports position coverage and, when outside the book, the latest
+   departure from it—not an engine verdict. A book on the destination square means
+   the reached position is covered by a selected repertoire. Transpositions rejoin
+   automatically, with the same continuations and comments as other move orders.
+   **Book marker on board** in settings toggles the marker (default on).
    Markers check all selected repertoires, independent of the focused move-list view.
 6. The sliders beside a move open local adjustments. Where repertoires overlap,
    choose which repertoire to adjust. **Add current line** is in settings.
@@ -58,16 +58,27 @@ match the derived SQLite index before it can be downloaded.
   alternative; opponent replies have regular labels, even inside an optional line.
 - Refutations, informational analysis and marked model-game continuations remain
   viewable, with their reasons and comments, but are not active theory.
-- Full UCI history is checked. Recorded transpositions remain supported; a FEN
-  match alone cannot reactivate an excluded or unknown history. Such a position is
-  reported as a match in another context, not as being back in repertoire.
-- A terminal theory position still counts as theory with no further coverage.
+- Book lookup uses the board position: pieces, side to move, castling rights and
+  legally available en passant, without move counters or incoming move history.
+  All same-position occurrences within each repertoire contribute continuations
+  and deduplicated comments. An active occurrence qualifies a move even when an
+  informational duplicate exists elsewhere. Purely informational moves remain so.
+- A covered position rejoins the book even after an unknown or excluded route.
+  This changes book coverage, not the actual game/analysis move history. The PC's
+  source-path annotation and training semantics remain unchanged.
+- End of line means no active continuation exists across any occurrence of that
+  position in the repertoire, not merely that one source line stops there.
 
 ## Adjustments
 
 Each repertoire has independent local overrides, automatically saved on the phone:
 make an active own-side move optional; exclude a branch; restore the original
-label; add the current board line; remove a local addition. These changes do not
+label; add the current board line; remove a local addition. New adjustments identify
+the position and outgoing move, so they apply across move orders in that repertoire.
+Existing path-scoped edits are still respected within their source subtrees; another
+independently active occurrence can supply book coverage. Extensions anchor at the
+most recent covered position and add only the missing moves, not the incoming order.
+These changes do not
 rewrite source PGNs, PC annotations or archived Lichess games. Excluded branches
 remain viewable and can be restored. Adding a line cannot silently cross an
 informational source move. To activate source information, review its PC annotation
@@ -75,14 +86,14 @@ rules and rebuild their index, then update the phone copy.
 
 ## Storage and limits
 
-- One private SQLite download holds the corpus; only indexed current-history
+- One private SQLite download holds the corpus; only indexed current-position
   queries and small result sets enter the WebView. No per-move network request.
-- Already known child eligibility/comments are projected immediately on any move
+- Already known child-position coverage/comments are projected immediately on any move
   or navigation action. Full visited-position results are cached up to 96 entries
   and 2 MiB of estimated text data; misses still use native SQLite. The cache is
   keyed by complete history, initial position and selected repertoires, and is
-  invalidated on edits/download updates. A transposition never becomes theory
-  merely because another history or position was cached.
+  invalidated on edits/download updates. History remains in the cache key only
+  because extension/deviation context can differ; it does not restrict book coverage.
 - Downloads use the existing paired-device token and HTTPS gateway. Up to 128 MiB
   uncompressed; gzip in transit. Checksummed installation replaces the prior copy
   only after validation. A slow or interrupted download leaves that copy usable.
@@ -91,8 +102,9 @@ rules and rebuild their index, then update the phone copy.
   positions, annotation reasons and lookup indexes. It is streamed to disk in
   64 KiB chunks, not retained in a giant JavaScript or native byte array. These
   sizes are for the September 7 package; the 128 MiB cap is not an allocation.
-- Local overrides have a 4 MiB cap, are keyed by repertoire and stable history
-  identity, and survive corpus updates. They are phone-local, not cloud-synced.
+- Local overrides have a 4 MiB cap, are keyed by repertoire and stable position/move
+  identity, and survive corpus updates. Legacy history keys remain readable without
+  migrating or dropping saved edits/Undo. Edits are phone-local, not cloud-synced.
 - One inverse edit journal is stored alongside the overrides in the same atomic
   file. It adds only the prior values of the paths touched by that action; the
   existing 4 MiB override limit excludes this journal. No-op or failed edits keep
@@ -102,7 +114,7 @@ rules and rebuild their index, then update the phone copy.
   overrides. Corpus downloads preserve the local undo step; downloads themselves
   and UI-setting changes are not repertoire edits and are not undone.
 - Up to 16 repertoires can be selected; the existing analysis history limit is
-  512 plies. All distinct comments at the current history and its continuations
+  512 plies. All distinct comments at the current position and its continuations
   are returned in full, including comments from additional source occurrences.
   They are rendered as plain text, never executable HTML.
 - No SRS trainer, arbitrary unannotated PGN importer or source-rule editor is

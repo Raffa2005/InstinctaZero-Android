@@ -43,15 +43,23 @@ test('cache keys retain full history/root/selection and stale replies never chan
   h.go(['d2d4']);const current=h.last;
   assert.equal(h.marker.kind,'','unrecorded move cannot inherit the other branch');
   h.reply(slow,{results:[result({end_of_line:true})]});assert.equal(h.marker.kind,'');
-  h.reply(current,{results:[result({theory:false,position_match:true,deviation:1})]});assert.equal(h.marker.kind,'transposition');
+  h.reply(current,{results:[result({theory:true,deviation:0})]});assert.equal(h.marker.kind,'theory');
   h.go(['d2d4'],'different w - - 0 1');assert.equal(h.marker.kind,'');
   h.select('r');h.go(['e2e4'],'start w - - 0 1');assert.equal(h.marker.kind,'');
 });
 
-test('information and transposition projections never become theory or an end-of-line marker',()=>{
-  const h=harness();h.reply(h.last,{results:[result({moves:[move('e2e4',{theory:false,position_match:true,deviation:1,end_of_line:false})]})]});
-  h.go(['e2e4']);assert.deepEqual(h.marker,{kind:'transposition',end:false});assert.doesNotMatch(h.panel.html(),/class="rep-end"/);
+test('purely informational positions remain unmarked',()=>{
+  const h=harness();h.reply(h.last,{results:[result({moves:[move('e2e4',{theory:false,position:{theory:false,deviation:1,end_of_line:false}})]})]});
+  h.go(['e2e4']);assert.deepEqual(h.marker,{kind:'',end:false});assert.doesNotMatch(h.panel.html(),/class="rep-end"/);
   h.click({repAction:'marker'});assert.equal(h.marker.kind,'');
+});
+
+test('covered child positions rejoin the book immediately with merged position comments regardless of the incoming edge',()=>{
+  const h=harness();h.reply(h.last,{results:[result({moves:[move('e2e4',{theory:false,comments:[],position:{theory:true,deviation:0,end_of_line:false,comments:['Comment from another move order']}})]})]});
+  h.go(['e2e4']);assert.deepEqual(h.marker,{kind:'theory',end:false});
+  assert.match(h.panel.html(),/Comment from another move order/);
+  assert.doesNotMatch(h.panel.html(),/different move order|No continuation for this history/);
+  assert.equal(h.panel.summary(),'In repertoire');
 });
 
 test('edits and downloads invalidate cached terminal markers; duplicate add taps send one write',()=>{

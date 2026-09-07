@@ -1,7 +1,7 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.7.4). Before producing a release APK, rebuild and verify the two
+(version 0.7.5). Before producing a release APK, rebuild and verify the two
 checked-in browser assets from their retained sources:
 
 ```bash
@@ -38,7 +38,10 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 25 / 0.7.4 release values;
+- versionCode/versionName are the intended 26 / 0.7.5 release values;
+- QGA reproduction and the alternate source move order both show Rd1/e4, their
+  continuations and deduplicated position comments. Terminal transposition references
+  must not hide coverage, and inactive duplicates must not veto active moves;
 - the expanded catalog supports independent and combined selection of all five
   repertoires. Corpus updates retain edits, selections and Undo; old offline
   packages remain readable. Variation introductions retain their Before move role;
@@ -55,11 +58,11 @@ Before publishing, at minimum verify:
 - verify compact repertoire rows, full escaped comments, restored selections,
   new-game defaults, explicit empty selections, and the persistent board-marker
   toggle. Markers must follow both orientations and navigation, reject stale
-  callbacks, and distinguish transpositions without changing theory status;
+  callbacks, and mark covered transpositions as ordinary repertoire positions;
 - known child markers appear before a deliberately delayed native reply;
   cached positions do not need another bridge request. Edits and corpus updates
   invalidate cached flags. End-of-line labels distinguish active terminal theory
-  from unknown/excluded history; direct single/multi-move additions persist in
+  from positions with no active source occurrence; direct single/multi-move additions persist in
   the chosen repertoire, cannot cross excluded/informational source lines, and
   leave source PGNs and archived games unchanged;
 - undo is available beside edit confirmations and in repertoire settings after
@@ -68,7 +71,13 @@ Before publishing, at minimum verify:
   no-ops, legacy state, and unchanged analysis tree/cursor/selected repertoires.
   Undo must invalidate cached markers/coverage without introducing stale callbacks;
 - optionally set `REPERTOIRE_TEST_INDEX` and `REPERTOIRE_TEST_CASES` for native
-  integration checks against private reference lookups. Do not commit those files;
+  integration checks against independent position-union reference lookups. Setting
+  `REPERTOIRE_PREVIEW_OUTPUT` saves the actual QGA native results locally; with the
+  same environment variable, run `node web/test/repertoire-transposition-ui.mjs`
+  to exercise those results at three phone sizes, including both orders, immediate
+  markers/comments, restart and canonical forward navigation. Use
+  `PHONE_PREVIEW_ASSETS` to repeat against assets extracted from the signed APK.
+  Do not commit private reference results or screenshots;
 - verify the paired PC serves the read-only repertoire endpoints, rejects
   unauthenticated access and preserves the gateway/Funnel configuration;
 - the APK installs and opens on native Home, while Analysis opens at the

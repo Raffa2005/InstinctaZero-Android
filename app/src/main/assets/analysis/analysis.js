@@ -262,17 +262,20 @@
     const file = square.charCodeAt(0) - 97, rank = Number(square[1]) - 1;
     repertoireMarker.style.left = ((black ? 7 - file : file) + 1) * 12.5 + '%';
     repertoireMarker.style.top = (black ? rank : 7 - rank) * 12.5 + '%';
-    repertoireMarker.classList.toggle('transposition', kind === 'transposition');
     repertoireMarker.classList.toggle('end-of-line', !!endOfLine);
     repertoireMarker.dataset.square = square;
-    repertoireMarker.setAttribute('aria-label', kind === 'theory' ? endOfLine ? 'Repertoire move · end of line' : 'Repertoire move' : 'Repertoire position by transposition');
+    repertoireMarker.setAttribute('aria-label', endOfLine ? 'Repertoire move · end of line' : 'Repertoire move');
   }
   repertoirePanel = window.createRepertoirePanel ? window.createRepertoirePanel({
     key:() => studyContext.gameId,
     status:heading,
     root:() => studyContext.initialFen,
     hasMoves:() => !!cursor.parent,
-    context:() => { const nodes = []; for (let n = cursor; n && n.move; n = n.parent) nodes.unshift({san:n.san,fen:n.fen}); const normalized = fen => { const board = new Chess(fen); const parts = board.fen().split(' '); if (!board.moves({verbose:true}).some(m => m.flags.includes('e'))) parts[3] = '-'; return parts; }; return {gameId:studyContext.gameId,root:normalized(studyContext.initialFen).join(' '),fen:normalized(chess.fen()).slice(0,4).join(' '),history:history(),entries:nodes}; },
+    context:() => {
+      const normalized = fen => { const parts = fen.split(' '); if (parts[3] !== '-' && !new Chess(fen).moves({verbose:true}).some(m => m.flags.includes('e'))) parts[3] = '-'; return parts; };
+      const nodes = []; for (let n = cursor; n && n.move; n = n.parent) nodes.unshift({san:n.san,fen:normalized(n.fen).join(' ')});
+      return {gameId:studyContext.gameId,root:normalized(studyContext.initialFen).join(' '),fen:normalized(chess.fen()).slice(0,4).join(' '),history:history(),entries:nodes};
+    },
     render:renderPanel, play:playUci, tab:() => setTab('repertoire'), marker:showRepertoireMarker,
     settings:() => openPanelView('repertoireSettings'), closeSettings:closePanelView
   }) : null;

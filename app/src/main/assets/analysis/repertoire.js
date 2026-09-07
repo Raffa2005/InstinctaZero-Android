@@ -23,7 +23,7 @@
     const markerEnabled = () => settings._bookMarker !== false;
     function save() { native()?.saveRepertoireSettings?.(JSON.stringify(settings)); }
     function updateMarker() {
-      const kind = results.some(rep => rep.theory) ? 'theory' : results.some(rep => rep.position_match || rep.candidates > 0) ? 'transposition' : '';
+      const kind = results.some(rep => rep.theory) ? 'theory' : '';
       const active = results.filter(rep => rep.theory);
       api.marker?.(markerEnabled() && api.hasMoves() ? kind : '', active.length > 0 && active.every(rep => rep.end_of_line));
     }
@@ -44,17 +44,18 @@
       if (lookupId) pending.delete(lookupId);
     }
     function cacheResult(context, ids, data) {
-      // Child eligibility and comments are already known. Project only those facts, never
-      // invent continuations or infer theory from a FEN. All move-entry paths use refresh().
+      // Child-position coverage/comments already merge every source move order. Project
+      // those facts immediately for board moves and navigation without rewriting the tree.
       const moves = new Set(data.flatMap(rep => (rep.moves || []).map(move => move.uci)));
       for (const uci of moves) {
         const next = {...context, history:[...context.history,uci]};
         const projected = data.map(rep => {
           const child = (rep.moves || []).find(move => move.uci === uci);
+          if (child?.position) return {...child.position,id:rep.id,name:rep.name,side:rep.side,moves:[],pending:true};
           return {id:rep.id, name:rep.name, side:rep.side, theory:!!child?.theory,
             alternative:!!child?.alternative, kind:child?.kind || 'unknown',
             deviation:child?.deviation ?? (rep.deviation || next.history.length),
-            end_of_line:!!child?.end_of_line, position_match:!!child?.position_match,
+            end_of_line:!!child?.end_of_line,
             starting_comments:child?.starting_comments || [],
             comments:child?.comments || (child?.comment ? [child.comment] : []), moves:[], pending:true};
         });
@@ -122,7 +123,7 @@
       }).join('') + '<p class="rep-hint">Saved for this board or game. New games start with your latest selection.</p>';
     }
     function helpHtml() {
-      return '<div class="rep-guide"><h3>Comments as you go</h3><p>The played move’s note appears above the continuations. Tap it to read the full comment, or tap a comment bubble beside a move to read ahead without playing it. Distinct source comments are kept, even when a move appears in several files.</p><h3>Theory and alternatives</h3><p>Main repertoire moves have no extra label. Alternatives are valid choices by your repertoire colour; opponent replies retain their optional-line context. Informational analysis, refutations and model-game tails remain readable but do not count as theory.</p><h3>Book markers</h3><p>A filled book marks a move in a selected repertoire. An outlined book means the position matches by transposition, but the full history has already left recorded theory. This never silently reactivates an excluded line. A small finish flag marks the end of active coverage, even if informational moves continue. Known moves show their marker immediately; visited positions are cached. Turn markers off here if you prefer a plain board.</p><h3>Separate or combined</h3><p>Choose one or several repertoires. Combined shows each move once; comments and adjustments retain their source. The focused view only filters the move list; board markers check all selected repertoires.</p><h3>Adjust safely</h3><p>Use the sliders beside a move to make an active own-side choice optional, exclude a branch, or restore its original label. To extend a line, play a new move or sequence on the board, then tap <b>Add move</b> or <b>Add line</b> below the continuations. In combined view, choose the repertoire to update. Existing settings also offer Add current line. Edits save on this phone, not to the PC. Tap <b>Undo</b> after a change, or <b>Undo last repertoire change</b> in settings later—even after restarting. It reverses the whole last edit without moving the analysis board. One step, no redo; changes made before v0.7.3 have no undo record. Source PGNs and archived Lichess games are never rewritten. Informational source lines must be reviewed in the PC annotations before becoming active.</p></div>';
+      return '<div class="rep-guide"><h3>Comments as you go</h3><p>The position’s note appears above the continuations. Tap it to read the full comment, or tap a comment bubble beside a move to read ahead without playing it. Distinct source comments are kept, including notes reached through other move orders.</p><h3>Theory and alternatives</h3><p>The book follows the board position, not your move order. Transpositions automatically show all recorded continuations and position comments; your played game stays unchanged. Main repertoire moves have no extra label. Alternatives are valid choices by your repertoire colour. Opponent replies keep regular labels. Purely informational analysis, refutations and model-game tails remain readable but do not count as theory. A move covered elsewhere at the same position is still a book move.</p><h3>Book markers</h3><p>A book marks a covered position in a selected repertoire, including transpositions. A small finish flag means there are no further active book moves from that position, even if informational moves remain. Known positions show their marker immediately; visited positions are cached. Turn markers off here if you prefer a plain board.</p><h3>Separate or combined</h3><p>Choose one or several repertoires. Combined shows each move once; comments and adjustments retain their source. The focused view only filters the move list; board markers check all selected repertoires.</p><h3>Adjust safely</h3><p>Use the sliders beside a move to make an active own-side choice optional, exclude it, or restore its original label. New adjustments apply to that position and move in the chosen repertoire, regardless of move order. A later transposition can rejoin an independently covered position. To extend a line, play a new move or sequence on the board, then tap <b>Add move</b> or <b>Add line</b> below the continuations. In combined view, choose the repertoire to update. Only the missing continuation is added. Edits save on this phone, not to the PC. Tap <b>Undo</b> after a change, or <b>Undo last repertoire change</b> in settings later—even after restarting. It reverses the whole last edit without moving the analysis board. One step, no redo; changes made before v0.7.3 have no undo record. Source PGNs and archived Lichess games are never rewritten. Purely informational source lines must be reviewed in the PC annotations before becoming active.</p></div>';
     }
     function commentList(entries) {
       const unique = new Map();
@@ -192,7 +193,7 @@
       }
       const extendable = visible().filter(rep => rep.can_add);
       if (extendable.length) content += '<div class="rep-extend">' + button('quick-add',extendable.every(rep => rep.add_count === 1) ? '+ Add move to repertoire' : '+ Add line to repertoire',editing ? 'disabled' : '') + (expanded === 'add' ? '<div class="rep-edit-sources">' + extendable.map(rep => button('add',escape(rep.name),'data-rep-id="' + escape(rep.id) + '"' + (editing ? ' disabled' : ''))).join('') + '</div>' : '') + '</div>';
-      if (!moves.length && !extendable.length) content += '<p class="rep-hint">' + (ended.length ? 'Play on the board to extend this line.' : !results.length || visible().some(rep => rep.pending) ? 'Checking the line…' : visible().some(rep => rep.candidates || rep.position_match) ? 'Known position · different move order. No continuation for this history.' : 'No recorded continuation.') + '</p>';
+      if (!moves.length && !extendable.length) content += '<p class="rep-hint">' + (ended.length ? 'Play on the board to extend this line.' : !results.length || visible().some(rep => rep.pending) ? 'Checking the position…' : 'No recorded continuation.') + '</p>';
       return '<div class="repertoire-panel rep-lines">' + content + '</div>';
     }
     function saveEdit(id, kind, history) {

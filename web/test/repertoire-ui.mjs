@@ -67,7 +67,7 @@ try {
           if(request.action==='lookup') {
             const length=request.history.length;
             const next=length===0?['e2e4','e4']:length===1?['c7c5','c5']:length===2?['g1f3','Nf3']:['b8c6','Nc6'];
-            result={results:request.selected.map(rep=>({...catalog.find(r=>r.id===rep),theory:length<3,alternative:false,deviation:length>=3?3:0,candidates:length===3?1:0,position_match:length===3,
+            result={results:request.selected.map(rep=>({...catalog.find(r=>r.id===rep),theory:length<=3,alternative:false,deviation:length>3?4:0,
               comments:length?['Control the centre.\nKeep an eye on the d5 break.','<img src=x onerror=alert(1)> is plain source text.']:[],
               moves:[
                 {uci:next[0],san:next[1],theory:true,alternative:length>0,own:length%2===0?rep==='white':rep!=='white',reason:'Source annotation',starting_comments:['Introduction to this variation <not markup>'],comments:['Develop naturally and prepare the centre.',rep==='white'?'A second file contributes another useful comment.':'Black’s perspective on this position.'],kind:length>0&&rep!=='white'?'alternative':'repertoire'},
@@ -175,9 +175,9 @@ try {
     // A new archived game inherits the last selection, but an explicit empty override wins.
     await page.evaluate(()=>window.InstinctaZero.loadArchivedGame({id:'abcdEF12',moves:[{uci:'e2e4'},{uci:'c7c5'},{uci:'g1f3'}],white:{name:'White'},black:{name:'Black'}}));
     await page.getByRole('button',{name:'Repertoires',exact:true}).tap();
-    await page.getByRole('img',{name:'Repertoire position by transposition',exact:true}).waitFor();
+    await page.getByRole('img',{name:'Repertoire move',exact:true}).waitFor();
     assert.equal(await page.locator('.repertoire-book-marker').getAttribute('data-square'),'f3');
-    assert.match(await page.locator('.game-title small').innerText(),/Outside repertoires/);
+    assert.match(await page.locator('.game-title small').innerText(),/2\/2 repertoires/);
     await page.screenshot({path:`${output}/transposition-${width}.png`});
     await page.locator('[data-action=settings]').tap();
     assert.equal(await page.locator('.rep-card.checked').count(),2);

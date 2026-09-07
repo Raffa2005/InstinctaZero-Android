@@ -13,6 +13,18 @@ function functionSource(source, name, nextName) {
   return source.slice(start, end);
 }
 
+test('book position keys retain legal en passant and remove ghost or pinned captures', async()=>{
+  const {Chess}=await import('chess.js');
+  const source=await readFile(controllerUrl,'utf8');
+  const start=source.indexOf('const normalized = fen =>');
+  const end=source.indexOf('\n      const nodes',start);
+  const normalized=new Function('Chess',source.slice(start,end)+';return normalized;')(Chess);
+  assert.equal(normalized('rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1')[3],'-');
+  assert.equal(normalized('4r1k1/8/8/3pP3/8/8/8/4K3 w - d6 0 1')[3],'-');
+  assert.equal(normalized('6k1/8/8/3pP3/8/8/8/4K3 w - d6 0 1')[3],'d6');
+  assert.equal(normalized('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1')[2],'KQkq');
+});
+
 test('notation is an inline mainline and introduces structure only for real siblings', async () => {
   const [controller, style] = await Promise.all([
     readFile(controllerUrl, 'utf8'),

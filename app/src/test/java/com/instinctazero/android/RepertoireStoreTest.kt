@@ -20,6 +20,28 @@ class RepertoireStoreTest {
     private val root = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
     private lateinit var store: RepertoireStore
     private lateinit var bytes: ByteArray
+    private val fens = mapOf(
+        "" to "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -",
+        "e2e4" to "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq -",
+        "e2e4 e7e5" to "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq -",
+        "e2e4 e7e5 g1f3" to "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq -",
+        "e2e4 e7e5 g1f3 b8c6" to "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq -",
+        "e2e4 e7e5 g1f3 b8c6 f1b5" to "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq -",
+        "e2e4 e7e5 g1f3 b8c6 f1b5 a7a6" to "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq -",
+        "e2e4 c7c5" to "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq -",
+        "e2e4 c7c5 g1f3" to "rnbqkbnr/pp1ppppp/8/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq -",
+        "e2e4 c7c5 g1f3 b8c6" to "r1bqkbnr/pp1ppppp/2n5/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq -",
+        "e2e4 f7f6" to "rnbqkbnr/ppppp1pp/5p2/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq -",
+        "e2e4 f7f6 d2d4" to "rnbqkbnr/ppppp1pp/5p2/8/3PP3/8/PPP2PPP/RNBQKBNR b KQkq -",
+        "e2e4 f7f6 g1f3" to "rnbqkbnr/ppppp1pp/5p2/8/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq -",
+        "d2d4" to "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq -",
+        "g1f3" to "rnbqkbnr/pppppppp/8/8/8/5N2/PPPPPPPP/RNBQKB1R b KQkq -",
+        "g1f3 g8f6" to "rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -",
+        "g1f3 c7c5" to "rnbqkbnr/pp1ppppp/8/2p5/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -",
+        "g1f3 c7c5 e2e4" to "rnbqkbnr/pp1ppppp/8/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq -"
+    )
+    private fun fen(moves: List<String>) = fens.getValue(moves.joinToString(" "))
+    private fun entries(moves: List<String>) = JSONArray(moves.mapIndexed { i,move -> JSONObject().put("san",move).put("fen",fen(moves.take(i+1))) })
     @Before fun setup() {
         val fixture = File(context.cacheDir, "fixture.sqlite")
         SQLiteDatabase.openOrCreateDatabase(fixture, null).use { db ->
@@ -30,7 +52,7 @@ class RepertoireStoreTest {
             db.execSQL("CREATE TABLE nodes(id INTEGER PRIMARY KEY,parent_id INTEGER,repertoire_id TEXT,path_id TEXT,uci TEXT,san TEXT,kind TEXT,theory INTEGER,line_alternative INTEGER,reason TEXT,comment TEXT,fen TEXT)")
             for ((rep, offset) in listOf("white" to 0, "black" to 100)) {
                 fun node(id: Int, parent: Int?, moves: List<String>, kind: String = "repertoire", theory: Int = 1, alt: Int = 0) {
-                    db.execSQL("INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", arrayOf(id+offset,parent?.plus(offset),rep,RepertoireStore.pathId(root,moves),moves.lastOrNull(),moves.lastOrNull(),kind,theory,alt,"Test reason","Comments stay visible",RepertoireStore.position(root)))
+                    db.execSQL("INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", arrayOf(id+offset,parent?.plus(offset),rep,RepertoireStore.pathId(root,moves),moves.lastOrNull(),moves.lastOrNull(),kind,theory,alt,"Test reason","Comments stay visible",fen(moves)))
                 }
                 node(1,null,emptyList()); node(2,1,listOf("e2e4")); node(3,2,listOf("e2e4","e7e5"))
                 node(4,3,listOf("e2e4","e7e5","g1f3"),"alternative",1,1)
@@ -44,9 +66,9 @@ class RepertoireStoreTest {
         store.install(bytes.inputStream(), RepertoireStore.hash(bytes))
     }
     private fun request(moves: List<String>, selected: List<String> = listOf("white")) = JSONObject()
-        .put("root",root).put("fen",root).put("history",JSONArray(moves)).put("selected",JSONArray(selected))
+        .put("root",root).put("fen",fen(moves)).put("entries",entries(moves)).put("history",JSONArray(moves)).put("selected",JSONArray(selected))
     private fun result(moves: List<String>) = store.lookup(request(moves)).getJSONArray("results").getJSONObject(0)
-    private fun edit(moves: List<String>, kind: String, rep: String = "white") = store.edit(request(moves).put("id",rep).put("kind",kind))
+    private fun edit(moves: List<String>, kind: String, rep: String = "white") = store.edit(request(moves).put("id",rep).put("kind",kind).put("fen",fen(moves.dropLast(1))))
 
     @Test fun activeAndInformationalOccurrencesCoexistAndTerminalTheoryIsValid() {
         assertTrue(result(listOf("e2e4")).getBoolean("theory"))
@@ -54,11 +76,11 @@ class RepertoireStoreTest {
         assertTrue(terminal.getBoolean("theory")); assertEquals(0,terminal.getJSONArray("moves").length())
         assertTrue(terminal.getBoolean("alternative")); assertEquals("repertoire",terminal.getString("kind"))
     }
-    @Test fun excludedHistoryCannotReactivateViaPositionMatch() {
+    @Test fun purelyInformationalAndUnknownPositionsRemainOutsideTheBook() {
         val excluded = result(listOf("e2e4","f7f6","d2d4"))
         assertFalse(excluded.getBoolean("theory")); assertEquals(2,excluded.getInt("deviation"))
         val unknown = result(listOf("d2d4"))
-        assertTrue(unknown.getInt("candidates") > 0); assertFalse(unknown.getBoolean("theory"))
+        assertFalse(unknown.getBoolean("known")); assertFalse(unknown.getBoolean("theory"))
         assertEquals(1,unknown.getInt("deviation"))
     }
     @Test fun editsAreSeparateAndPersistWithCombinedAccess() {
@@ -78,7 +100,7 @@ class RepertoireStoreTest {
     }
     @Test fun addingAndRemovingLocalLinesDoesNotChangeSourceOrCrossExcludedBridges() {
         val moves = listOf("e2e4","c7c5","g1f3")
-        val entries = JSONArray(moves.map { JSONObject().put("san",it).put("fen",root) })
+        val entries = entries(moves)
         store.edit(request(moves).put("id","white").put("kind","add").put("entries",entries))
         assertTrue(result(moves).getBoolean("theory"))
         edit(moves.take(2),"analysis"); assertFalse(result(moves).getBoolean("theory"))
@@ -122,7 +144,7 @@ class RepertoireStoreTest {
         store.undo(token); assertTrue(result(listOf("e2e4")).getBoolean("theory"))
         for (rep in listOf("fourth","fifth")) {
             val moves = listOf("d2d4")
-            store.edit(request(moves).put("id",rep).put("kind","add").put("entries",JSONArray().put(JSONObject().put("san","d4").put("fen",root))))
+            store.edit(request(moves).put("id",rep).put("kind","add"))
             assertTrue(store.lookup(request(moves,listOf(rep))).getJSONArray("results").getJSONObject(0).getBoolean("theory"))
             store.undo(store.undoInfo()!!.getString("token"))
             assertFalse(store.lookup(request(moves,listOf(rep))).getJSONArray("results").getJSONObject(0).getBoolean("theory"))
@@ -205,22 +227,22 @@ class RepertoireStoreTest {
             db.execSQL("UPDATE nodes SET fen=? WHERE id=3",arrayOf(target))
         }
         fun match(fen: String = target) = store.lookup(request(listOf("g1f3","g8f6")).put("fen",fen)).getJSONArray("results").getJSONObject(0)
-        assertTrue(match().getBoolean("position_match")); assertFalse(match().getBoolean("theory"))
-        assertEquals(1,match().getInt("deviation"))
-        assertFalse(match(target.replace("w KQkq", "b KQkq")).getBoolean("position_match"))
-        assertFalse(match(target.replace("KQkq", "KQ")).getBoolean("position_match"))
+        assertTrue(match().getBoolean("theory")); assertEquals(0,match().getInt("deviation"))
+        assertFalse(match(target.replace("w KQkq", "b KQkq")).getBoolean("theory"))
+        assertFalse(match(target.replace("KQkq", "KQ")).getBoolean("theory"))
+        assertFalse(match(target.replace("KQkq -", "KQkq e3")).getBoolean("theory"))
         edit(listOf("e2e4"),"analysis")
-        assertFalse(match().getBoolean("position_match"))
+        assertFalse(match().getBoolean("theory"))
         edit(listOf("e2e4"),"reset")
-        assertTrue(match().getBoolean("position_match"))
+        assertTrue(match().getBoolean("theory"))
         assertEquals(0,store.lookup(request(listOf("g1f3"),emptyList()).put("fen",target)).getJSONArray("results").length())
     }
 
     @Test fun localTranspositionsDisappearWhenTheirParentIsRemovedOrExcluded() {
         val target = "rnbqkbnr/pp1ppppp/8/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq -"
         val moves = listOf("e2e4","c7c5","g1f3")
-        fun add() = store.edit(request(moves).put("id","white").put("kind","add").put("entries",JSONArray(moves.mapIndexed { index, move -> JSONObject().put("san",move).put("fen",if(index==2)target else root) })))
-        fun match() = store.lookup(request(listOf("g1f3","c7c5","e2e4")).put("fen",target)).getJSONArray("results").getJSONObject(0).getBoolean("position_match")
+        fun add() = store.edit(request(moves).put("id","white").put("kind","add"))
+        fun match() = store.lookup(request(listOf("g1f3","c7c5","e2e4")).put("fen",target)).getJSONArray("results").getJSONObject(0).getBoolean("theory")
         add(); assertTrue(match())
         edit(moves.take(2),"analysis"); assertFalse(match())
         edit(moves.take(2),"reset"); assertFalse(match())
@@ -231,7 +253,7 @@ class RepertoireStoreTest {
     @Test fun endOfLineIncludesInformationalTailsAndExcludesUnknownHistories() {
         val terminal = listOf("e2e4","e7e5","g1f3","b8c6")
         SQLiteDatabase.openDatabase(File(context.filesDir,"mobile_repertoire.sqlite").path,null,SQLiteDatabase.OPEN_READWRITE).use { db ->
-            db.execSQL("INSERT INTO nodes VALUES(9,5,'white',?,'f1b5','Bb5','analysis',0,0,'Information','A tail',?)",arrayOf(RepertoireStore.pathId(root,terminal+"f1b5"),RepertoireStore.position(root)))
+            db.execSQL("INSERT INTO nodes VALUES(9,5,'white',?,'f1b5','Bb5','analysis',0,0,'Information','A tail',?)",arrayOf(RepertoireStore.pathId(root,terminal+"f1b5"),fen(terminal+"f1b5")))
         }
         assertTrue(result(terminal).getBoolean("end_of_line"))
         assertEquals(1,result(terminal).getJSONArray("moves").length())
@@ -248,7 +270,7 @@ class RepertoireStoreTest {
         assertTrue(result(terminal).getBoolean("end_of_line"))
         assertTrue(result(extended).getBoolean("can_add")); assertEquals(2,result(extended).getInt("add_count"))
         val request = request(extended).put("id","white").put("kind","add")
-            .put("entries",JSONArray(extended.map { JSONObject().put("san",it).put("fen",root) }))
+            .put("entries",entries(extended))
         store.edit(request)
         store = RepertoireStore(context)
         assertTrue(result(extended).getBoolean("theory")); assertTrue(result(extended).getBoolean("end_of_line"))
@@ -262,7 +284,7 @@ class RepertoireStoreTest {
         edit(listOf("e2e4"),"analysis")
         for (moves in listOf(listOf("e2e4"),listOf("e2e4","c7c5"),listOf("e2e4","f7f6","g1f3"))) {
             assertFalse(result(moves).getBoolean("can_add"))
-            assertThrows(IllegalArgumentException::class.java) { store.edit(request(moves).put("id","white").put("kind","add").put("entries",JSONArray(moves.map { JSONObject().put("san",it).put("fen",root) }))) }
+            assertThrows(IllegalArgumentException::class.java) { store.edit(request(moves).put("id","white").put("kind","add")) }
         }
         edit(listOf("e2e4"),"reset")
         assertFalse(result(listOf("e2e4","f7f6")).getBoolean("can_add"))
@@ -272,8 +294,8 @@ class RepertoireStoreTest {
 
     @Test fun failedMultiMoveAdditionRollsBackAllNewMoves() {
         val moves = listOf("e2e4","c7c5","g1f3")
-        val entries = JSONArray().put(JSONObject().put("san","e4").put("fen",root))
-            .put(JSONObject().put("san","c5").put("fen",root)).put(JSONObject())
+        val entries = JSONArray().put(JSONObject().put("san","e4").put("fen",fen(moves.take(1))))
+            .put(JSONObject().put("san","c5").put("fen",fen(moves.take(2)))).put(JSONObject())
         assertThrows(org.json.JSONException::class.java) { store.edit(request(moves).put("id","white").put("kind","add").put("entries",entries)) }
         assertFalse(result(moves.take(2)).getBoolean("theory"))
         assertEquals(2,result(moves).getInt("add_count"))
@@ -281,7 +303,7 @@ class RepertoireStoreTest {
     }
 
     private fun addLine(moves: List<String>, rep: String = "white") = store.edit(request(moves).put("id",rep).put("kind","add")
-        .put("entries",JSONArray(moves.map { JSONObject().put("san",it).put("fen",root) })))
+        .put("entries",entries(moves)))
     private fun editsWithoutUndo(): Map<String, Map<String, String>> {
         val saved = JSONObject(File(context.filesDir,"mobile_repertoire_edits.json").readText()).also { it.remove("_undo") }
         return saved.keys().asSequence().associateWith { rep ->
