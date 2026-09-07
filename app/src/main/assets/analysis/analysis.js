@@ -150,6 +150,7 @@
   function filterSummary(values) { return values.length ? values.join(' · ') : 'All'; }
   function chip(value, label, selected) { return '<button class="filter-chip' + (selected ? ' selected' : '') + '" data-filter="' + safe(value) + '" aria-pressed="' + selected + '">' + safe(label) + '</button>'; }
   function panelViewHtml() {
+    if (panelView === 'repertoireSettings') return repertoirePanel ? repertoirePanel.settingsHtml() : '';
     if (panelView === 'settings') {
       const nodeIndex = Math.max(0, NODE_OPTIONS.indexOf(settings.nodes));
       return '<div class="panel-view compact-settings">' +
@@ -170,6 +171,7 @@
   function clearAnalysisCaches(node) { delete node.analysisCache; node.children.forEach(clearAnalysisCaches); }
   function persistBookSettings() { saveUiSettings(); cancelBookRequest(); book.data = null; bookSettingsDirty = true; }
   function bindPanelView() {
+    if (panelView === 'repertoireSettings') { if (repertoirePanel) repertoirePanel.bind(panel); return; }
     if (panelView === 'settings') {
       const nodes = panel.querySelector('[data-nodes]'), arrowsControl = panel.querySelector('[data-arrow-count]');
       panel.querySelectorAll('[data-backend]').forEach(button => button.onclick = () => { const next = button.dataset.backend; if ((next !== 'cpu' && next !== 'sycl') || next === settings.backend) return; settings.backend = next; clearAnalysisCaches(root); saveUiSettings(); clearEngine('idle'); renderPanel(); scheduleAnalysis(); });
@@ -192,7 +194,7 @@
   function returnToMainline() { const intersection = mainlineIntersection(cursor); if (intersection) restore(intersection); }
   function restore(next) { if (!next) return; const previous = cursor; if (next.parent === previous) inheritAnalysisToChild(previous, next); cursor = next; restoring = true; chess.load(cursor.fen); sync(null); restoring = false; saveStudyNow(); onPositionChanged(); }
   function playUci(uci) { if (!uci || uci.length < 4) return; commitMove(uci.slice(0,2), uci.slice(2,4), uci.length > 4 ? uci[4] : undefined); }
-  function flipBoard() { ground.toggleOrientation(); wrap.classList.toggle('orientation-white'); wrap.classList.toggle('orientation-black'); renderArrows(engine.lines); scheduleStudySave(); }
+  function flipBoard() { ground.toggleOrientation(); wrap.classList.toggle('orientation-white'); wrap.classList.toggle('orientation-black'); renderArrows(engine.lines); if (repertoirePanel) repertoirePanel.updateMarker(); scheduleStudySave(); }
   function squarePoint(square) { const f = square.charCodeAt(0) - 97, r = Number(square[1]) - 1, white = !wrap.classList.contains('orientation-black'); return [(white ? f : 7 - f) * 64 + 32, (white ? 7 - r : r) * 64 + 32]; }
   function lineWinningChance(line) { let cp = finiteMetric(line && line.white_cp); const mate = finiteMetric(line && line.white_mate); if (mate !== null) cp = mate > 0 ? 1000 : -1000; if (cp === null) return null; if (chess.turn() === 'b') cp = -cp; cp = Math.max(-1000, Math.min(1000, cp)); return 2 / (1 + Math.exp(-0.00368208 * cp)) - 1; }
   function credibleLeelaReferenceQ(moveStats, bestStat) { const bestVisits = Math.max(0, finiteMetric(bestStat && bestStat.visits) || 0); const minimumVisits = Math.max(1, Math.floor(bestVisits * 0.02)); const values = moveStats.filter(stat => (finiteMetric(stat && stat.visits) || 0) >= minimumVisits).map(stat => finiteMetric(stat && stat.q)).filter(q => q !== null); const bestQ = finiteMetric(bestStat && bestStat.q); if (bestQ !== null) values.push(bestQ); return values.length ? Math.max(...values) : null; }
@@ -201,7 +203,7 @@
   function alternativeArrowWidth(bestLine, line, index, moveStats, statsByMove) { const best = statsByMove.get(bestLine && bestLine.pv && bestLine.pv[0]), alternative = statsByMove.get(line && line.pv && line.pv[0]); let referenceQ = credibleLeelaReferenceQ(moveStats, best), alternativeQ = finiteMetric(alternative && alternative.q); if (referenceQ === null || alternativeQ === null) { referenceQ = lineWinningChance(bestLine); alternativeQ = lineWinningChance(line); } return leelaArrowWidthFromMetrics({ bestVisits: best && best.visits, alternativeVisits: alternative && alternative.visits, referenceQ, alternativeQ, fallbackIndex:index }); }
   function arrowLine(move, kind, width, shortening) { if (!/^[a-h][1-8][a-h][1-8]/.test(move || '')) return ''; const a = squarePoint(move.slice(0,2)), b = squarePoint(move.slice(2,4)), dx = b[0] - a[0], dy = b[1] - a[1], length = Math.hypot(dx, dy) || 1, amount = Math.min(shortening || 10, length / 2), x2 = b[0] - dx / length * amount, y2 = b[1] - dy / length * amount; return '<line class="analysis-arrow ' + kind + '" stroke-width="' + width + '" x1="' + a[0] + '" y1="' + a[1] + '" x2="' + x2 + '" y2="' + y2 + '" marker-end="url(#arrow-' + kind + ')"/>'; }
   function renderArrows(lines) { const defs = arrows.querySelector('defs').outerHTML; if (!settings.showArrows || !lines.length) { arrows.innerHTML = defs; return; } const best = lines[0], bestMove = best && best.pv && best.pv[0]; if (!/^[a-h][1-8][a-h][1-8]/.test(bestMove || '')) { arrows.innerHTML = defs; return; } const moveStats = Array.isArray((engine.stats || {}).move_stats) ? engine.stats.move_stats : []; const statsByMove = new Map(moveStats.map(stat => [stat.uci, stat])); const shapes = [{ move:bestMove, kind:'blue', width:15 }], seen = new Set([bestMove.slice(0,4)]); const alternatives = rankedLeelaAlternativeLines(lines.slice(1), statsByMove); for (const [index, line] of alternatives.entries()) { if (shapes.length >= settings.arrowCount) break; const move = line && line.pv && line.pv[0]; if (!move || seen.has(move.slice(0,4))) continue; const width = alternativeArrowWidth(best, line, index, moveStats, statsByMove); if (width === null) continue; if (/^[a-h][1-8][a-h][1-8]/.test(move)) { seen.add(move.slice(0,4)); shapes.push({ move, kind:'grey', width }); } } const destinationCounts = new Map(); shapes.forEach(shape => destinationCounts.set(shape.move.slice(2,4), (destinationCounts.get(shape.move.slice(2,4)) || 0) + 1)); arrows.innerHTML = defs + shapes.map(shape => arrowLine(shape.move, shape.kind, shape.width, destinationCounts.get(shape.move.slice(2,4)) > 1 ? 20 : 10)).join(''); }
-  function openPanelView(kind) { if (wrap.classList.contains('expanded')) { wrap.classList.remove('expanded'); refreshBoardBounds(); scheduleStudySave(); } panelView = kind; renderPanel(); }
+  function openPanelView(kind) { if (wrap.classList.contains('expanded')) { wrap.classList.remove('expanded'); refreshBoardBounds(); scheduleStudySave(); } panelView = kind; if (kind === 'repertoireSettings' && repertoirePanel) repertoirePanel.beginSettings(); renderPanel(); }
   function deleteCurrentBranch() { if (!cursor.parent) return; const parent = cursor.parent; parent.children = parent.children.filter(child => child !== cursor); parent.selectedChild = mainlineChild(parent); restore(parent); }
   function promoteVariation() { const target = variationTarget, parent = target && target.parent; if (!parent) return closePanelView(); const index = parent.children.indexOf(target); if (index > 0) { parent.children.splice(index, 1); parent.children.unshift(target); } parent.selectedChild = target; variationTarget = null; panelView = null; scheduleStudySave(); renderPanel(); }
   function deleteVariation() { const target = variationTarget, parent = target && target.parent; if (!parent) return closePanelView(); const containsCursor = (() => { for (let node = cursor; node; node = node.parent) if (node === target) return true; return false; })(); parent.children = parent.children.filter(child => child !== target); parent.selectedChild = mainlineChild(parent); variationTarget = null; panelView = null; if (containsCursor) restore(parent); else { scheduleStudySave(); renderPanel(); } }
@@ -244,14 +246,34 @@
   document.addEventListener('keydown', event => { if (event.key !== 'Escape') return; if (promotionPicker) promotionPicker.querySelector('[data-cancel]').click(); else if (panelView) closePanelView(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) { stopActiveNavigation(); saveStudyNow(); resetTransport(); } else if (analysisActive && settings.enabled) scheduleAnalysis(); }); window.addEventListener('blur', stopActiveNavigation); window.addEventListener('pagehide', () => { stopActiveNavigation(); saveStudyNow(); resetTransport(); });
   document.querySelector('.back').onclick = () => { if (window.InstinctaZero.handleAndroidBack()) return; if (native() && native().leaveAnalysis) native().leaveAnalysis(); };
-  document.querySelectorAll('.actions button').forEach(button => { const action = button.dataset.action; if (action === 'flip') button.onclick = flipBoard; else if (action === 'mainline') button.onclick = returnToMainline; else if (action === 'prev' || action === 'next') bindRepeatingNavigation(button, () => action === 'prev' ? cursor.parent : mainlineChild(cursor)); else button.onclick = () => { const target = action === 'settings' ? (tab === 'book' ? 'bookSettings' : 'settings') : 'study'; if (panelView === target) closePanelView(); else openPanelView(target); }; });
+  document.querySelectorAll('.actions button').forEach(button => { const action = button.dataset.action; if (action === 'flip') button.onclick = flipBoard; else if (action === 'mainline') button.onclick = returnToMainline; else if (action === 'prev' || action === 'next') bindRepeatingNavigation(button, () => action === 'prev' ? cursor.parent : mainlineChild(cursor)); else button.onclick = () => { const target = action === 'settings' ? (tab === 'book' ? 'bookSettings' : tab === 'repertoire' ? 'repertoireSettings' : 'settings') : 'study'; if (panelView === target) closePanelView(); else openPanelView(target); }; });
+  // An overlay only: never change Chessground's pieces, hit targets, or arrow geometry.
+  const repertoireMarker = document.createElement('div');
+  repertoireMarker.className = 'repertoire-book-marker';
+  repertoireMarker.hidden = true;
+  repertoireMarker.setAttribute('role', 'img');
+  repertoireMarker.innerHTML = window.repertoireBookIcon || '';
+  boardEl.appendChild(repertoireMarker);
+  function showRepertoireMarker(kind) {
+    const square = cursor.move && cursor.move.to;
+    repertoireMarker.hidden = !kind || !square;
+    if (repertoireMarker.hidden) return;
+    const black = ground.state.orientation === 'black';
+    const file = square.charCodeAt(0) - 97, rank = Number(square[1]) - 1;
+    repertoireMarker.style.left = ((black ? 7 - file : file) + 1) * 12.5 + '%';
+    repertoireMarker.style.top = (black ? rank : 7 - rank) * 12.5 + '%';
+    repertoireMarker.classList.toggle('transposition', kind === 'transposition');
+    repertoireMarker.dataset.square = square;
+    repertoireMarker.setAttribute('aria-label', kind === 'theory' ? 'Repertoire move' : 'Repertoire position by transposition');
+  }
   repertoirePanel = window.createRepertoirePanel ? window.createRepertoirePanel({
     key:() => studyContext.gameId,
     status:heading,
     root:() => studyContext.initialFen,
     hasMoves:() => !!cursor.parent,
     context:() => { const nodes = []; for (let n = cursor; n && n.move; n = n.parent) nodes.unshift({san:n.san,fen:n.fen}); const normalized = fen => { const board = new Chess(fen); const parts = board.fen().split(' '); if (!board.moves({verbose:true}).some(m => m.flags.includes('e'))) parts[3] = '-'; return parts; }; return {gameId:studyContext.gameId,root:normalized(studyContext.initialFen).join(' '),fen:normalized(chess.fen()).slice(0,4).join(' '),history:history(),entries:nodes}; },
-    render:renderPanel, play:playUci, tab:() => setTab('repertoire'), pause:resetTransport, resume:() => { refreshBoardBounds(); scheduleAnalysis(); }
+    render:renderPanel, play:playUci, tab:() => setTab('repertoire'), marker:showRepertoireMarker,
+    settings:() => openPanelView('repertoireSettings'), closeSettings:closePanelView
   }) : null;
   window.InstinctaZero.openRepertoires = () => repertoirePanel && repertoirePanel.openLibrary();
   loadUiSettings(); loadStudyState(); document.querySelectorAll('.tabs [data-tab]').forEach(item => item.classList.toggle('selected', item.dataset.tab === tab)); renderPanel(); refreshBoardBounds();

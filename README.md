@@ -1,17 +1,20 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.7.0 adds an annotated repertoire companion to the simple analysis app.
+InstinctaZero Android 0.7.1 makes the repertoire companion move-first, with readable comments and optional board markers.
 
 The board, arrows, mainline navigation and portrait configuration remain unchanged
 from the simple version. This is not a return of the reverted multi-study redesign.
 
-Open **Repertoires** from Home or the side menu, download the annotated library
-from the paired PC, and choose which repertoires to compare. The analysis tab has
-both a combined view and per-repertoire filters. Selections are saved independently
-for each archived game and the local board. All checks after download run against
+Open **Repertoires** from Home or the side menu. The settings gear contains the
+one-time download, repertoire selection, combined/individual view, and book-marker
+toggle. Saved choices open directly into moves; new games inherit your latest
+selection, while existing per-game choices remain separate. Tap a comment bubble
+to read without playing a move, or expand the played move's note above the list.
+Filled board markers mean recorded theory; outlined markers mean a matching
+position by a different history, without clearing the deviation. All checks run against
 an indexed on-device database; the corpus is not loaded into the WebView or shipped
 in this repository/APK. See [Repertoires](docs/repertoires.md) for meaning, edits and
-limits. The in-app **?** opens the same usage guidance.
+limits. **How to use** in repertoire settings opens the same usage guidance.
 
 Menus use quieter warm accents, rounded touch controls and short tab transitions.
 No local PGN files, archived game PGNs, pairing or PC annotations are modified.

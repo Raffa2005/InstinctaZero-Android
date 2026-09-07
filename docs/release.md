@@ -1,7 +1,7 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.7.0). Before producing a release APK, rebuild and verify the two
+(version 0.7.1). Before producing a release APK, rebuild and verify the two
 checked-in browser assets from their retained sources:
 
 ```bash
@@ -38,7 +38,7 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 21 / 0.7.0 release values;
+- versionCode/versionName are the intended 22 / 0.7.1 release values;
 - no local PGN files or source annotations are deleted or modified;
 - board/piece assets, arrow metrics and portrait manifest retain the simple version. Do not use the USB
   tethering phone for testing or disconnect it;
@@ -46,6 +46,10 @@ Before publishing, at minimum verify:
   build all pass;
 - run `npm run test:repertoire-ui` under Node 20+ with `PHONE_PREVIEW_CHROMIUM`
   pointing at a local headless Chromium. No real account or phone is used;
+- verify compact repertoire rows, full escaped comments, restored selections,
+  new-game defaults, explicit empty selections, and the persistent board-marker
+  toggle. Markers must follow both orientations and navigation, reject stale
+  callbacks, and distinguish transpositions without changing theory status;
 - optionally set `REPERTOIRE_TEST_INDEX` and `REPERTOIRE_TEST_CASES` for native
   integration checks against private reference lookups. Do not commit those files;
 - verify the paired PC serves the read-only repertoire endpoints, rejects

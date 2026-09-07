@@ -73,6 +73,56 @@ internal class RepertoireStore(context: Context) {
 
     private data class Node(val uci: String, val san: String, val kind: String, val theory: Boolean,
         val alternative: Boolean, val reason: String, val comment: String, val fen: String)
+    private fun comments(nodes: List<Node>): JSONArray = JSONArray(nodes.map { it.comment }.filter { it.isNotBlank() }.distinct())
+
+    /** A position badge is discovery only, never permission to reactivate the actual history.
+     * Only another active, locally unmasked source path qualifies as a transposition match.
+     */
+    private fun positionMatches(db: SQLiteDatabase, rep: String, fen: String, currentPath: String): Int {
+        val local = overrides(rep)
+        val excluded = local.keys().asSequence().filter { local.getJSONObject(it).optString("kind") == "analysis" }.toSet()
+        fun unmasked(id: Long): Boolean {
+            if (excluded.isEmpty()) return true
+            var next = id
+            repeat(513) {
+                if (next == 0L) return true
+                db.rawQuery("SELECT path_id,parent_id FROM nodes WHERE id=?", arrayOf(next.toString())).use { row ->
+                    if (!row.moveToFirst() || row.getString(0) in excluded) return false
+                    next = if (row.isNull(1)) 0 else row.getLong(1)
+                }
+            }
+            return false
+        }
+        val eligible = mutableSetOf<String>()
+        db.rawQuery("SELECT id,path_id FROM nodes WHERE repertoire_id=? AND fen=? AND theory=1", arrayOf(rep, position(fen))).use { rows ->
+            while (rows.moveToNext()) {
+                val key = rows.getString(1)
+                if (key != currentPath && key !in eligible && unmasked(rows.getLong(0))) eligible.add(key)
+            }
+        }
+        // Local extensions participate too, but a removed/excluded ancestor cannot become a
+        // back door into theory merely because its descendant still has a stored FEN.
+        fun activeLocalPath(key: String): Boolean {
+            var next = key
+            repeat(513) {
+                if (next in excluded) return false
+                val edit = local.optJSONObject(next)
+                if (edit?.optBoolean("added") == true) next = edit.optString("parent")
+                else {
+                    db.rawQuery("SELECT id FROM nodes WHERE repertoire_id=? AND path_id=? AND theory=1", arrayOf(rep, next)).use { rows ->
+                        while (rows.moveToNext()) if (unmasked(rows.getLong(0))) return true
+                    }
+                    return false
+                }
+            }
+            return false
+        }
+        local.keys().forEach { key ->
+            val edit = local.getJSONObject(key)
+            if (key != currentPath && edit.optBoolean("added") && position(edit.optString("fen")) == position(fen) && activeLocalPath(key)) eligible.add(key)
+        }
+        return eligible.size
+    }
     private fun source(db: SQLiteDatabase, rep: String, root: String, moves: List<String>, children: Boolean = false): List<Node> {
         val query = if (children) "SELECT uci,san,kind,theory,line_alternative,reason,comment,fen FROM nodes WHERE parent_id IN (SELECT id FROM nodes WHERE repertoire_id=? AND path_id=?)"
             else "SELECT uci,san,kind,theory,line_alternative,reason,comment,fen FROM nodes WHERE repertoire_id=? AND path_id=?"
@@ -133,6 +183,7 @@ internal class RepertoireStore(context: Context) {
                 val identity = identity(db, rep)
                 val memo = mutableMapOf<String, State>()
                 val current = state(db, rep, identity.second, root, moves, memo)
+                val currentNodes = source(db, rep, root, moves)
                 val children = source(db, rep, root, moves, true).groupBy { it.uci }.toMutableMap()
                 val local = overrides(rep)
                 local.keys().forEach { key ->
@@ -149,13 +200,15 @@ internal class RepertoireStore(context: Context) {
                     val best = occurrences.firstOrNull { it.theory && !it.alternative } ?: occurrences.firstOrNull { it.theory } ?: occurrences.first()
                     lines.put(JSONObject().put("uci", uci).put("san", best.san).put("kind", child.kind).put("theory", child.theory)
                         .put("alternative", child.alternative).put("own", ownMove(identity.second, root, moves.size + 1))
-                        .put("reason", child.reason).put("comment", best.comment.take(4000)).put("edited", local.has(pathId(root, moves + uci))))
+                        .put("reason", child.reason).put("comment", best.comment).put("comments", comments(occurrences))
+                        .put("edited", local.has(pathId(root, moves + uci))))
                 }
-                val candidates = if (!current.known) db.rawQuery("SELECT count(*) FROM nodes WHERE repertoire_id=? AND fen=? AND theory=1", arrayOf(rep, position(request.getString("fen")))).use { it.moveToFirst(); it.getInt(0) } else 0
+                val candidates = if (!current.theory) positionMatches(db, rep, request.getString("fen"), pathId(root, moves)) else 0
                 results.put(JSONObject().put("id", rep).put("name", identity.first).put("side", identity.second)
                     .put("known", current.known).put("theory", current.theory).put("alternative", current.alternative)
                     .put("kind", current.kind).put("reason", current.reason).put("deviation", current.deviation)
-                    .put("candidates", candidates).put("moves", lines))
+                    .put("candidates", candidates).put("position_match", candidates > 0)
+                    .put("comments", comments(currentNodes)).put("moves", lines))
             }
         }
         return JSONObject().put("results", results)

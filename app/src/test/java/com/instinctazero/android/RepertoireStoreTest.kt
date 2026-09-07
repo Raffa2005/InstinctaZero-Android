@@ -116,4 +116,45 @@ class RepertoireStoreTest {
             assertTrue(result(listOf("e2e4")).getBoolean("theory"))
         } finally { release.countDown(); download.get(5,java.util.concurrent.TimeUnit.SECONDS); worker.shutdownNow() }
     }
+
+    @Test fun allDistinctSourceCommentsSurviveForCurrentMoveAndContinuations() {
+        val longComment = "A full annotation with <markup> & variations.\n".repeat(110)
+        SQLiteDatabase.openDatabase(File(context.filesDir,"mobile_repertoire.sqlite").path,null,SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("UPDATE nodes SET comment=? WHERE id=8", arrayOf(longComment))
+        }
+        val played = result(listOf("e2e4")).getJSONArray("comments")
+        assertEquals(2,played.length()); assertEquals(longComment,played.getString(1))
+        val continuation = result(emptyList()).getJSONArray("moves").getJSONObject(0).getJSONArray("comments")
+        assertEquals(played.toString(),continuation.toString())
+        assertEquals(1,result(listOf("e2e4","e7e5")).getJSONArray("comments").length())
+    }
+
+    @Test fun transpositionMarkersRespectSourceExclusionsAndPositionIdentity() {
+        val target = "rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -"
+        SQLiteDatabase.openDatabase(File(context.filesDir,"mobile_repertoire.sqlite").path,null,SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("UPDATE nodes SET fen=? WHERE id=3",arrayOf(target))
+        }
+        fun match(fen: String = target) = store.lookup(request(listOf("g1f3","g8f6")).put("fen",fen)).getJSONArray("results").getJSONObject(0)
+        assertTrue(match().getBoolean("position_match")); assertFalse(match().getBoolean("theory"))
+        assertEquals(1,match().getInt("deviation"))
+        assertFalse(match(target.replace("w KQkq", "b KQkq")).getBoolean("position_match"))
+        assertFalse(match(target.replace("KQkq", "KQ")).getBoolean("position_match"))
+        edit(listOf("e2e4"),"analysis")
+        assertFalse(match().getBoolean("position_match"))
+        edit(listOf("e2e4"),"reset")
+        assertTrue(match().getBoolean("position_match"))
+        assertEquals(0,store.lookup(request(listOf("g1f3"),emptyList()).put("fen",target)).getJSONArray("results").length())
+    }
+
+    @Test fun localTranspositionsDisappearWhenTheirParentIsRemovedOrExcluded() {
+        val target = "rnbqkbnr/pp1ppppp/8/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq -"
+        val moves = listOf("e2e4","c7c5","g1f3")
+        fun add() = store.edit(request(moves).put("id","white").put("kind","add").put("entries",JSONArray(moves.mapIndexed { index, move -> JSONObject().put("san",move).put("fen",if(index==2)target else root) })))
+        fun match() = store.lookup(request(listOf("g1f3","c7c5","e2e4")).put("fen",target)).getJSONArray("results").getJSONObject(0).getBoolean("position_match")
+        add(); assertTrue(match())
+        edit(moves.take(2),"analysis"); assertFalse(match())
+        edit(moves.take(2),"reset"); assertFalse(match())
+        add(); assertTrue(match())
+        assertArrayEquals(bytes,File(context.filesDir,"mobile_repertoire.sqlite").readBytes())
+    }
 }

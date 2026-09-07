@@ -8,14 +8,24 @@ match the derived SQLite index before it can be downloaded.
 
 ## Use on the phone
 
-1. Open **Repertoires** on Home or in the menu; tap **Download from PC** once.
-2. Select one or several repertoires. Tap **Compare selected** to use the board.
-3. During game analysis, open the new repertoire tab to change this game's selection.
-   **Combined** shows selected repertoires together, labelled separately. A name
-   chip isolates one repertoire without changing the selected set or another repertoire's edits.
-4. The header reports repertoire status. The repertoire panel identifies whose
-   move first left the recorded history. This is a coverage label, not an engine verdict.
-5. Tap a move to play it. Tap its sliders icon for annotation details and local adjustments.
+1. Open **Repertoires** on Home or in the menu. For first setup, open settings
+   and **Download from PC** once, then select one or several repertoires.
+2. Tap the bottom settings gear again to return to moves. There is no chooser
+   on subsequent opens. Selections survive restarts; new games inherit your latest
+   selection, while existing game-specific choices (including none) remain separate.
+3. The gear holds all selection controls. **Combined** shows each move once;
+   a name chip isolates a repertoire without altering its independent annotations.
+4. Tap a move to play it. Its comment bubble opens all distinct source comments
+   without playing the move. The current position's comment appears above the
+   continuations; tap the preview to expand it. Forward/back navigation updates it.
+5. The header reports coverage and the first deviation, not an engine verdict.
+   A filled book on the destination square means the move is in a selected repertoire.
+   An outlined book means a position match by a different history; it does not
+   reactivate theory. Locally excluded/removed candidate lines do not qualify.
+   **Book marker on board** in settings toggles both markers (default on).
+   Markers check all selected repertoires, independent of the focused move-list view.
+6. The sliders beside a move open local adjustments. Where repertoires overlap,
+   choose which repertoire to adjust. **Add current line** is in settings.
 
 ## Alternatives and information
 
@@ -49,7 +59,9 @@ rules and rebuild their index, then update the phone copy.
 - Local overrides have a 4 MiB cap, are keyed by repertoire and stable history
   identity, and survive corpus updates. They are phone-local, not cloud-synced.
 - Up to 16 repertoires can be selected; the existing analysis history limit is
-  512 plies. Source comments shown in a move detail are capped at 4,000 characters.
+  512 plies. All distinct comments at the current history and its continuations
+  are returned in full, including comments from additional source occurrences.
+  They are rendered as plain text, never executable HTML.
 - No SRS trainer, arbitrary unannotated PGN importer or source-rule editor is
   introduced in this pass. This feature does not resurrect the reverted study UI.
 - The private corpus is never included in the public source repository or APK.
