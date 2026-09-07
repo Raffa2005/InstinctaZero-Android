@@ -2,10 +2,11 @@
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {readFile, mkdir} from 'node:fs/promises';
-import {fileURLToPath} from 'node:url';
+import {pathToFileURL} from 'node:url';
+import {resolve} from 'node:path';
 import {chromium} from 'playwright';
 
-const assets = new URL('../../app/src/main/assets/analysis/', import.meta.url);
+const assets = process.env.PHONE_PREVIEW_ASSETS ? pathToFileURL(resolve(process.env.PHONE_PREVIEW_ASSETS) + '/') : new URL('../../app/src/main/assets/analysis/', import.meta.url);
 const output = process.env.PHONE_PREVIEW_OUTPUT || '/tmp/instinctazero-repertoire-preview';
 await mkdir(output,{recursive:true});
 const server = createServer(async (req,res) => {
