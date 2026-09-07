@@ -103,3 +103,11 @@ test('failed undo stays retryable and a newer native journal replaces an obsolet
   const count=h.requests.length;h.click({repAction:'undo',repUndoToken:'one'});assert.equal(h.requests.length,count);
   h.click({repAction:'undo',repUndoToken:'two'});assert.equal(h.last.token,'two');assert.equal(h.last.action,'undo');
 });
+
+test('variation introductions follow immediate child projections without becoming executable markup',()=>{
+  const h=harness();h.reply(h.last,{results:[result({moves:[move('e2e4',{starting_comments:['Introduction <script>not code</script>']})]})]});
+  h.go(['e2e4']);
+  assert.match(h.panel.html(),/Introduction &lt;script&gt;not code&lt;\/script&gt;/);
+  assert.doesNotMatch(h.panel.html(),/<script>/);
+  assert.deepEqual(h.marker,{kind:'theory',end:true});
+});

@@ -26,7 +26,7 @@ try {
     const errors=[];page.on('pageerror',error=>errors.push(error.message));
     await page.addInitScript(() => {
       let sequence=0, installed=true;
-      const catalog=[{id:'white',name:'Tame the Sicilian',side:'white'},{id:'qga',name:'Queen’s Gambit Accepted',side:'black'},{id:'black',name:'Taimanov Sicilian',side:'black'}];
+      const catalog=[{id:'white',name:'Tame the Sicilian',side:'white'},{id:'qga',name:'Queen’s Gambit Accepted',side:'black'},{id:'black',name:'Taimanov Sicilian',side:'black'},{id:'ruy_lopez',name:'Ruy Lopez',side:'white'},{id:'jobava_london',name:'Jobava London',side:'white'}];
       const settings=JSON.parse(localStorage.getItem('repertoires') || '{"analysis":["white","black"]}');window.__test={requests:[],saved:localStorage.getItem('study') || '{}',edits:[],failDownload:false,delay:12};
       const additions=JSON.parse(localStorage.getItem('additions') || '{}');
       let undo=JSON.parse(localStorage.getItem('repertoireUndo') || 'null');
@@ -70,7 +70,7 @@ try {
             result={results:request.selected.map(rep=>({...catalog.find(r=>r.id===rep),theory:length<3,alternative:false,deviation:length>=3?3:0,candidates:length===3?1:0,position_match:length===3,
               comments:length?['Control the centre.\nKeep an eye on the d5 break.','<img src=x onerror=alert(1)> is plain source text.']:[],
               moves:[
-                {uci:next[0],san:next[1],theory:true,alternative:length>0,own:length%2===0?rep==='white':rep!=='white',reason:'Source annotation',comments:['Develop naturally and prepare the centre.',rep==='white'?'A second file contributes another useful comment.':'Black’s perspective on this position.'],kind:length>0&&rep!=='white'?'alternative':'repertoire'},
+                {uci:next[0],san:next[1],theory:true,alternative:length>0,own:length%2===0?rep==='white':rep!=='white',reason:'Source annotation',starting_comments:['Introduction to this variation <not markup>'],comments:['Develop naturally and prepare the centre.',rep==='white'?'A second file contributes another useful comment.':'Black’s perspective on this position.'],kind:length>0&&rep!=='white'?'alternative':'repertoire'},
                 ...(length<2?[{uci:length===0?'d2d4':'e7e5',san:length===0?'d4':'e5',theory:false,alternative:false,own:false,kind:'analysis',reason:'Informational only; does not reactivate theory',comment:''}]:[])
               ]}))};
             if(window.__test.extensionMode) result={results:request.selected.map(rep=>{
@@ -98,6 +98,8 @@ try {
     await page.getByRole('button',{name:'Comments on e4',exact:true}).tap();
     assert.match(await page.locator('.rep-comments').innerText(),/second file/);
     assert.match(await page.locator('.rep-comments').innerText(),/Black’s perspective/);
+    assert.match(await page.locator('.rep-comments').innerText(),/Before move/);
+    assert.match(await page.locator('.rep-comments').innerText(),/Introduction to this variation <not markup>/);
     assert.equal(await page.locator('[data-action=prev]').isDisabled(),true,'reading does not play a move');
     await page.screenshot({path:`${output}/comments-${width}.png`});
     await page.locator('[data-rep-play=e2e4]').tap();
@@ -123,6 +125,22 @@ try {
     await page.getByRole('switch',{name:'Book marker on board'}).tap();
     assert.equal(await page.locator('.repertoire-book-marker').isVisible(),false);
     assert.equal(await page.locator('.rep-card.checked').count(),2);
+    assert.equal(await page.locator('.rep-card').count(),5);
+    await page.getByRole('checkbox',{name:/Ruy Lopez/}).tap();
+    await page.getByRole('checkbox',{name:/Jobava London/}).tap();
+    assert.equal(await page.locator('.rep-card.checked').count(),4);
+    await page.screenshot({path:`${output}/five-repertoires-${width}.png`});
+    const selection=await page.evaluate(()=>JSON.parse(localStorage.getItem('repertoires')).analysis);
+    assert.deepEqual(selection,['white','black','ruy_lopez','jobava_london']);
+    await page.locator('[data-action=settings]').tap();
+    await page.waitForFunction(()=>window.__test.requests.some(r=>r.action==='lookup'&&r.selected.includes('ruy_lopez')&&r.selected.includes('jobava_london')));
+    await page.reload();
+    await page.locator('[data-rep-play=c7c5]').waitFor();
+    await page.locator('[data-action=settings]').tap();
+    assert.equal(await page.getByRole('checkbox',{name:/Ruy Lopez/}).getAttribute('aria-checked'),'true');
+    assert.equal(await page.getByRole('checkbox',{name:/Jobava London/}).getAttribute('aria-checked'),'true');
+    await page.getByRole('checkbox',{name:/Ruy Lopez/}).tap();
+    await page.getByRole('checkbox',{name:/Jobava London/}).tap();
     await page.screenshot({path:`${output}/settings-${width}.png`});
     await page.locator('[data-rep-focus=white]').tap();
     await page.locator('[data-action=settings]').tap();
@@ -245,6 +263,7 @@ try {
     const selectionBeforeUndo=await page.evaluate(()=>localStorage.getItem('repertoires'));
     await page.getByRole('button',{name:'Undo last repertoire change',exact:true}).tap();
     await page.waitForFunction(()=>window.__test.additions.white?.length===1);
+    await page.getByText('Change undone · Tame the Sicilian',{exact:true}).waitFor();
     assert.equal(await page.evaluate(()=>localStorage.getItem('repertoires')),selectionBeforeUndo,'undo never rolls back selected repertoires');
     assert.equal(await page.evaluate(()=>JSON.parse(window.__test.saved).cursor.length),6,'undo leaves the analyzed line in place');
     assert.equal(await page.locator('[data-rep-action=undo]').count(),0);

@@ -16,6 +16,7 @@ internal class RepertoireStore(context: Context) {
     private val prefs = context.getSharedPreferences("mobile_repertoire_preferences", Context.MODE_PRIVATE)
     private val editsFile = AtomicFile(File(context.filesDir, "mobile_repertoire_edits.json"))
     private var undoRecord: JSONObject? = null
+    private var hasStartingComments: Boolean? = null
     private val edits: JSONObject by lazy {
         val saved = runCatching { JSONObject(String(editsFile.readFully(), Charsets.UTF_8)) }.getOrDefault(JSONObject())
         val record = saved.remove("_undo") as? JSONObject
@@ -32,7 +33,7 @@ internal class RepertoireStore(context: Context) {
     }
 
     companion object {
-        const val MAX_BYTES = 80L * 1024 * 1024
+        const val MAX_BYTES = 128L * 1024 * 1024
         fun position(fen: String): String = fen.trim().split(Regex("\\s+")).take(4).joinToString(" ")
         fun pathId(root: String, moves: List<String>): String = hash(("repertoire-path-v1\n${position(root)}\n${moves.joinToString(" ")}").toByteArray()).take(32)
         fun hash(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
@@ -50,7 +51,7 @@ internal class RepertoireStore(context: Context) {
                     val count = input.read(buffer)
                     if (count < 0) break
                     total += count
-                    require(total <= MAX_BYTES) { "Repertoire is larger than 80 MiB" }
+                    require(total <= MAX_BYTES) { "Repertoire is larger than 128 MiB" }
                     digest.update(buffer, 0, count); output.write(buffer, 0, count)
                 }
             }
@@ -63,6 +64,7 @@ internal class RepertoireStore(context: Context) {
             }
             synchronized(this) {
                 check(temporary.renameTo(file)) { "Unable to install repertoire download" }
+                hasStartingComments = null
                 prefs.edit().putString("fingerprint", expected).apply()
             }
         } finally { temporary.delete() }
@@ -134,8 +136,9 @@ internal class RepertoireStore(context: Context) {
     }
 
     private data class Node(val uci: String, val san: String, val kind: String, val theory: Boolean,
-        val alternative: Boolean, val reason: String, val comment: String, val fen: String)
-    private fun comments(nodes: List<Node>): JSONArray = JSONArray(nodes.map { it.comment }.filter { it.isNotBlank() }.distinct())
+        val alternative: Boolean, val reason: String, val comment: String, val fen: String, val introduction: String = "")
+    private fun comments(nodes: List<Node>, introductions: Boolean = false): JSONArray =
+        JSONArray(nodes.map { if (introductions) it.introduction else it.comment }.filter { it.isNotBlank() }.distinct())
 
     /** A position badge is discovery only, never permission to reactivate the actual history.
      * Only another active, locally unmasked source path qualifies as a transposition match.
@@ -186,11 +189,19 @@ internal class RepertoireStore(context: Context) {
         return eligible.size
     }
     private fun source(db: SQLiteDatabase, rep: String, root: String, moves: List<String>, children: Boolean = false): List<Node> {
-        val query = if (children) "SELECT uci,san,kind,theory,line_alternative,reason,comment,fen FROM nodes WHERE parent_id IN (SELECT id FROM nodes WHERE repertoire_id=? AND path_id=?)"
-            else "SELECT uci,san,kind,theory,line_alternative,reason,comment,fen FROM nodes WHERE repertoire_id=? AND path_id=?"
+        // Older downloaded packages lack the additive introduction column. Detect once per
+        // installed database, not once per move, and keep those offline copies readable.
+        val introductions = hasStartingComments ?: db.rawQuery("PRAGMA table_info(nodes)", null).use { columns ->
+            var found = false
+            while (columns.moveToNext()) if (columns.getString(1) == "starting_comment") found = true
+            found.also { hasStartingComments = it }
+        }
+        val fields = "uci,san,kind,theory,line_alternative,reason,comment,fen," + if (introductions) "starting_comment" else "''"
+        val query = if (children) "SELECT $fields FROM nodes WHERE parent_id IN (SELECT id FROM nodes WHERE repertoire_id=? AND path_id=?)"
+            else "SELECT $fields FROM nodes WHERE repertoire_id=? AND path_id=?"
         return db.rawQuery(query, arrayOf(rep, pathId(root, moves))).use { rows ->
             buildList { while (rows.moveToNext()) add(Node(rows.getString(0) ?: "", rows.getString(1) ?: "", rows.getString(2), rows.getInt(3) == 1,
-                rows.getInt(4) == 1, rows.getString(5) ?: "", rows.getString(6) ?: "", rows.getString(7))) }
+                rows.getInt(4) == 1, rows.getString(5) ?: "", rows.getString(6) ?: "", rows.getString(7), rows.getString(8) ?: "")) }
         }
     }
     private fun overrides(rep: String): JSONObject = edits.optJSONObject(rep) ?: JSONObject()
@@ -298,6 +309,7 @@ internal class RepertoireStore(context: Context) {
                         .put("end_of_line", child.theory && !hasTheoryChild(db, rep, root, moves + uci))
                         .put("position_match", !child.theory && positionMatches(db, rep, best.fen, pathId(root, moves + uci)) > 0)
                         .put("reason", child.reason).put("comment", best.comment).put("comments", comments(occurrences))
+                        .put("starting_comments", comments(occurrences, true))
                         .put("edited", local.has(pathId(root, moves + uci))))
                 }
                 val candidates = if (!current.theory) positionMatches(db, rep, request.getString("fen"), pathId(root, moves)) else 0
@@ -308,7 +320,7 @@ internal class RepertoireStore(context: Context) {
                     .put("candidates", candidates).put("position_match", candidates > 0)
                     .put("end_of_line", current.theory && !hasContinuation)
                     .put("can_add", additions > 0).put("add_count", maxOf(0, additions))
-                    .put("comments", comments(currentNodes)).put("moves", lines))
+                    .put("comments", comments(currentNodes)).put("starting_comments", comments(currentNodes, true)).put("moves", lines))
             }
         }
         return JSONObject().put("results", results)

@@ -1,7 +1,7 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.7.3). Before producing a release APK, rebuild and verify the two
+(version 0.7.4). Before producing a release APK, rebuild and verify the two
 checked-in browser assets from their retained sources:
 
 ```bash
@@ -38,7 +38,13 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 24 / 0.7.3 release values;
+- versionCode/versionName are the intended 25 / 0.7.4 release values;
+- the expanded catalog supports independent and combined selection of all five
+  repertoires. Corpus updates retain edits, selections and Undo; old offline
+  packages remain readable. Variation introductions retain their Before move role;
+- streamed downloads accept the current >80 MiB library and reject >128 MiB
+  without replacing the saved copy. Unknown resolver versions and stale hashes
+  still fail closed on the PC;
 - no local PGN files or source annotations are deleted or modified;
 - board/piece assets, arrow metrics and portrait manifest retain the simple version. Do not use the USB
   tethering phone for testing or disconnect it;

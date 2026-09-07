@@ -55,6 +55,7 @@
             alternative:!!child?.alternative, kind:child?.kind || 'unknown',
             deviation:child?.deviation ?? (rep.deviation || next.history.length),
             end_of_line:!!child?.end_of_line, position_match:!!child?.position_match,
+            starting_comments:child?.starting_comments || [],
             comments:child?.comments || (child?.comment ? [child.comment] : []), moves:[], pending:true};
         });
         remember(cacheKey(next,ids), projected, false);
@@ -127,15 +128,16 @@
       const unique = new Map();
       for (const {rep, move} of entries) {
         const comments = Array.isArray(move.comments) ? move.comments : [move.comment];
-        for (const text of comments) if (typeof text === 'string' && text.trim()) {
-          if (!unique.has(text)) unique.set(text, new Set());
-          unique.get(text).add(rep.name);
+        for (const [role, notes] of [['Before move', move.starting_comments || []], ['', comments]]) for (const text of notes) if (typeof text === 'string' && text.trim()) {
+          const key = JSON.stringify([role,text]);
+          if (!unique.has(key)) unique.set(key, {text, role, sources:new Set()});
+          unique.get(key).sources.add(rep.name);
         }
       }
-      return [...unique].map(([text, sources]) => ({text, sources:[...sources]}));
+      return [...unique.values()].map(note => ({...note,sources:[...note.sources]}));
     }
     function commentsHtml(comments) {
-      return comments.map(note => '<div class="rep-note"><small>' + escape(note.sources.join(' · ')) + '</small><p>' + escape(note.text) + '</p></div>').join('');
+      return comments.map(note => '<div class="rep-note"><small>' + escape([note.role,...note.sources].filter(Boolean).join(' · ')) + '</small><p>' + escape(note.text) + '</p></div>').join('');
     }
     function rows() {
       const grouped = new Map();

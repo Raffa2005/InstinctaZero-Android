@@ -2,7 +2,8 @@
 
 The PC source is the annotated repertoire package, not an indiscriminate PGN merge.
 The installed source on Rafael's PC is `~/Repertoire` (not `~/projects/Repertoire`).
-Only the three corrected PGNs named by `annotations/manifest.json` are used;
+Only the corrected PGNs named by `annotations/manifest.json` are used (currently
+Tame the Sicilian, Queen’s Gambit Accepted, Taimanov Sicilian, Ruy Lopez and Jobava London);
 `archive/` is not imported. The source package's PGN and sidecar fingerprints must
 match the derived SQLite index before it can be downloaded.
 
@@ -10,6 +11,8 @@ match the derived SQLite index before it can be downloaded.
 
 1. Open **Repertoires** on Home or in the menu. For first setup, open settings
    and **Download from PC** once, then select one or several repertoires.
+   For the expanded library, install v0.7.4 or newer, tap **Update from PC**, then
+   select Ruy Lopez and/or Jobava London. New repertoires are not auto-selected.
 2. Tap the bottom settings gear again to return to moves. There is no chooser
    on subsequent opens. Selections survive restarts; new games inherit your latest
    selection, while existing game-specific choices (including none) remain separate.
@@ -18,6 +21,8 @@ match the derived SQLite index before it can be downloaded.
 4. Tap a move to play it. Its comment bubble opens all distinct source comments
    without playing the move. The current position's comment appears above the
    continuations; tap the preview to expand it. Forward/back navigation updates it.
+   Introductions to a variation appear with a **Before move** label, separately
+   from the after-move comments. Older downloaded packages remain readable.
 5. The header reports coverage and the first deviation, not an engine verdict.
    A filled book on the destination square means the move is in a selected repertoire.
    An outlined book means a position match by a different history; it does not
@@ -78,9 +83,14 @@ rules and rebuild their index, then update the phone copy.
   keyed by complete history, initial position and selected repertoires, and is
   invalidated on edits/download updates. A transposition never becomes theory
   merely because another history or position was cached.
-- Downloads use the existing paired-device token and HTTPS gateway. Up to 80 MiB
+- Downloads use the existing paired-device token and HTTPS gateway. Up to 128 MiB
   uncompressed; gzip in transit. Checksummed installation replaces the prior copy
   only after validation. A slow or interrupted download leaves that copy usable.
+- The five PGNs total approximately 6.5 MiB; the full derived PC index is about
+  83.6 MiB on disk / 15.8 MiB over gzip. It includes repeated source occurrences,
+  positions, annotation reasons and lookup indexes. It is streamed to disk in
+  64 KiB chunks, not retained in a giant JavaScript or native byte array. These
+  sizes are for the September 7 package; the 128 MiB cap is not an allocation.
 - Local overrides have a 4 MiB cap, are keyed by repertoire and stable history
   identity, and survive corpus updates. They are phone-local, not cloud-synced.
 - One inverse edit journal is stored alongside the overrides in the same atomic

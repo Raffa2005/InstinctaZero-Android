@@ -1,6 +1,10 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.7.3 adds persistent, one-step undo for repertoire changes.
+InstinctaZero Android 0.7.4 supports the expanded five-repertoire PC library,
+including Ruy Lopez and Jobava London. After updating the app, open Repertoires →
+settings → **Update from PC**, then select either or both new repertoires.
+Existing selections, local edits and the last Undo step survive the download.
+Variation-introduction comments are preserved separately from after-move notes.
 
 The board, arrows, mainline navigation and portrait configuration remain unchanged
 from the simple version. This is not a return of the reverted multi-study redesign.
