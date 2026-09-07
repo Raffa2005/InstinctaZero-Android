@@ -14,7 +14,7 @@ function harness() {
     downloadRepertoires:()=>{const id=String(requests.length+1);requests.push({requestId:id,action:'download'});return id;}}};
   vm.runInNewContext(source,{window,setTimeout:fn=>timers.push(fn)});
   const panel=window.createRepertoirePanel({key:()=>null,root:()=>context.root,context:()=>context,hasMoves:()=>!!context.history.length,
-    marker:(kind,end)=>markers.push({kind,end}),render:()=>renders++,settings:()=>{},closeSettings:()=>{}});
+    marker:(kind,end)=>markers.push({kind,end}),render:()=>renders++,settings:()=>{},closeSettings:()=>{},tab:()=>{}});
   const reply=(request,data)=>window.InstinctaZero.onNativeRepertoire(request.requestId,JSON.stringify(data));
   timers.shift()();reply(requests.at(-1),{installed:true,repertoires:[{id:'r',name:'Test',side:'white'}]});
   return {panel,requests,markers,settings,reply,go(history,root=context.root){context={...context,history,root};panel.refresh();},
@@ -24,6 +24,29 @@ function harness() {
 }
 const result = (extra={})=>({id:'r',name:'Test',side:'white',theory:true,comments:[],moves:[],...extra});
 const move = (uci,extra={})=>({uci,san:uci,theory:true,deviation:0,comments:['Already known comment'],end_of_line:true,...extra});
+
+test('extension chooses the nearest covered repertoire, never arbitrary catalog order',()=>{
+  const h=harness();
+  h.reply(h.last,{results:[result({id:'unrelated',name:'Unrelated',theory:false,can_add:true,add_count:17,deviation:1}),
+    result({id:'english',name:'English',theory:false,can_add:true,add_count:1,deviation:17})]});
+  h.click({repAction:'quick-add'});
+  assert.equal(h.last.action,'edit');assert.equal(h.last.id,'english');assert.equal(h.last.kind,'add');
+});
+
+test('equally plausible repertoires keep the chooser and a single candidate needs no extra choice',()=>{
+  const h=harness();
+  h.reply(h.last,{results:[result({id:'one',name:'One',can_add:true,deviation:4}),result({id:'two',name:'Two',can_add:true,deviation:4})]});
+  const count=h.requests.length;h.click({repAction:'quick-add'});assert.equal(h.requests.length,count);
+  assert.match(h.panel.html(),/data-rep-id="one"/);assert.match(h.panel.html(),/data-rep-id="two"/);
+  h.go(['e2e4']);h.reply(h.last,{results:[result({id:'one',can_add:true,deviation:4}),result({id:'two',can_add:false})]});
+  h.click({repAction:'quick-add'});assert.equal(h.last.action,'edit');assert.equal(h.last.id,'one');
+});
+
+test('opening a named library book refreshes the catalogue and selects that book',()=>{
+  const h=harness();h.panel.openLibrary('new');
+  h.reply(h.last,{installed:true,repertoires:[{id:'r',name:'Old',side:'white'},{id:'new',name:'New',side:'black',local:true}]});
+  assert.deepEqual(h.settings.analysis,['new']);assert.deepEqual(h.last.selected,['new']);
+});
 
 test('child marker and terminal status are synchronous for any navigation path, with immediate comments',()=>{
   const h=harness();h.reply(h.last,{results:[result({moves:[move('e2e4')]})]});

@@ -4,6 +4,7 @@ internal enum class ShellScreen {
     HOME,
     GAMES,
     PROFILE,
+    REPERTOIRES,
     ANALYSIS,
 }
 
@@ -65,6 +66,11 @@ internal class ShellNavigation {
         drawerOpen = false
         keypadOpen = false
     }
+    fun showRepertoires() {
+        screen = ShellScreen.REPERTOIRES
+        drawerOpen = false
+        keypadOpen = false
+    }
 
     fun openDrawer() {
         if (screen != ShellScreen.ANALYSIS) drawerOpen = true
@@ -91,7 +97,7 @@ internal class ShellNavigation {
             drawerOpen = false
             ShellBackAction.RENDER_NATIVE
         }
-        screen == ShellScreen.PROFILE || screen == ShellScreen.GAMES -> {
+        screen == ShellScreen.PROFILE || screen == ShellScreen.GAMES || screen == ShellScreen.REPERTOIRES -> {
             showHome()
             ShellBackAction.RENDER_NATIVE
         }

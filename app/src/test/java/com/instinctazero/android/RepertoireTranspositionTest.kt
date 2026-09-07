@@ -80,6 +80,23 @@ class RepertoireTranspositionTest {
         val fromPosition = request("reported").put("root",reported.getString("fen")).put("history",JSONArray()).put("entries",JSONArray())
         assertEquals(active(reported),active(store.lookup(fromPosition).getJSONArray("results").getJSONObject(0)))
     }
+    @Test fun sourceCommentEditsFollowTranspositionsAndProjectedMovesThenRestoreAndUndoExactly() {
+        val before=lookup("reported").toString()
+        val request=request("reported").put("id","qga").put("kind","comment").put("comment","My complete note.\nSecond paragraph.")
+        store.edit(request)
+        val edited=lookup("canonical")
+        assertTrue(edited.getBoolean("comment_edited"))
+        assertEquals("My complete note.\nSecond paragraph.",edited.getJSONArray("comments").getString(0))
+        val incoming=moves(lookup("reported",15)).single { it.getString("uci")=="b8d7" }
+        assertEquals(edited.getJSONArray("comments").toString(),incoming.getJSONObject("position").getJSONArray("comments").toString())
+        store.install(original.inputStream(),RepertoireStore.hash(original))
+        assertEquals(edited.toString(),lookup("canonical").toString())
+        store.edit(request.put("kind","reset_comment"))
+        assertEquals(before,lookup("reported").toString())
+        store.undo(store.undoInfo()!!.getString("token"))
+        assertEquals(edited.toString(),lookup("canonical").toString())
+        assertArrayEquals(original,File(RuntimeEnvironment.getApplication().filesDir,"mobile_repertoire.sqlite").readBytes())
+    }
     @Test fun anInactiveDuplicateDoesNotVetoAnActiveEdgeAndOpponentMovesAreNotAlternatives() {
         for (move in moves(lookup("reported"))) {
             assertTrue(move.getBoolean("theory")); assertFalse(move.getBoolean("own")); assertFalse(move.getBoolean("alternative"))

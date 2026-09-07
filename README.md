@@ -1,6 +1,14 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.7.6 speeds up offline repertoire navigation with direct indexed
+InstinctaZero Android 0.8.0 adds grouped, icon-led menus and a **Repertoire library**.
+Create named White/Black repertoires on the phone, open them on the existing board,
+and rename your own books. Write/edit position comments from a comment bubble,
+move adjustments, position settings or the confirmation after adding a line.
+**Save**, **Undo** and **Restore source text** keep editing explicit and recoverable.
+The nearest covered repertoire is used for one-tap extensions; genuine ties still ask.
+Names, new moves and comment overrides are saved locally, not synced to the PC.
+
+The v0.7.6 performance fix remains: offline repertoire navigation uses direct indexed
 lookups, narrower extension checks and a bounded position cache. It uses your existing
 download; no repertoire redownload, re-pairing or migration is needed. See the
 [verification and host benchmarks](docs/repertoire-performance.md).
@@ -22,7 +30,7 @@ author cutoffs remain distinct from the phone's position-based book coverage.
 The board, arrows, mainline navigation and portrait configuration remain unchanged
 from the simple version. This is not a return of the reverted multi-study redesign.
 
-Open **Repertoires** from Home or the side menu. The settings gear contains the
+Open **Repertoire board** from Home or the side menu. The settings gear contains the
 one-time download, repertoire selection, combined/individual view, and book-marker
 toggle. Saved choices open directly into moves; new games inherit your latest
 selection, while existing per-game choices remain separate. Tap a comment bubble
@@ -35,7 +43,8 @@ limits. **How to use** in repertoire settings opens the same usage guidance.
 Known move markers and comments appear immediately from the previous lookup;
 visited positions use a bounded cache. A small finish flag marks the end of
 active repertoire coverage. To extend a line, play moves on the board, then tap
-**Add move** or **Add line** in the repertoire tab. In combined view, choose the
+**Add move** or **Add line** in the repertoire tab. The closest covered repertoire is
+chosen automatically; when multiple candidates are equally close, choose the
 target repertoire explicitly. Additions save on this phone and survive restarts;
 source PGNs and archived game PGNs remain unchanged. Comment writing is deferred.
 

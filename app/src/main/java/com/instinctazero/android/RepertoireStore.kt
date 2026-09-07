@@ -34,6 +34,7 @@ internal class RepertoireStore(context: Context) {
 
     companion object {
         const val MAX_BYTES = 128L * 1024 * 1024
+        const val START_POSITION = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -"
         fun position(fen: String): String = fen.trim().split(Regex("\\s+")).take(4).joinToString(" ")
         fun pathId(root: String, moves: List<String>): String = hash(("repertoire-path-v1\n${position(root)}\n${moves.joinToString(" ")}").toByteArray()).take(32)
         fun hash(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
@@ -71,6 +72,35 @@ internal class RepertoireStore(context: Context) {
     }
 
     private fun open(path: File = file) = SQLiteDatabase.openDatabase(path.path, null, SQLiteDatabase.OPEN_READONLY)
+    private fun source() = if(file.isFile) open() else null
+    private fun localLibrary() = edits.optJSONObject("_local_repertoires") ?: JSONObject()
+    private fun localRoot(rep: String) = localLibrary().optJSONObject(rep)?.optString("root")
+    /** Metadata shares the atomic edits file, but creating/renaming an empty book does
+     * not discard the user's last reversible line/comment edit. */
+    @Synchronized fun saveRepertoire(request: JSONObject): JSONObject {
+        val name = request.getString("name").trim()
+        require(name.isNotEmpty() && name.length<=80) { "Use a repertoire name of 1–80 characters." }
+        val before = edits.toString(); val previousUndo = undoRecord?.toString()
+        try {
+            val library = localLibrary()
+            val requestedId = request.optString("id")
+            val id = requestedId.ifBlank { "local_" + UUID.randomUUID().toString().replace("-","") }
+            val item = if(requestedId.isNotBlank()) library.optJSONObject(id)
+                ?: throw IllegalArgumentException("Only phone-created repertoires can be renamed here.")
+            else {
+                require(library.length()<64) { "You can create up to 64 repertoires on this phone." }
+                val side = request.getString("side")
+                require(side in listOf("white","black")) { "Choose White or Black." }
+                JSONObject().put("side",side).put("root",START_POSITION)
+            }
+            library.put(id,item.put("name",name)); edits.put("_local_repertoires",library)
+            if(undoRecord?.optString("repertoire")==id) undoRecord?.put("name",name)
+            undoRecord?.put("after_hash",fingerprint(edits)); persistEdits(undoRecord)
+            return catalog().put("created_id",id)
+        } catch(error: Exception) {
+            restoreEdits(before); undoRecord = previousUndo?.let(::JSONObject); throw error
+        } finally { positionCache.clear() }
+    }
     private fun canonical(value: Any?): String = when (value) {
         null, JSONObject.NULL -> "null"
         is JSONObject -> value.keys().asSequence().toList().sorted().joinToString(",", "{", "}") { JSONObject.quote(it) + ":" + canonical(value.get(it)) }
@@ -125,13 +155,18 @@ internal class RepertoireStore(context: Context) {
         prefs.edit().putString("settings", JSONObject(raw).toString()).apply()
     }
     @Synchronized fun catalog(): JSONObject {
-        val result = JSONObject().put("installed", file.isFile).put("fingerprint", prefs.getString("fingerprint", ""))
+        val library = localLibrary()
+        val result = JSONObject().put("installed", file.isFile || library.length()>0).put("fingerprint", prefs.getString("fingerprint", ""))
         val list = JSONArray()
         if (file.isFile) open().use { db ->
             db.rawQuery("SELECT id,name,side,pgn FROM repertoires ORDER BY id", null).use { rows ->
                 while (rows.moveToNext()) list.put(JSONObject().put("id", rows.getString(0)).put("name", rows.getString(1))
                     .put("side", rows.getString(2)).put("file", rows.getString(3)))
             }
+        }
+        library.keys().forEach { id ->
+            val item = library.getJSONObject(id)
+            list.put(JSONObject().put("id",id).put("name",item.getString("name")).put("side",item.getString("side")).put("file","").put("local",true))
         }
         return result.put("repertoires", list).put("undo", undoInfo() ?: JSONObject.NULL)
     }
@@ -155,11 +190,11 @@ internal class RepertoireStore(context: Context) {
         val selected = request.getJSONArray("selected")
         require(selected.length() <= 16)
         val results = JSONArray()
-        if (!file.isFile) return JSONObject().put("results", results)
-        open().use { db ->
+        if (!file.isFile && localLibrary().length()==0) return JSONObject().put("results", results)
+        source().use { db ->
             for (index in 0 until selected.length()) {
                 val rep = selected.getString(index)
-                val book by lazy { RepertoirePositionBook(db,rep,overrides(rep)) }
+                val book by lazy { RepertoirePositionBook(db,rep,overrides(rep),localRoot(rep)) }
                 val current = positionCache.get(rep,fen) ?: run {
                     val identity = identity(db,rep)
                     book.status(fen).put("id",rep).put("name",identity.first).put("side",identity.second)
@@ -178,24 +213,38 @@ internal class RepertoireStore(context: Context) {
         }
         return JSONObject().put("results",results)
     }
-    private fun identity(db: SQLiteDatabase, rep: String): Pair<String, String> = db.rawQuery("SELECT name,side FROM repertoires WHERE id=?", arrayOf(rep)).use {
+    private fun identity(db: SQLiteDatabase?, rep: String): Pair<String, String> {
+        localLibrary().optJSONObject(rep)?.let { return it.getString("name") to it.getString("side") }
+        require(db!=null) { "Repertoire is not installed" }
+        return db.rawQuery("SELECT name,side FROM repertoires WHERE id=?", arrayOf(rep)).use {
         require(it.moveToFirst()) { "Repertoire is not installed" }; it.getString(0) to it.getString(1)
+        }
     }
     @Synchronized fun edit(request: JSONObject) {
         val rep = request.getString("id"); val moves = checkedMoves(request)
-        require(moves.isNotEmpty()) { "Choose a move first" }
         val kind = request.getString("kind")
-        require(kind in listOf("analysis", "alternative", "reset", "add"))
+        require(kind in listOf("analysis", "alternative", "reset", "add", "comment", "reset_comment"))
+        require(moves.isNotEmpty() || kind in listOf("comment","reset_comment")) { "Choose a move first" }
         val before = edits.toString()
         val previousLocal = JSONObject(overrides(rep).toString())
         var repertoireName = rep
         var removedAddition = false
         try {
-            open().use { db ->
+            source().use { db ->
                 val identity = identity(db, rep); repertoireName = identity.first
                 val local = overrides(rep); edits.put(rep, local)
-                val book = RepertoirePositionBook(db,rep,local)
-                if (kind == "add") {
+                val book = RepertoirePositionBook(db,rep,local,localRoot(rep))
+                if(kind in listOf("comment","reset_comment")) {
+                    val fen = position(request.getString("fen"))
+                    require(fen.length<=100 && book.status(fen).getBoolean("known")) { "Add the line before commenting on it." }
+                    val key = RepertoirePositionBook.commentKey(fen)
+                    if(kind=="reset_comment") local.remove(key)
+                    else {
+                        val text = request.getString("comment").replace("\r\n","\n")
+                        require(text.length<=64*1024) { "This comment is too long." }
+                        local.put(key,JSONObject().put("scope","comment").put("fen",fen).put("comment",text))
+                    }
+                } else if (kind == "add") {
                     val entries = request.getJSONArray("entries")
                     require(entries.length() == moves.size)
                     val additions = book.additions(positionHistory(request,moves),moves,entries)
@@ -238,6 +287,8 @@ internal class RepertoireStore(context: Context) {
                 "add" -> if (changes.length() == 1) "Added move" else "Added ${changes.length()} moves"
                 "analysis" -> "Excluded branch"
                 "alternative" -> "Made optional alternative"
+                "comment" -> "Edited comment"
+                "reset_comment" -> "Restored source comment"
                 else -> if (removedAddition) "Removed local addition" else "Restored original label"
             }
             val record = JSONObject().put("v", 1).put("token", UUID.randomUUID().toString())

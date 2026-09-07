@@ -259,7 +259,7 @@ class OfflineShellContractTest {
         assertFalse(activity.contains("navigation.screen == ShellScreen.HOME) refreshArchive()"))
         assertTrue(activity.contains("navigation.screen == ShellScreen.GAMES && !archiveRefreshedThisSession"))
         assertTrue(activity.contains("ShellScreen.GAMES -> page.addView(gamesContent()"))
-        assertTrue(activity.contains("drawerButton(\"Games\")"))
+        assertTrue(activity.contains("menu.row(\"\\uf009\",\"Games\")"))
         assertTrue(activity.contains("private fun gamePerfIcon"))
         assertTrue(activity.contains("if (initial > 0 || increment > 0)"))
         assertTrue(activity.contains("private fun gameResultPresentation"))

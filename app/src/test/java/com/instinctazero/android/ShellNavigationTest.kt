@@ -24,6 +24,10 @@ class ShellNavigationTest {
         assertEquals(ShellScreen.GAMES, navigation.screen)
         assertEquals(ShellBackAction.RENDER_NATIVE, navigation.onBack())
         assertEquals(ShellScreen.HOME, navigation.screen)
+        navigation.showRepertoires()
+        assertEquals(ShellScreen.REPERTOIRES,navigation.screen)
+        assertEquals(ShellBackAction.RENDER_NATIVE,navigation.onBack())
+        assertEquals(ShellScreen.HOME,navigation.screen)
 
         navigation.openDrawer()
         assertEquals(ShellBackAction.RENDER_NATIVE, navigation.onBack())

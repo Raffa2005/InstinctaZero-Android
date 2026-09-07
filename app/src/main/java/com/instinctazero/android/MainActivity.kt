@@ -71,6 +71,8 @@ class MainActivity : ComponentActivity() {
     private val pairingCode = PairingCodeBuffer()
     private var webPageLoaded = false
     private var pendingRepertoires = false
+    private var pendingRepertoireId: String? = null
+    private val repertoireLibrary = RepertoireLibraryState()
     private var connectionMessage: String? = null
     private val archiveGames = mutableListOf<JSONObject>()
     private var archiveAccount = ""
@@ -97,6 +99,12 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("SetJavaScriptEnabled") // The bundled Chessground UI needs JavaScript.
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        savedInstanceState?.let {
+            repertoireLibrary.name=it.getString("repertoire.name","")
+            repertoireLibrary.side=it.getString("repertoire.side","white")
+            repertoireLibrary.id=it.getString("repertoire.id","")
+            repertoireLibrary.editing=it.getBoolean("repertoire.editing")
+        }
 
         WebView.setWebContentsDebuggingEnabled(false)
         CookieManager.getInstance().setAcceptCookie(false)
@@ -160,9 +168,19 @@ class MainActivity : ComponentActivity() {
         // Paint Home first, then warm the packaged analysis page behind it. This keeps launch
         // responsive while still making the first Analysis tap effectively instantaneous.
         shellRoot.post { webView.loadUrl(AnalysisWebPolicy.MAIN_PAGE_URL) }
+        if(savedInstanceState?.getBoolean("repertoire.open")==true) showRepertoireLibrary()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = handleShellBack()
         })
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("repertoire.name",repertoireLibrary.name)
+        outState.putString("repertoire.side",repertoireLibrary.side)
+        outState.putString("repertoire.id",repertoireLibrary.id)
+        outState.putBoolean("repertoire.editing",repertoireLibrary.editing)
+        outState.putBoolean("repertoire.open",navigation.screen==ShellScreen.REPERTOIRES)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onResume() {
@@ -289,7 +307,8 @@ class MainActivity : ComponentActivity() {
         if (webPageLoaded) setAnalysisActive(true)
     }
 
-    private fun showRepertoires() {
+    private fun showRepertoires(id: String? = null) {
+        pendingRepertoireId = id
         pendingRepertoires = true
         showAnalysisScreen()
         if (webPageLoaded) openRepertoirePage()
@@ -297,7 +316,20 @@ class MainActivity : ComponentActivity() {
 
     private fun openRepertoirePage() {
         pendingRepertoires = false
-        webView.evaluateJavascript("window.InstinctaZero&&window.InstinctaZero.openRepertoires&&window.InstinctaZero.openRepertoires();void 0;", null)
+        val id = pendingRepertoireId?.let(JSONObject::quote) ?: "null"
+        pendingRepertoireId = null
+        webView.evaluateJavascript("window.InstinctaZero&&window.InstinctaZero.openRepertoires&&window.InstinctaZero.openRepertoires($id);void 0;", null)
+    }
+    internal fun showRepertoireLibrary() {
+        cancelPairingIfActive("opened repertoires")
+        releaseExtraArchiveRows(); navigation.showRepertoires(); setAnalysisActive(false)
+        nativeBridge.cancelAll("opened repertoires"); nativeLayer.visibility=View.VISIBLE
+        renderNativeScreen()
+        nativeBridge.manageRepertoires(JSONObject().put("action","catalog")) { data ->
+            repertoireLibrary.catalog=data
+            if(data.optString("event")=="error") repertoireLibrary.error=data.optString("message")
+            if(navigation.screen==ShellScreen.REPERTOIRES)renderNativeScreen()
+        }
     }
 
     private fun refreshArchive() {
@@ -392,6 +424,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleShellBack() {
+        if(navigation.screen==ShellScreen.REPERTOIRES && repertoireLibrary.editing && !repertoireLibrary.busy) {
+            repertoireLibrary.editing=false; repertoireLibrary.error=""; renderNativeScreen(); return
+        }
         val wasBusyKeypad = navigation.keypadOpen && pairingCode.busy
         when (navigation.onBack()) {
             ShellBackAction.RENDER_NATIVE -> {
@@ -420,6 +455,15 @@ class MainActivity : ComponentActivity() {
         when (navigation.screen) {
             ShellScreen.PROFILE -> page.addView(profileContent(), weighted())
             ShellScreen.GAMES -> page.addView(gamesContent(), weighted())
+            ShellScreen.REPERTOIRES -> page.addView(RepertoireLibraryView.build(this,repertoireLibrary,::renderNativeScreen,{ request ->
+                repertoireLibrary.busy=true; repertoireLibrary.error=""; renderNativeScreen()
+                nativeBridge.manageRepertoires(request.put("action","save_repertoire")) { data ->
+                    repertoireLibrary.busy=false
+                    if(data.optString("event")=="error") repertoireLibrary.error=data.optString("message")
+                    else { repertoireLibrary.catalog=data; repertoireLibrary.editing=false }
+                    if(navigation.screen==ShellScreen.REPERTOIRES)renderNativeScreen()
+                }
+            },::showRepertoires),weighted())
             else -> page.addView(homeContent(), weighted())
         }
         nativeLayer.addView(page, matchFrame())
@@ -431,11 +475,12 @@ class MainActivity : ComponentActivity() {
         gravity = Gravity.CENTER_VERTICAL
         setPadding(4.dp, 0, 10.dp, 0)
         setBackgroundColor(HEADER_BACKGROUND)
-        val childScreen = navigation.screen == ShellScreen.PROFILE || navigation.screen == ShellScreen.GAMES
+        val childScreen = navigation.screen in listOf(ShellScreen.PROFILE,ShellScreen.GAMES,ShellScreen.REPERTOIRES)
         val leading = shellButton(if (childScreen) "‹" else "☰", 25f).apply {
             contentDescription = if (childScreen) "Back to home" else "Open menu"
             setOnClickListener {
-                if (childScreen) showHomeScreen()
+                if (navigation.screen==ShellScreen.REPERTOIRES && repertoireLibrary.editing) handleShellBack()
+                else if (childScreen) showHomeScreen()
                 else { navigation.openDrawer(); renderNativeScreen() }
             }
         }
@@ -459,6 +504,7 @@ class MainActivity : ComponentActivity() {
             text = when (navigation.screen) {
                 ShellScreen.PROFILE -> "Account / PC"
                 ShellScreen.GAMES -> archiveAccount.ifBlank { "Games" }
+                ShellScreen.REPERTOIRES -> "Repertoires"
                 else -> "InstinctaZero"
             }
             setTextColor(Color.WHITE)
@@ -480,37 +526,9 @@ class MainActivity : ComponentActivity() {
 
     private fun homeContent(): View {
         val paired = nativeBridge.isPaired()
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(18.dp, 24.dp, 18.dp, 18.dp)
-            addView(TextView(this@MainActivity).apply {
-                text = "Chess analysis"
-                setTextColor(Color.WHITE)
-                textSize = 24f
-                typeface = Typeface.DEFAULT_BOLD
-            })
-            addView(TextView(this@MainActivity).apply {
-                text = "A local study board with Leela lines and opening book. Games remain separate and load only when you open them."
-                setTextColor(TEXT_MUTED)
-                textSize = 15f
-                setPadding(0, 6.dp, 0, 20.dp)
-            })
-            addView(shellCard("Analysis board", "Continue the board where you left it") { showAnalysisScreen() })
-            addView(shellCard(
-                "Games",
-                if (paired) archiveAccount.takeIf(String::isNotBlank)?.let { "Completed games · $it" }
-                    ?: "Completed games from the paired account"
-                else "Connect the analysis PC to view completed games",
-            ) { if (paired) showGamesScreen() else showProfileScreen() }.apply {
-                (layoutParams as? LinearLayout.LayoutParams)?.topMargin = 12.dp
-            })
-            addView(shellCard("Account / PC", connectionSummary()) { showProfileScreen() }.apply {
-                (layoutParams as? LinearLayout.LayoutParams)?.topMargin = 12.dp
-            })
-            addView(shellCard("Repertoires", "Your openings · compare, explore, adjust") { showRepertoires() }.apply {
-                (layoutParams as? LinearLayout.LayoutParams)?.topMargin = 12.dp
-            })
-        }.let { content -> android.widget.ScrollView(this).apply { isFillViewport = true; addView(content) } }
+        val menu = WorkspaceMenu(this)
+        return menu.home(paired,connectionSummary(),::showAnalysisScreen,
+            { if(paired)showGamesScreen() else showProfileScreen() },::showRepertoireLibrary,{showRepertoires()},::showProfileScreen)
     }
 
     private fun gamesContent(): View {
@@ -906,12 +924,19 @@ class MainActivity : ComponentActivity() {
                 typeface = Typeface.DEFAULT_BOLD
                 setPadding(10.dp, 8.dp, 10.dp, 18.dp)
             })
-            addView(drawerButton("Home") { showHomeScreen() })
-            addView(drawerButton("Analysis board") { showAnalysisScreen() })
-            addView(drawerButton("Repertoires") { showRepertoires() })
-            addView(drawerButton("Games") { if (nativeBridge.isPaired()) showGamesScreen() else showProfileScreen() })
-            addView(drawerButton("Account / PC") { showProfileScreen() })
-        }, FrameLayout.LayoutParams(292.dp, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START))
+            val menu=WorkspaceMenu(this@MainActivity)
+            addView(menu.row("\uf015","Home") { showHomeScreen() })
+            addView(menu.section("Analysis"))
+            addView(menu.row("\uf201","Analysis board") { showAnalysisScreen() })
+            addView(menu.row("\uf009","Games") { if (nativeBridge.isPaired()) showGamesScreen() else showProfileScreen() })
+            addView(menu.section("Repertoires"))
+            addView(menu.row("\uf02d","Repertoire library") { showRepertoireLibrary() })
+            addView(menu.row("\uf279","Repertoire board") { showRepertoires() })
+            addView(menu.section("Connection"))
+            addView(menu.row("\uf108","Account / PC") { showProfileScreen() })
+        }.let { content -> android.widget.ScrollView(this@MainActivity).apply {
+            setBackgroundColor(0xff252525.toInt()); isFillViewport=true; addView(content)
+        } }, FrameLayout.LayoutParams(292.dp, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START))
     }
 
     private fun drawerButton(label: String, action: () -> Unit): View = shellButton(label, 16f).apply {
@@ -1121,6 +1146,15 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
 
     @JavascriptInterface fun getRepertoireSettings(): String = repertoireStore.settings()
     @JavascriptInterface fun saveRepertoireSettings(raw: String) { runCatching { repertoireStore.saveSettings(raw) } }
+    @JavascriptInterface fun openRepertoireLibrary() { activity.runOnUiThread { activity.showRepertoireLibrary() } }
+    fun manageRepertoires(request: JSONObject, done: (JSONObject) -> Unit) {
+        repertoireExecutor.execute {
+            val result = try {
+                if(request.optString("action")=="save_repertoire") repertoireStore.saveRepertoire(request) else repertoireStore.catalog()
+            } catch(error: Exception) { JSONObject(errorPayload(error.safeMessage())) }
+            activity.runOnUiThread { done(result) }
+        }
+    }
     @JavascriptInterface fun requestRepertoire(requestJson: String): String = newRequestId().also { id ->
         val lookup = requestJson.length <= 128 * 1024 && runCatching { JSONObject(requestJson).optString("action") == "lookup" }.getOrDefault(false)
         val generation = if (lookup) repertoireLookupGeneration.incrementAndGet() else 0

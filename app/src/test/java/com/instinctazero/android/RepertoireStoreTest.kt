@@ -88,6 +88,22 @@ class RepertoireStoreTest {
         assertTrue(result(listOf("e2e4")).getBoolean("theory"))
         assertEquals("Complete new source comment",result(listOf("e2e4")).getJSONArray("comments").getString(0))
     }
+    @Test fun phoneCreatedRepertoireAndItsCommentSurvivePcInstallationAndUndo() {
+        val id=store.saveRepertoire(JSONObject().put("name","My opening").put("side","white")).getString("created_id")
+        val line=request(listOf("e2e4"),listOf(id))
+        store.edit(JSONObject(line.toString()).put("id",id).put("kind","add"))
+        store.edit(JSONObject(line.toString()).put("id",id).put("kind","comment").put("comment","My note"))
+        val token=store.undoInfo()!!.getString("token")
+        val before=store.lookup(line).toString()
+        store.install(bytes.inputStream(),RepertoireStore.hash(bytes))
+        store=RepertoireStore(context)
+        assertEquals(before,store.lookup(line).toString())
+        assertEquals(3,store.catalog().getJSONArray("repertoires").length())
+        store.undo(token)
+        val after=store.lookup(line).getJSONArray("results").getJSONObject(0)
+        assertTrue(after.getBoolean("theory"));assertEquals(0,after.getJSONArray("comments").length())
+        assertArrayEquals(bytes,File(context.filesDir,"mobile_repertoire.sqlite").readBytes())
+    }
     private fun request(moves: List<String>, selected: List<String> = listOf("white")) = JSONObject()
         .put("root",root).put("fen",fen(moves)).put("entries",entries(moves)).put("history",JSONArray(moves)).put("selected",JSONArray(selected))
     private fun result(moves: List<String>) = store.lookup(request(moves)).getJSONArray("results").getJSONObject(0)

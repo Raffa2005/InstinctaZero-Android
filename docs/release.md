@@ -1,8 +1,9 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.7.6). This update accelerates lookups against the existing six-repertoire
-library. It requires no repertoire redownload or data migration.
+(version 0.8.0). This update adds grouped native menus, phone-created repertoires,
+position comment editing and automatic extension targeting. The v0.7.6 indexed
+lookup/cache behavior remains. No repertoire redownload or data migration is needed.
 Before producing a release APK, rebuild and verify the two
 checked-in browser assets from their retained sources:
 
@@ -40,7 +41,16 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 27 / 0.7.6 release values;
+- versionCode/versionName are the intended 28 / 0.8.0 release values;
+- run `WorkspaceMenuTest` with `NATIVE_MENU_PREVIEW` set to a private output folder
+  for actual native View/Skia snapshots at phone sizes. Check groups/icons, naming
+  and colour selection without starting a real account or using the USB phone;
+- run `node web/test/repertoire-authoring-ui.mjs` with the same preview environment
+  as the existing repertoire UI test. Check named-library selection, typed text,
+  focus across updates, a keyboard-sized viewport, Save/restore/Undo/restart, and
+  nearest-prefix versus tied extension choices;
+- verify new books work without a source database, and that creating/renaming,
+  PC installation, transpositions and Undo preserve local books and comments;
 - verify the optional real-corpus performance/regression procedure in
   [`repertoire-performance.md`](repertoire-performance.md), including index plans,
   complete response equivalence, independent deviation context, and warmed-cache
@@ -48,7 +58,7 @@ Before publishing, at minimum verify:
 - QGA reproduction and the alternate source move order both show Rd1/e4, their
   continuations and deduplicated position comments. Terminal transposition references
   must not hide coverage, and inactive duplicates must not veto active moves;
-- the expanded catalog supports independent and combined selection of all six
+- the expanded catalog supports independent and combined selection of installed
   repertoires. Corpus updates retain edits, selections and Undo; old offline
   packages remain readable. Variation introductions retain their Before move role;
 - streamed downloads accept the current >80 MiB library and reject >128 MiB

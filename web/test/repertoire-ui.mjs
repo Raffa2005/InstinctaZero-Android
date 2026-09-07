@@ -238,9 +238,10 @@ try {
     await page.getByRole('img',{name:'Repertoire move · end of line',exact:true}).waitFor();
     const savedEdits=await page.evaluate(()=>window.__test.edits.length);
     await page.getByRole('button',{name:'+ Add move to repertoire',exact:true}).tap();
-    assert.equal(await page.evaluate(()=>window.__test.edits.length),savedEdits,'remaining target still needs an explicit choice in combined view');
-    await page.getByRole('button',{name:'Taimanov Sicilian',exact:true}).waitFor();
-    await page.getByRole('button',{name:'+ Add move to repertoire',exact:true}).tap();
+    await page.waitForFunction(count=>window.__test.edits.length===count+1,savedEdits);
+    assert.equal(await page.evaluate(()=>window.__test.edits.at(-1).id),'black','one remaining candidate extends directly');
+    await page.getByRole('button',{name:'Undo last repertoire change',exact:true}).tap();
+    await page.waitForFunction(()=>!window.__test.additions.black?.length);
     await playBoardMove('f1','b5');await playBoardMove('a7','a6');
     await page.getByRole('button',{name:'+ Add line to repertoire',exact:true}).tap();
     await page.getByRole('button',{name:'Tame the Sicilian',exact:true}).tap();

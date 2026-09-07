@@ -2,7 +2,7 @@
 
 The PC source is the annotated repertoire package, not an indiscriminate PGN merge.
 The installed source on Rafael's PC is `~/Repertoire` (not `~/projects/Repertoire`).
-Only the corrected PGNs named by `annotations/manifest.json` are used (currently
+Only the corrected PGNs named by `annotations/manifest.json` are used (including
 Tame the Sicilian, Queen’s Gambit Accepted, Taimanov Sicilian, Ruy Lopez, Jobava London
 and Symmetrical English for Black);
 `archive/` is not imported. The source package's PGN and sidecar fingerprints must
@@ -10,7 +10,7 @@ match the derived SQLite index before it can be downloaded.
 
 ## Use on the phone
 
-1. Open **Repertoires** on Home or in the menu. For first setup, open settings
+1. Open **Repertoire board** on Home or in the menu. For first setup, open settings
    and **Download from PC** once, then select one or several repertoires.
    For the expanded library, install v0.7.4 or newer, tap **Update from PC**, then
    select Ruy Lopez and/or Jobava London. New repertoires are not auto-selected.
@@ -41,11 +41,15 @@ match the derived SQLite index before it can be downloaded.
    the board flag appears only when none of the currently active selected
    repertoires has a theory continuation.
 8. Play a new move (or several) on the board, then tap **Add move to repertoire**
-   or **Add line to repertoire** directly below the continuations. Choose a target
-   in combined view; in an individual view it saves directly to that repertoire.
+   or **Add line to repertoire** directly below the continuations. The repertoire
+   with the nearest covered prefix is chosen automatically, with its name shown
+   before you tap. A focused view uses that repertoire. Only genuine ties ask.
    A confirmation appears after saving. You can navigate back to see/play the
-   new continuation. There are no move-entry text fields. Comment writing is
-   not included yet; existing comments retain the same read/expand behavior.
+   new continuation. There are no move-entry text fields. The **Comment** action
+   after adding opens the position editor. You can also **Edit comment** below an
+   expanded note, use **Write / edit comment** in move adjustments, or use position
+   comments in settings. Save follows that position through transpositions.
+   **Restore source text** removes your override; the original PGN is never changed.
 9. After a change, tap **Undo** beside the confirmation, or find **Undo last
    repertoire change** in settings later. The action and affected repertoire are
    named there. One undo reverses the entire most recent local edit across the
@@ -89,6 +93,21 @@ informational source move. To activate source information, review its PC annotat
 rules and rebuild their index, then update the phone copy.
 
 ## Storage and limits
+
+**Repertoire library → New repertoire** creates an empty, named White or Black book
+without requiring pairing or a download. Open the book, play a line and add it.
+Opening a particular library book selects it for the current board; **Repertoire
+board** keeps the existing combined selection. Phone-created books can be renamed.
+Creation and renaming preserve the last line/comment Undo step. They are kept apart
+from downloaded books and survive PC library updates. There is no automatic PC sync
+or export for phone-created books in this version.
+
+Up to 64 phone-created repertoires and 16 simultaneous selections are supported.
+Names have an 80-character limit; position comments have a 64 Ki-character limit.
+Metadata, added moves and comments share the existing 4 MiB atomic local-edit budget.
+Variation introductions remain separate read-only **Before move** source notes;
+the editor changes the position's after-move comment, not source classifications.
+Uninstalling/clearing app data removes this phone-only work, just as with prior local edits.
 
 - One private SQLite download holds the corpus; only indexed current-position
   queries and small result sets enter the WebView. No per-move network request.
