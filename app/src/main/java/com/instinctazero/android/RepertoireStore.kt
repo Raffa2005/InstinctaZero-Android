@@ -8,13 +8,28 @@ import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
 import java.security.MessageDigest
+import java.util.UUID
 
 /** Private indexed corpus, loaded on demand. Source PGNs and the PC index are read-only. */
 internal class RepertoireStore(context: Context) {
     private val file = File(context.filesDir, "mobile_repertoire.sqlite")
     private val prefs = context.getSharedPreferences("mobile_repertoire_preferences", Context.MODE_PRIVATE)
     private val editsFile = AtomicFile(File(context.filesDir, "mobile_repertoire_edits.json"))
-    private val edits: JSONObject by lazy { runCatching { JSONObject(String(editsFile.readFully(), Charsets.UTF_8)) }.getOrDefault(JSONObject()) }
+    private var undoRecord: JSONObject? = null
+    private val edits: JSONObject by lazy {
+        val saved = runCatching { JSONObject(String(editsFile.readFully(), Charsets.UTF_8)) }.getOrDefault(JSONObject())
+        val record = saved.remove("_undo") as? JSONObject
+        // Older versions can still read the repertoire keys. If one changed the edits without
+        // updating the journal, do not present a stale undo after upgrading again.
+        undoRecord = record?.takeIf { runCatching {
+            it.optInt("v") == 1 && listOf("token", "repertoire", "name", "label").all { key -> it.getString(key).isNotBlank() } &&
+                it.getJSONArray("changes").let { changes -> changes.length() in 1..512 && (0 until changes.length()).all { i ->
+                    val change = changes.getJSONObject(i)
+                    change.getString("path").matches(Regex("[a-f0-9]{32}")) && change.has("before") && (change.isNull("before") || change.optJSONObject("before") != null)
+                } } && it.optString("after_hash") == fingerprint(saved)
+        }.getOrDefault(false) }
+        saved
+    }
 
     companion object {
         const val MAX_BYTES = 80L * 1024 * 1024
@@ -54,6 +69,53 @@ internal class RepertoireStore(context: Context) {
     }
 
     private fun open(path: File = file) = SQLiteDatabase.openDatabase(path.path, null, SQLiteDatabase.OPEN_READONLY)
+    private fun canonical(value: Any?): String = when (value) {
+        null, JSONObject.NULL -> "null"
+        is JSONObject -> value.keys().asSequence().toList().sorted().joinToString(",", "{", "}") { JSONObject.quote(it) + ":" + canonical(value.get(it)) }
+        is JSONArray -> (0 until value.length()).joinToString(",", "[", "]") { canonical(value.get(it)) }
+        is String -> JSONObject.quote(value)
+        else -> value.toString()
+    }
+    private fun fingerprint(value: JSONObject): String = hash(canonical(value).toByteArray(Charsets.UTF_8))
+    private fun restoreEdits(raw: String) {
+        edits.keys().asSequence().toList().forEach(edits::remove)
+        val old = JSONObject(raw); old.keys().forEach { edits.put(it, old.get(it)) }
+    }
+    private fun persistEdits(record: JSONObject?) {
+        val content = edits.toString()
+        require(content.toByteArray(Charsets.UTF_8).size <= 4 * 1024 * 1024) { "Local edits have reached the 4 MiB limit" }
+        val saved = JSONObject(content)
+        if (record != null) saved.put("_undo", record)
+        val output = editsFile.startWrite()
+        try { output.write(saved.toString().toByteArray(Charsets.UTF_8)); editsFile.finishWrite(output) }
+        catch (error: Exception) { editsFile.failWrite(output); throw error }
+    }
+    @Synchronized fun undoInfo(): JSONObject? {
+        edits // Initialize the journal together with the edits on first access.
+        return undoRecord?.let { JSONObject().put("token", it.getString("token"))
+            .put("repertoire", it.getString("repertoire")).put("name", it.getString("name")).put("label", it.getString("label")) }
+    }
+    @Synchronized fun undo(token: String) {
+        edits
+        val record = undoRecord ?: throw IllegalStateException("No repertoire change to undo.")
+        require(token == record.getString("token")) { "The last repertoire change has changed. Check the undo label and try again." }
+        check(record.getString("after_hash") == fingerprint(edits)) { "The repertoire changed outside this undo step." }
+        val before = edits.toString()
+        try {
+            val rep = record.getString("repertoire")
+            val local = overrides(rep)
+            val changes = record.getJSONArray("changes")
+            for (i in 0 until changes.length()) {
+                val change = changes.getJSONObject(i); val key = change.getString("path")
+                if (change.isNull("before")) local.remove(key)
+                else local.put(key, JSONObject(change.getJSONObject("before").toString()))
+            }
+            if (local.length() == 0 && !record.optBoolean("had_repertoire")) edits.remove(rep) else edits.put(rep, local)
+            // State and the consumed undo record commit in one AtomicFile transaction.
+            persistEdits(null)
+            undoRecord = null
+        } catch (error: Exception) { restoreEdits(before); throw error }
+    }
     @Synchronized fun settings(): String = prefs.getString("settings", "{}") ?: "{}"
     @Synchronized fun saveSettings(raw: String) {
         require(raw.length <= 32 * 1024)
@@ -68,7 +130,7 @@ internal class RepertoireStore(context: Context) {
                     .put("side", rows.getString(2)).put("file", rows.getString(3)))
             }
         }
-        return result.put("repertoires", list)
+        return result.put("repertoires", list).put("undo", undoInfo() ?: JSONObject.NULL)
     }
 
     private data class Node(val uci: String, val san: String, val kind: String, val theory: Boolean,
@@ -260,9 +322,12 @@ internal class RepertoireStore(context: Context) {
         val kind = request.getString("kind")
         require(kind in listOf("analysis", "alternative", "reset", "add"))
         val before = edits.toString()
+        val previousLocal = JSONObject(overrides(rep).toString())
+        var repertoireName = rep
         try {
             open().use { db ->
-                val side = identity(db, rep).second
+                val identity = identity(db, rep)
+                val side = identity.second; repertoireName = identity.first
                 val local = overrides(rep); edits.put(rep, local)
                 val key = pathId(root, moves)
                 if (kind == "reset") local.remove(key)
@@ -290,13 +355,26 @@ internal class RepertoireStore(context: Context) {
                     local.put(key, (local.optJSONObject(key) ?: JSONObject()).put("kind", kind))
                 }
             }
-            val raw = edits.toString().toByteArray(Charsets.UTF_8)
-            require(raw.size <= 4 * 1024 * 1024) { "Local edits have reached the 4 MiB limit" }
-            val output = editsFile.startWrite()
-            try { output.write(raw); editsFile.finishWrite(output) } catch (error: Exception) { editsFile.failWrite(output); throw error }
+            val after = overrides(rep)
+            val keys = (previousLocal.keys().asSequence().toList() + after.keys().asSequence().toList()).toSortedSet()
+            val changes = JSONArray()
+            for (key in keys) if (canonical(previousLocal.opt(key)) != canonical(after.opt(key))) {
+                changes.put(JSONObject().put("path", key).put("before", previousLocal.opt(key) ?: JSONObject.NULL))
+            }
+            if (changes.length() == 0) { restoreEdits(before); return } // A no-op must not consume the previous undo.
+            val label = when (kind) {
+                "add" -> if (changes.length() == 1) "Added move" else "Added ${changes.length()} moves"
+                "analysis" -> "Excluded branch"
+                "alternative" -> "Made optional alternative"
+                else -> if (previousLocal.optJSONObject(pathId(root, moves))?.optBoolean("added") == true) "Removed local addition" else "Restored original label"
+            }
+            val record = JSONObject().put("v", 1).put("token", UUID.randomUUID().toString())
+                .put("repertoire", rep).put("name", repertoireName).put("label", label)
+                .put("had_repertoire", JSONObject(before).has(rep)).put("changes", changes).put("after_hash", fingerprint(edits))
+            persistEdits(record)
+            undoRecord = record
         } catch (error: Exception) {
-            edits.keys().asSequence().toList().forEach(edits::remove)
-            val old = JSONObject(before); old.keys().forEach { edits.put(it, old.get(it)) }
+            restoreEdits(before)
             throw error
         }
     }

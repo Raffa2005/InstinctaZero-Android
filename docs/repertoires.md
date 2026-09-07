@@ -37,6 +37,14 @@ match the derived SQLite index before it can be downloaded.
    A confirmation appears after saving. You can navigate back to see/play the
    new continuation. There are no move-entry text fields. Comment writing is
    not included yet; existing comments retain the same read/expand behavior.
+9. After a change, tap **Undo** beside the confirmation, or find **Undo last
+   repertoire change** in settings later. The action and affected repertoire are
+   named there. One undo reverses the entire most recent local edit across the
+   library: a whole added line, exclusion, optional-alternative label or removal/
+   label restoration. It works after a restart and does not move your analysis
+   cursor, delete the analyzed variation or alter repertoire selections. Earlier
+   edits and other repertoires stay intact. This is one step, with no redo; it
+   starts recording new changes in v0.7.3, not edits from older versions.
 
 ## Alternatives and information
 
@@ -75,6 +83,14 @@ rules and rebuild their index, then update the phone copy.
   only after validation. A slow or interrupted download leaves that copy usable.
 - Local overrides have a 4 MiB cap, are keyed by repertoire and stable history
   identity, and survive corpus updates. They are phone-local, not cloud-synced.
+- One inverse edit journal is stored alongside the overrides in the same atomic
+  file. It adds only the prior values of the paths touched by that action; the
+  existing 4 MiB override limit excludes this journal. No-op or failed edits keep
+  the previous undo. A completed undo consumes it. Token and state checks prevent
+  an obsolete button or repeated tap from undoing a newer action. Legacy override
+  files remain readable, and invalid/stale journals are ignored without dropping
+  overrides. Corpus downloads preserve the local undo step; downloads themselves
+  and UI-setting changes are not repertoire edits and are not undone.
 - Up to 16 repertoires can be selected; the existing analysis history limit is
   512 plies. All distinct comments at the current history and its continuations
   are returned in full, including comments from additional source occurrences.

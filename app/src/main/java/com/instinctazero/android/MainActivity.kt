@@ -1134,12 +1134,14 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
                 val request = JSONObject(requestJson)
                 val result = when (request.optString("action")) {
                     "catalog" -> repertoireStore.catalog()
-                    "edit" -> { repertoireStore.edit(request); JSONObject().put("saved", true) }
+                    "edit" -> { repertoireStore.edit(request); JSONObject().put("saved", true).put("undo", repertoireStore.undoInfo() ?: JSONObject.NULL) }
+                    "undo" -> { repertoireStore.undo(request.getString("token")); JSONObject().put("saved", true).put("undo", JSONObject.NULL) }
                     "lookup" -> repertoireStore.lookup(request)
                     else -> throw IllegalArgumentException("Unknown repertoire action")
                 }
                 emit("onNativeRepertoire", id, result.toString())
-            } catch (error: Exception) { emit("onNativeRepertoire", id, errorPayload(error.safeMessage())) }
+            } catch (error: Exception) { emit("onNativeRepertoire", id, JSONObject(errorPayload(error.safeMessage()))
+                .put("undo", runCatching { repertoireStore.undoInfo() }.getOrNull() ?: JSONObject.NULL).toString()) }
         }
     }
     @JavascriptInterface fun downloadRepertoires(): String = newRequestId().also { id ->

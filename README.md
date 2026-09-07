@@ -1,6 +1,6 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.7.2 adds quicker repertoire markers, visible line endings, and direct move/line additions.
+InstinctaZero Android 0.7.3 adds persistent, one-step undo for repertoire changes.
 
 The board, arrows, mainline navigation and portrait configuration remain unchanged
 from the simple version. This is not a return of the reverted multi-study redesign.
@@ -22,6 +22,13 @@ active repertoire coverage. To extend a line, play moves on the board, then tap
 **Add move** or **Add line** in the repertoire tab. In combined view, choose the
 target repertoire explicitly. Additions save on this phone and survive restarts;
 source PGNs and archived game PGNs remain unchanged. Comment writing is deferred.
+
+Tap **Undo** beside a repertoire-edit confirmation, or **Undo last repertoire
+change** in repertoire settings—even after restarting. This reverses the entire
+last local edit (including a multi-move addition) without changing the analysis
+board, earlier edits, other repertoires or source files. The control names the
+affected repertoire. It records new edits from v0.7.3 onward; earlier versions
+did not save undo history. There is one undo step, not an undo/redo stack.
 
 Menus use quieter warm accents, rounded touch controls and short tab transitions.
 No local PGN files, archived game PGNs, pairing or PC annotations are modified.

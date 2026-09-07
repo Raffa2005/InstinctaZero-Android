@@ -1,7 +1,7 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.7.2). Before producing a release APK, rebuild and verify the two
+(version 0.7.3). Before producing a release APK, rebuild and verify the two
 checked-in browser assets from their retained sources:
 
 ```bash
@@ -38,7 +38,7 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 23 / 0.7.2 release values;
+- versionCode/versionName are the intended 24 / 0.7.3 release values;
 - no local PGN files or source annotations are deleted or modified;
 - board/piece assets, arrow metrics and portrait manifest retain the simple version. Do not use the USB
   tethering phone for testing or disconnect it;
@@ -56,6 +56,11 @@ Before publishing, at minimum verify:
   from unknown/excluded history; direct single/multi-move additions persist in
   the chosen repertoire, cannot cross excluded/informational source lines, and
   leave source PGNs and archived games unchanged;
+- undo is available beside edit confirmations and in repertoire settings after
+  recreation. Verify whole-line rollback, previous-prefix/other-repertoire
+  preservation, labels/removals, stale/repeated requests, failed atomic writes,
+  no-ops, legacy state, and unchanged analysis tree/cursor/selected repertoires.
+  Undo must invalidate cached markers/coverage without introducing stale callbacks;
 - optionally set `REPERTOIRE_TEST_INDEX` and `REPERTOIRE_TEST_CASES` for native
   integration checks against private reference lookups. Do not commit those files;
 - verify the paired PC serves the read-only repertoire endpoints, rejects

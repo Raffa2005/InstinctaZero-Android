@@ -9,7 +9,7 @@
     let catalog = [], catalogReady = false, installed = false, settings = {}, results = [], error = '', busy = false;
     let help = false, adjusting = null, expanded = '', generation = 0, lookupId = null;
     const cache = new Map();
-    let cacheBytes = 0, editing = false, addedMessage = '';
+    let cacheBytes = 0, editing = false, addedMessage = '', lastChange = null;
     const native = () => window.InstinctaZeroNative;
     try { settings = JSON.parse(native()?.getRepertoireSettings?.() || '{}') || {}; } catch (_) {}
     const contextKey = () => api.key() || 'analysis';
@@ -78,6 +78,7 @@
         busy = false;
         if (data.event === 'error') { error = data.message; api.render(); return; }
         catalog = data.repertoires || []; catalogReady = true; installed = data.installed;
+        lastChange = data.undo || null;
         invalidate();
         refresh();
       }, download);
@@ -120,7 +121,7 @@
       }).join('') + '<p class="rep-hint">Saved for this board or game. New games start with your latest selection.</p>';
     }
     function helpHtml() {
-      return '<div class="rep-guide"><h3>Comments as you go</h3><p>The played move’s note appears above the continuations. Tap it to read the full comment, or tap a comment bubble beside a move to read ahead without playing it. Distinct source comments are kept, even when a move appears in several files.</p><h3>Theory and alternatives</h3><p>Main repertoire moves have no extra label. Alternatives are valid choices by your repertoire colour; opponent replies retain their optional-line context. Informational analysis, refutations and model-game tails remain readable but do not count as theory.</p><h3>Book markers</h3><p>A filled book marks a move in a selected repertoire. An outlined book means the position matches by transposition, but the full history has already left recorded theory. This never silently reactivates an excluded line. A small finish flag marks the end of active coverage, even if informational moves continue. Known moves show their marker immediately; visited positions are cached. Turn markers off here if you prefer a plain board.</p><h3>Separate or combined</h3><p>Choose one or several repertoires. Combined shows each move once; comments and adjustments retain their source. The focused view only filters the move list; board markers check all selected repertoires.</p><h3>Adjust safely</h3><p>Use the sliders beside a move to make an active own-side choice optional, exclude a branch, or restore its original label. To extend a line, play a new move or sequence on the board, then tap <b>Add move</b> or <b>Add line</b> below the continuations. In combined view, choose the repertoire to update. Existing settings also offer Add current line. Edits save on this phone, not to the PC. Source PGNs and archived Lichess games are never rewritten. Informational source lines must be reviewed in the PC annotations before becoming active.</p></div>';
+      return '<div class="rep-guide"><h3>Comments as you go</h3><p>The played move’s note appears above the continuations. Tap it to read the full comment, or tap a comment bubble beside a move to read ahead without playing it. Distinct source comments are kept, even when a move appears in several files.</p><h3>Theory and alternatives</h3><p>Main repertoire moves have no extra label. Alternatives are valid choices by your repertoire colour; opponent replies retain their optional-line context. Informational analysis, refutations and model-game tails remain readable but do not count as theory.</p><h3>Book markers</h3><p>A filled book marks a move in a selected repertoire. An outlined book means the position matches by transposition, but the full history has already left recorded theory. This never silently reactivates an excluded line. A small finish flag marks the end of active coverage, even if informational moves continue. Known moves show their marker immediately; visited positions are cached. Turn markers off here if you prefer a plain board.</p><h3>Separate or combined</h3><p>Choose one or several repertoires. Combined shows each move once; comments and adjustments retain their source. The focused view only filters the move list; board markers check all selected repertoires.</p><h3>Adjust safely</h3><p>Use the sliders beside a move to make an active own-side choice optional, exclude a branch, or restore its original label. To extend a line, play a new move or sequence on the board, then tap <b>Add move</b> or <b>Add line</b> below the continuations. In combined view, choose the repertoire to update. Existing settings also offer Add current line. Edits save on this phone, not to the PC. Tap <b>Undo</b> after a change, or <b>Undo last repertoire change</b> in settings later—even after restarting. It reverses the whole last edit without moving the analysis board. One step, no redo; changes made before v0.7.3 have no undo record. Source PGNs and archived Lichess games are never rewritten. Informational source lines must be reviewed in the PC annotations before becoming active.</p></div>';
     }
     function commentList(entries) {
       const unique = new Map();
@@ -147,8 +148,8 @@
         return {uci, entries, best, comments:commentList(entries)};
       }).sort((a,b) => Number(b.best.move.theory) - Number(a.best.move.theory) || Number(a.best.move.alternative) - Number(b.best.move.alternative));
     }
-    function notices() {
-      return (error ? '<p class="rep-error" role="alert">' + escape(error) + '</p>' : '') + (busy ? '<p class="rep-hint" role="status">Getting the PC copy… Saved moves stay available.</p>' : '') + (editing ? '<p class="rep-hint" role="status">Saving to repertoire…</p>' : addedMessage ? '<p class="rep-saved" role="status">' + escape(addedMessage) + '</p>' : '');
+    function notices(showUndo = true) {
+      return (error ? '<p class="rep-error" role="alert">' + escape(error) + '</p>' : '') + (busy ? '<p class="rep-hint" role="status">Getting the PC copy… Saved moves stay available.</p>' : '') + (editing ? '<p class="rep-hint" role="status">Saving repertoire change…</p>' : addedMessage ? '<div class="rep-change-notice" role="status"><span>' + escape(addedMessage) + '</span>' + (showUndo && lastChange ? button('undo','Undo','aria-label="Undo last repertoire change" data-rep-undo-token="' + escape(lastChange.token) + '"') : '') + '</div>' : '');
     }
     function adjustment() {
       const {rep, move} = adjusting;
@@ -157,9 +158,10 @@
         (move.edited ? button('reset','↶ &nbsp; Restore original / remove local addition') : '') + '</div><p class="rep-hint">' + escape(move.reason) + '</p>';
     }
     function settingsHtml() {
-      let content = notices();
+      let content = notices(false);
       if (adjusting) return '<div class="repertoire-panel">' + content + adjustment() + '</div>';
       content += '<button class="touch-switch' + (markerEnabled() ? ' on' : '') + '" data-rep-action="marker" role="switch" aria-checked="' + markerEnabled() + '"><span>Book marker on board</span><i aria-hidden="true"></i></button>';
+      if (lastChange) content += '<button class="rep-undo-setting" data-rep-action="undo" data-rep-undo-token="' + escape(lastChange.token) + '" aria-label="Undo last repertoire change"' + (editing ? ' disabled' : '') + '><span class="fa" aria-hidden="true">&#xf0e2;</span><span>Undo last repertoire change<small>' + escape(lastChange.label + ' · ' + lastChange.name) + '</small></span></button>';
       if (installed) {
         content += selection();
         if (selected().length > 1) content += '<div class="rep-section-label">Move list</div><div class="rep-filters"><button data-rep-focus="" class="' + (!focus() ? 'selected' : '') + '">Combined</button>' + catalog.filter(rep => selected().includes(rep.id)).map(rep => '<button data-rep-focus="' + escape(rep.id) + '" class="' + (focus() === rep.id ? 'selected' : '') + '">' + escape(rep.name) + '</button>').join('') + '</div>';
@@ -198,8 +200,20 @@
       editing = true; error = ''; addedMessage = ''; invalidate(); api.render();
       request({...context, id, history, action:'edit', kind}, data => {
         editing = false; invalidate();
+        if ('undo' in data) lastChange = data.undo;
         if (data.event === 'error') { error = data.message; api.render(); }
-        else { error = ''; refresh(); if (kind === 'add' && isCurrent()) { addedMessage = 'Added to ' + name; api.render(); } }
+        else { error = ''; refresh(); if (isCurrent()) { addedMessage = kind === 'add' ? 'Added to ' + name : (lastChange?.label || 'Updated repertoire') + ' · ' + name; api.render(); } }
+      });
+    }
+    function undoLastChange(token) {
+      if (editing || !lastChange || token !== lastChange.token) return;
+      const name = lastChange.name;
+      editing = true; error = ''; addedMessage = ''; invalidate(); api.render();
+      request({action:'undo',token}, data => {
+        editing = false; invalidate();
+        if ('undo' in data) lastChange = data.undo;
+        if (data.event === 'error') { error = data.message; api.render(); }
+        else { lastChange = null; error = ''; refresh(); addedMessage = 'Change undone · ' + name; api.render(); }
       });
     }
     function editMove(rep, move) { api.settings(); adjusting = {rep,move}; api.render(); }
@@ -221,6 +235,7 @@
       panel.querySelectorAll('[data-rep-action]').forEach(el => el.onclick = () => {
         const action = el.dataset.repAction;
         if (action === 'choose') { api.settings(); return; }
+        if (action === 'undo') { undoLastChange(el.dataset.repUndoToken); return; }
         if (action === 'marker') { settings._bookMarker = !markerEnabled(); save(); updateMarker(); }
         else if (action === 'help') help = !help;
         else if (action === 'cancel') { adjusting = null; api.closeSettings(); return; }

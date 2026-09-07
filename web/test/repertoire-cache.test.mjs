@@ -74,3 +74,32 @@ test('cache has a fixed bound instead of retaining every visited game position',
   const count=h.requests.length;h.go(['0']);assert.equal(h.requests.length,count+1);
   h.go(['119']);assert.equal(h.requests.length,count+1,'recent entries remain cached');
 });
+
+test('undo invalidates cached coverage, rejects duplicate taps and leaves board context alone',()=>{
+  const h=harness();h.reply(h.last,{results:[result({moves:[move('e2e4')]})]});
+  h.go(['e2e4','e7e5']);h.reply(h.last,{results:[result({theory:false,can_add:true,add_count:1})]});
+  h.click({repAction:'quick-add'});
+  h.reply(h.last,{saved:true,undo:{token:'step-1',name:'Test',label:'Added move',repertoire:'r'}});
+  h.reply(h.last,{results:[result({end_of_line:true})]});
+  assert.match(h.panel.html(),/Undo last repertoire change/);
+  assert.match(h.panel.settingsHtml(),/Added move · Test/);
+  h.click({repAction:'undo',repUndoToken:'old-step'});assert.equal(h.last.action,'lookup');
+  h.click({repAction:'undo',repUndoToken:'step-1'});const undo=h.last;
+  assert.equal(undo.action,'undo');assert.equal(undo.token,'step-1');
+  h.click({repAction:'undo',repUndoToken:'step-1'});assert.equal(h.last,undo);
+  h.reply(undo,{saved:true,undo:null});
+  assert.deepEqual(h.last.history,['e2e4','e7e5'],'undo refreshes the same board position');
+  assert.equal(h.marker.kind,'','cache invalidated before fresh post-undo coverage');
+  h.reply(h.last,{results:[result({theory:false,can_add:true,add_count:1})]});
+  assert.equal(h.marker.kind,'');assert.doesNotMatch(h.panel.settingsHtml(),/Undo last repertoire change/);
+});
+
+test('failed undo stays retryable and a newer native journal replaces an obsolete button',()=>{
+  const h=harness();h.reply(h.last,{results:[result({theory:false,can_add:true,add_count:1})]});
+  h.click({repAction:'quick-add'});h.reply(h.last,{saved:true,undo:{token:'one',name:'Test',label:'Added move',repertoire:'r'}});
+  h.click({repAction:'undo',repUndoToken:'one'});
+  h.reply(h.last,{event:'error',message:'Could not save',undo:{token:'two',name:'Other',label:'Excluded branch',repertoire:'s'}});
+  assert.match(h.panel.settingsHtml(),/Excluded branch · Other/);assert.match(h.panel.html(),/Could not save/);
+  const count=h.requests.length;h.click({repAction:'undo',repUndoToken:'one'});assert.equal(h.requests.length,count);
+  h.click({repAction:'undo',repUndoToken:'two'});assert.equal(h.last.token,'two');assert.equal(h.last.action,'undo');
+});

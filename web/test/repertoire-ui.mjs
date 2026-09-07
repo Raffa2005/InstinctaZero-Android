@@ -29,6 +29,9 @@ try {
       const catalog=[{id:'white',name:'Tame the Sicilian',side:'white'},{id:'qga',name:'Queen’s Gambit Accepted',side:'black'},{id:'black',name:'Taimanov Sicilian',side:'black'}];
       const settings=JSON.parse(localStorage.getItem('repertoires') || '{"analysis":["white","black"]}');window.__test={requests:[],saved:localStorage.getItem('study') || '{}',edits:[],failDownload:false,delay:12};
       const additions=JSON.parse(localStorage.getItem('additions') || '{}');
+      let undo=JSON.parse(localStorage.getItem('repertoireUndo') || 'null');
+      const undoInfo=()=>undo?{token:undo.token,name:undo.name,label:undo.label,repertoire:undo.repertoire}:null;
+      const saveUndo=()=>localStorage.setItem('repertoireUndo',JSON.stringify(undo));
       window.__test.additions=additions;window.__test.extensionMode=localStorage.getItem('extensionMode')==='true';
       window.InstinctaZeroNative={
         getUiSettings:()=>'{"leelaEnabled":false}',saveUiSettings:()=>{},getStudyState:()=>window.__test.saved,saveStudyState:raw=>{window.__test.saved=raw;localStorage.setItem('study',raw);},
@@ -37,8 +40,9 @@ try {
         requestRepertoire:raw=>{
           const request=JSON.parse(raw),id='rep-'+(++sequence);window.__test.requests.push(request);
           let result;
-          if(request.action==='catalog')result={installed,repertoires:catalog};
+          if(request.action==='catalog')result={installed,repertoires:catalog,undo:undoInfo()};
           if(request.action==='edit'){
+            const before=JSON.parse(JSON.stringify(additions));
             window.__test.edits.push(request);result={saved:true};
             if(request.kind==='add'){
               additions[request.id]=additions[request.id] || [];
@@ -47,6 +51,17 @@ try {
                 if(!additions[request.id].includes(path))additions[request.id].push(path);
               }
               localStorage.setItem('additions',JSON.stringify(additions));
+            }
+            const count=Number(localStorage.getItem('undoSequence') || '0')+1;localStorage.setItem('undoSequence',String(count));
+            undo={token:'undo-'+count,repertoire:request.id,name:catalog.find(rep=>rep.id===request.id).name,label:request.kind==='add'?'Added line':'Changed label',before};
+            saveUndo();result.undo=undoInfo();
+          }
+          if(request.action==='undo'){
+            if(!undo || request.token!==undo.token)result={event:'error',message:'Undo no longer available',undo:undoInfo()};
+            else {
+              Object.keys(additions).forEach(key=>delete additions[key]);Object.assign(additions,undo.before);
+              localStorage.setItem('additions',JSON.stringify(additions));undo=null;saveUndo();
+              result={saved:true,undo:null};
             }
           }
           if(request.action==='lookup') {
@@ -69,7 +84,7 @@ try {
           }
           setTimeout(()=>window.InstinctaZero.onNativeRepertoire(id,result),window.__test.delay);return id;
         },
-        downloadRepertoires:()=>{const id='download-'+(++sequence);setTimeout(()=>window.InstinctaZero.onNativeRepertoire(id,window.__test.failDownload?{event:'error',message:'Connection interrupted. Saved copy unchanged.'}:{installed:true,repertoires:catalog,downloaded:true}),40);return id;}
+        downloadRepertoires:()=>{const id='download-'+(++sequence);setTimeout(()=>window.InstinctaZero.onNativeRepertoire(id,window.__test.failDownload?{event:'error',message:'Connection interrupted. Saved copy unchanged.'}:{installed:true,repertoires:catalog,downloaded:true,undo:undoInfo()}),40);return id;}
       };
     });
     await page.goto(`http://127.0.0.1:${server.address().port}`);
@@ -191,6 +206,17 @@ try {
     assert.equal(await page.evaluate(()=>window.__test.additions.black?.length || 0),0);
     await page.getByRole('img',{name:'Repertoire move · end of line',exact:true}).waitFor();
     await page.screenshot({path:`${output}/added-${width}.png`});
+    await page.waitForFunction(()=>JSON.parse(window.__test.saved).cursor?.length===4);
+    const boardBeforeUndo=await page.evaluate(()=>{const saved=JSON.parse(window.__test.saved);return {tree:saved.tree,cursor:saved.cursor,gameId:saved.gameId};});
+    await page.getByRole('button',{name:'Undo last repertoire change',exact:true}).tap();
+    await page.waitForFunction(()=>!window.__test.additions.white?.length);
+    await page.getByText('Change undone · Tame the Sicilian',{exact:true}).waitFor();
+    assert.equal(await page.locator('.repertoire-book-marker').isVisible(),false);
+    assert.deepEqual(await page.evaluate(()=>{const saved=JSON.parse(window.__test.saved);return {tree:saved.tree,cursor:saved.cursor,gameId:saved.gameId};}),boardBeforeUndo);
+    assert.equal(await page.locator('[data-rep-action=undo]').count(),0,'single undo is consumed');
+    await page.getByRole('button',{name:'+ Add move to repertoire',exact:true}).tap();
+    await page.getByRole('button',{name:'Tame the Sicilian',exact:true}).tap();
+    await page.getByRole('img',{name:'Repertoire move · end of line',exact:true}).waitFor();
     const savedEdits=await page.evaluate(()=>window.__test.edits.length);
     await page.getByRole('button',{name:'+ Add move to repertoire',exact:true}).tap();
     assert.equal(await page.evaluate(()=>window.__test.edits.length),savedEdits,'remaining target still needs an explicit choice in combined view');
@@ -210,9 +236,26 @@ try {
     const start=Date.now();await page.locator('[data-action=next]').tap();
     assert.equal(await page.getByRole('img',{name:'Repertoire move · end of line',exact:true}).isVisible(),true);
     assert.ok(Date.now()-start<1000,'known badge must precede the delayed native reply');
+    await page.evaluate(()=>{window.__test.delay=12;});
+    await page.locator('[data-action=settings]').tap();
+    await page.getByRole('button',{name:'Undo last repertoire change',exact:true}).waitFor();
+    assert.match(await page.locator('.rep-undo-setting').innerText(),/Added line · Tame the Sicilian/);
+    await page.screenshot({path:`${output}/undo-settings-${width}.png`});
+    await page.getByRole('checkbox',{name:/Tame/}).tap();
+    const selectionBeforeUndo=await page.evaluate(()=>localStorage.getItem('repertoires'));
+    await page.getByRole('button',{name:'Undo last repertoire change',exact:true}).tap();
+    await page.waitForFunction(()=>window.__test.additions.white?.length===1);
+    assert.equal(await page.evaluate(()=>localStorage.getItem('repertoires')),selectionBeforeUndo,'undo never rolls back selected repertoires');
+    assert.equal(await page.evaluate(()=>JSON.parse(window.__test.saved).cursor.length),6,'undo leaves the analyzed line in place');
+    assert.equal(await page.locator('[data-rep-action=undo]').count(),0);
+    await page.getByRole('checkbox',{name:/Tame/}).tap();
+    await page.locator('[data-action=settings]').tap();
+    await page.locator('[data-action=prev]').tap();await page.locator('[data-action=prev]').tap();
+    await page.getByRole('img',{name:'Repertoire move · end of line',exact:true}).waitFor();
+    assert.equal(await page.locator('.repertoire-book-marker').getAttribute('data-square'),'c6','pre-existing repertoire prefix survives undo');
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     assert.deepEqual(errors,[]);
-    console.log(`${width}×${height}: comments, preferences, immediate markers, terminal flags, single/multi-move additions, independent persistence and navigation passed`);
+    console.log(`${width}×${height}: comments, markers, additions, immediate/restarted undo, unchanged board/selection and restored terminal coverage passed`);
     await page.close();
   }
 } finally {await browser.close();server.close();}

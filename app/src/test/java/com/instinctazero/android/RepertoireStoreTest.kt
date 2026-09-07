@@ -209,4 +209,123 @@ class RepertoireStoreTest {
         assertEquals(2,result(moves).getInt("add_count"))
         assertArrayEquals(bytes,File(context.filesDir,"mobile_repertoire.sqlite").readBytes())
     }
+
+    private fun addLine(moves: List<String>, rep: String = "white") = store.edit(request(moves).put("id",rep).put("kind","add")
+        .put("entries",JSONArray(moves.map { JSONObject().put("san",it).put("fen",root) })))
+    private fun editsWithoutUndo(): Map<String, Map<String, String>> {
+        val saved = JSONObject(File(context.filesDir,"mobile_repertoire_edits.json").readText()).also { it.remove("_undo") }
+        return saved.keys().asSequence().associateWith { rep ->
+            val paths = saved.getJSONObject(rep)
+            paths.keys().asSequence().associateWith { paths.getJSONObject(it).toString() }
+        }
+    }
+    private fun undoToken() = store.undoInfo()!!.getString("token")
+
+    @Test fun undoAddedLineSurvivesRestartAndCorpusUpdateAndPreservesExistingPrefixes() {
+        addLine(listOf("e2e4","c7c5"))
+        edit(listOf("e2e4"),"alternative")
+        edit(listOf("e2e4"),"analysis","black")
+        store.saveSettings("{\"analysis\":[\"white\",\"black\"],\"_bookMarker\":true}")
+        val settings = store.settings(); val before = editsWithoutUndo()
+        val line = listOf("e2e4","c7c5","g1f3","b8c6")
+        addLine(line)
+        assertEquals("Added 2 moves",store.undoInfo()!!.getString("label"))
+        val token = undoToken()
+        store = RepertoireStore(context)
+        store.install(bytes.inputStream(),RepertoireStore.hash(bytes))
+        assertEquals(token,store.catalog().getJSONObject("undo").getString("token"))
+        store.undo(token)
+        assertTrue(result(line.take(2)).getBoolean("theory")); assertTrue(result(line.take(2)).getBoolean("alternative"))
+        assertFalse(result(line).getBoolean("theory")); assertEquals(2,result(line).getInt("add_count"))
+        assertEquals(before,editsWithoutUndo()); assertEquals(settings,store.settings())
+        assertNull(store.undoInfo())
+        store = RepertoireStore(context); assertNull(store.undoInfo())
+        assertArrayEquals(bytes,File(context.filesDir,"mobile_repertoire.sqlite").readBytes())
+    }
+
+    @Test fun undoExclusionRestoresTheExactPriorAlternativeLabel() {
+        edit(listOf("e2e4"),"alternative")
+        val before = editsWithoutUndo()
+        edit(listOf("e2e4"),"analysis")
+        assertFalse(result(listOf("e2e4","e7e5")).getBoolean("theory"))
+        store.undo(undoToken())
+        assertTrue(result(listOf("e2e4","e7e5")).getBoolean("theory"))
+        assertTrue(result(listOf("e2e4","e7e5")).getBoolean("alternative"))
+        assertEquals(before,editsWithoutUndo())
+    }
+
+    @Test fun undoRemovalRestoresLocalAdditionAndItsDescendants() {
+        val moves = listOf("e2e4","c7c5","g1f3")
+        addLine(moves); val before = editsWithoutUndo()
+        edit(moves.take(2),"reset")
+        assertEquals("Removed local addition",store.undoInfo()!!.getString("label"))
+        assertFalse(result(moves).getBoolean("theory"))
+        store.undo(undoToken())
+        assertEquals(before,editsWithoutUndo()); assertTrue(result(moves).getBoolean("theory"))
+        assertTrue(result(moves).getBoolean("end_of_line"))
+    }
+
+    @Test fun undoOptionalAndRestoredLabelsDoesNotTouchSourceData() {
+        assertNull(store.undoInfo())
+        assertThrows(IllegalStateException::class.java) { store.undo("none") }
+        edit(listOf("e2e4"),"alternative"); store.undo(undoToken())
+        assertFalse(result(listOf("e2e4")).getBoolean("alternative"))
+        edit(listOf("e2e4"),"analysis"); edit(listOf("e2e4"),"reset")
+        assertTrue(result(listOf("e2e4")).getBoolean("theory"))
+        store.undo(undoToken()); assertFalse(result(listOf("e2e4")).getBoolean("theory"))
+        assertArrayEquals(bytes,File(context.filesDir,"mobile_repertoire.sqlite").readBytes())
+    }
+
+    @Test fun failedAndNoOpEditsKeepTheLastMeaningfulUndo() {
+        edit(listOf("e2e4"),"analysis"); val token = undoToken()
+        val before = File(context.filesDir,"mobile_repertoire_edits.json").readBytes()
+        edit(listOf("e2e4"),"analysis")
+        edit(listOf("e2e4","e7e5"),"reset")
+        assertThrows(IllegalArgumentException::class.java) { addLine(listOf("e2e4","c7c5")) }
+        assertEquals(token,undoToken()); assertArrayEquals(before,File(context.filesDir,"mobile_repertoire_edits.json").readBytes())
+        store.undo(token); assertTrue(result(listOf("e2e4")).getBoolean("theory"))
+    }
+
+    @Test fun staleOrRepeatedUndoCannotUndoADifferentRepertoiresNewerChange() {
+        edit(listOf("e2e4"),"analysis"); val stale = undoToken()
+        edit(listOf("e2e4"),"analysis","black"); val latest = undoToken()
+        val before = editsWithoutUndo()
+        assertThrows(IllegalArgumentException::class.java) { store.undo(stale) }
+        assertEquals(before,editsWithoutUndo()); assertEquals("black",store.undoInfo()!!.getString("repertoire"))
+        store.undo(latest)
+        assertFalse(result(listOf("e2e4")).getBoolean("theory"))
+        assertTrue(store.lookup(request(listOf("e2e4"),listOf("black"))).getJSONArray("results").getJSONObject(0).getBoolean("theory"))
+        assertThrows(IllegalStateException::class.java) { store.undo(latest) }
+    }
+
+    @Test fun failedAtomicWritesPreserveBothTheEditsAndTheirUndo() {
+        edit(listOf("e2e4"),"analysis"); val token = undoToken()
+        val before = File(context.filesDir,"mobile_repertoire_edits.json").readBytes()
+        val blocker = File(context.filesDir,"mobile_repertoire_edits.json.new")
+        assertTrue(blocker.mkdir())
+        try {
+            assertThrows(java.io.IOException::class.java) { store.undo(token) }
+            assertThrows(java.io.IOException::class.java) { edit(listOf("e2e4"),"analysis","black") }
+            assertEquals(token,undoToken()); assertFalse(result(listOf("e2e4")).getBoolean("theory"))
+            assertArrayEquals(before,File(context.filesDir,"mobile_repertoire_edits.json").readBytes())
+        } finally { assertTrue(blocker.delete()) }
+        store = RepertoireStore(context); store.undo(token)
+        assertTrue(result(listOf("e2e4")).getBoolean("theory"))
+    }
+
+    @Test fun oldEditsAndInvalidJournalsRemainUsableWithoutInventingAnUndo() {
+        edit(listOf("e2e4"),"analysis")
+        val saved = File(context.filesDir,"mobile_repertoire_edits.json")
+        val original = saved.readText()
+        val corrupt = JSONObject(original); corrupt.getJSONObject("_undo").remove("changes"); saved.writeText(corrupt.toString())
+        store = RepertoireStore(context); assertNull(store.undoInfo()); assertFalse(result(listOf("e2e4")).getBoolean("theory"))
+        val stale = JSONObject(original)
+        stale.put("black",JSONObject().put(RepertoireStore.pathId(root,listOf("e2e4")),JSONObject().put("kind","analysis")))
+        saved.writeText(stale.toString()); store = RepertoireStore(context)
+        assertNull(store.undoInfo()); assertFalse(result(listOf("e2e4")).getBoolean("theory"))
+        stale.remove("_undo"); saved.writeText(stale.toString()); store = RepertoireStore(context)
+        assertNull(store.undoInfo())
+        edit(listOf("e2e4"),"reset"); store.undo(undoToken())
+        assertFalse(result(listOf("e2e4")).getBoolean("theory"))
+    }
 }
