@@ -25,6 +25,16 @@ class RepertoireCorpusTest {
         val cases = JSONArray(File(reference!!).readText())
         val times = mutableListOf<Long>()
         val previews = JSONObject()
+        val packagePreviews = JSONArray()
+        System.getenv("REPERTOIRE_TEST_CATALOG")?.let { catalogPath ->
+            val expected = JSONObject(File(catalogPath).readText()).getJSONArray("repertoires")
+            val actual = store.catalog().getJSONArray("repertoires")
+            fun identities(rows: JSONArray, fileKey: String) = (0 until rows.length()).map {
+                val rep = rows.getJSONObject(it)
+                listOf(rep.getString("id"),rep.getString("name"),rep.getString("side"),rep.getString(fileKey))
+            }.sortedBy { it[0] }
+            assertEquals("Downloaded catalog identities and sides",identities(expected,"pgn"),identities(actual,"file"))
+        }
         for (i in 0 until cases.length()) {
             val test = cases.getJSONObject(i)
             val started = System.nanoTime()
@@ -41,9 +51,28 @@ class RepertoireCorpusTest {
                 assertEquals("$field case $i",(0 until referenceNotes.length()).map { referenceNotes.getString(it) }.sorted(),
                     (0 until notes.length()).map { notes.getString(it) }.sorted())
             }
+            test.optString("side").takeIf { it.isNotBlank() }?.let { assertEquals("Repertoire side case $i",it,actual.getString("side")) }
+            test.optJSONArray("move_details")?.let { details ->
+                assertEquals("All viewable moves case $i",details.length(),moves.length())
+                for (j in 0 until details.length()) {
+                    val detail = details.getJSONObject(j)
+                    val move = (0 until moves.length()).map { moves.getJSONObject(it) }.single { it.getString("uci")==detail.getString("uci") }
+                    for (field in listOf("theory","alternative","own")) assertEquals("$field ${detail.getString("uci")} case $i",detail.getBoolean(field),move.getBoolean(field))
+                    if (move.getBoolean("theory") && !move.getBoolean("own")) assertEquals("Opponent label case $i","repertoire",move.getString("kind"))
+                    for (field in listOf("comments","starting_comments")) {
+                        val expectedNotes = detail.getJSONArray(field); val actualNotes = move.getJSONArray(field)
+                        assertEquals("Move $field case $i",(0 until expectedNotes.length()).map { expectedNotes.getString(it) }.sorted(),
+                            (0 until actualNotes.length()).map { actualNotes.getString(it) }.sorted())
+                    }
+                }
+            }
             if (test.getString("rep")=="qga") previews.put(test.getString("fen"),actual)
+            packagePreviews.put(JSONObject().put("request",test).put("result",actual))
         }
         System.getenv("REPERTOIRE_PREVIEW_OUTPUT")?.let { File(it).writeText(previews.toString()) }
+        System.getenv("REPERTOIRE_PACKAGE_PREVIEW_OUTPUT")?.let {
+            File(it).writeText(JSONObject().put("catalog",store.catalog()).put("positions",packagePreviews).toString())
+        }
         println("Private corpus: ${cases.length()} reference matches; host median ${times.sorted()[times.size/2]} ms, max ${times.max()} ms (not a physical phone benchmark)")
     }
 }

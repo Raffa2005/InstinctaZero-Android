@@ -3,7 +3,8 @@
 The PC source is the annotated repertoire package, not an indiscriminate PGN merge.
 The installed source on Rafael's PC is `~/Repertoire` (not `~/projects/Repertoire`).
 Only the corrected PGNs named by `annotations/manifest.json` are used (currently
-Tame the Sicilian, Queen’s Gambit Accepted, Taimanov Sicilian, Ruy Lopez and Jobava London);
+Tame the Sicilian, Queen’s Gambit Accepted, Taimanov Sicilian, Ruy Lopez, Jobava London
+and Symmetrical English for Black);
 `archive/` is not imported. The source package's PGN and sidecar fingerprints must
 match the derived SQLite index before it can be downloaded.
 
@@ -13,6 +14,9 @@ match the derived SQLite index before it can be downloaded.
    and **Download from PC** once, then select one or several repertoires.
    For the expanded library, install v0.7.4 or newer, tap **Update from PC**, then
    select Ruy Lopez and/or Jobava London. New repertoires are not auto-selected.
+   Symmetrical English for Black is available through the same **Update from PC**
+   action on v0.7.5; no new APK is needed. Choose it separately or combine it with
+   other repertoires. The existing selections, edits and Undo survive the update.
 2. Tap the bottom settings gear again to return to moves. There is no chooser
    on subsequent opens. Selections survive restarts; new games inherit your latest
    selection, while existing game-specific choices (including none) remain separate.
@@ -97,8 +101,8 @@ rules and rebuild their index, then update the phone copy.
 - Downloads use the existing paired-device token and HTTPS gateway. Up to 128 MiB
   uncompressed; gzip in transit. Checksummed installation replaces the prior copy
   only after validation. A slow or interrupted download leaves that copy usable.
-- The five PGNs total approximately 6.5 MiB; the full derived PC index is about
-  83.6 MiB on disk / 15.8 MiB over gzip. It includes repeated source occurrences,
+- The six-repertoire PC index is about 100.2 MiB on disk / 19.3 MiB over gzip.
+  It includes repeated source occurrences,
   positions, annotation reasons and lookup indexes. It is streamed to disk in
   64 KiB chunks, not retained in a giant JavaScript or native byte array. These
   sizes are for the September 7 package; the 128 MiB cap is not an allocation.
@@ -119,6 +123,15 @@ rules and rebuild their index, then update the phone copy.
   They are rendered as plain text, never executable HTML.
 - No SRS trainer, arbitrary unannotated PGN importer or source-rule editor is
   introduced in this pass. This feature does not resurrect the reverted study UI.
+- The English source retains 333 records (29 main chapters plus orientation and
+  quickstarter sections) and their headers/comments/variations in the index.
+  The current phone UI is a position-based book, not a chapter-by-chapter viewer.
+  Optional …Bf5 starts at Black's sixth move in records 331–333; the shared prefix
+  is regular repertoire. White replies keep regular labels inside that optional
+  context. Rejected examples and post-cutoff continuations remain viewable but
+  are excluded from normal source training. Policy 4 preserves explicit author
+  recommendations in resolved source annotations; it changes neither the SQLite
+  layout nor v0.7.5's book lookup. The PC must support policy 4 before downloading.
 - The private corpus is never included in the public source repository or APK.
 
 The server accepts `INSTINCTAZERO_REPERTOIRE_DIR` to point at another complete

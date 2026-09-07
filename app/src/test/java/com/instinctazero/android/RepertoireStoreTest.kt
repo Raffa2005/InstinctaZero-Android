@@ -129,26 +129,28 @@ class RepertoireStoreTest {
         val token = store.undoInfo()!!.getString("token")
         val fixture = File(context.cacheDir,"fixture.sqlite")
         SQLiteDatabase.openDatabase(fixture.path,null,SQLiteDatabase.OPEN_READWRITE).use { db ->
-            db.execSQL("INSERT INTO repertoires VALUES('third','Third','black','third.pgn'),('fourth','Fourth','white','fourth.pgn'),('fifth','Fifth','white','fifth.pgn')")
-            for ((id,rep) in listOf(201 to "third",202 to "fourth",203 to "fifth")) {
+            db.execSQL("INSERT INTO repertoires VALUES('third','Third','black','third.pgn'),('fourth','Fourth','white','fourth.pgn'),('fifth','Fifth','white','fifth.pgn'),('sixth','Sixth','black','sixth.pgn')")
+            for ((id,rep) in listOf(201 to "third",202 to "fourth",203 to "fifth",204 to "sixth")) {
                 db.execSQL("INSERT INTO nodes SELECT ?,parent_id,?,path_id,uci,san,kind,theory,line_alternative,reason,comment,fen FROM nodes WHERE id=1",arrayOf(id,rep))
             }
         }
         val updated = fixture.readBytes()
         store.install(updated.inputStream(),RepertoireStore.hash(updated))
         store = RepertoireStore(context)
-        assertEquals(5,store.catalog().getJSONArray("repertoires").length())
+        assertEquals(6,store.catalog().getJSONArray("repertoires").length())
         assertEquals("{\"analysis\":[\"white\"],\"_bookMarker\":false}",store.settings())
         assertFalse(result(listOf("e2e4")).getBoolean("theory"))
         assertEquals(token,store.undoInfo()!!.getString("token"))
         store.undo(token); assertTrue(result(listOf("e2e4")).getBoolean("theory"))
-        for (rep in listOf("fourth","fifth")) {
+        for (rep in listOf("fourth","fifth","sixth")) {
             val moves = listOf("d2d4")
             store.edit(request(moves).put("id",rep).put("kind","add"))
             assertTrue(store.lookup(request(moves,listOf(rep))).getJSONArray("results").getJSONObject(0).getBoolean("theory"))
             store.undo(store.undoInfo()!!.getString("token"))
             assertFalse(store.lookup(request(moves,listOf(rep))).getJSONArray("results").getJSONObject(0).getBoolean("theory"))
         }
+        val sixth = store.lookup(request(emptyList(),listOf("sixth"))).getJSONArray("results").getJSONObject(0)
+        assertEquals("black",sixth.getString("side"))
     }
 
     @Test fun oversizedStreamIsRejectedWithoutReplacingSavedCorpusOrUndo() {

@@ -6,6 +6,14 @@ changing the played game's move history. Terminal source references no longer hi
 lines recorded under another move order. Existing downloaded libraries, selections,
 local edits and Undo remain usable; no repertoire redownload is needed for this fix.
 
+The PC library now also includes **Symmetrical English for Black**. To add it to
+the existing v0.7.5 app, open Repertoires → settings → **Update from PC**, then
+select it. No APK update or re-pairing is required. Its 333 records, chapter/lesson
+metadata, comments and variations are retained in the downloaded index; the phone
+continues to browse them as a position-based book, not a separate chapter library.
+The …Bf5 system is an optional Black alternative. Source training contexts and
+author cutoffs remain distinct from the phone's position-based book coverage.
+
 The board, arrows, mainline navigation and portrait configuration remain unchanged
 from the simple version. This is not a return of the reverted multi-study redesign.
 

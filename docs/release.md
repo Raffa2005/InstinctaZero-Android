@@ -1,7 +1,9 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.7.5). Before producing a release APK, rebuild and verify the two
+(version 0.7.5). The six-repertoire library, including Symmetrical English for
+Black, uses the existing APK; do not bump the app solely for that data update.
+Before producing a release APK, rebuild and verify the two
 checked-in browser assets from their retained sources:
 
 ```bash
@@ -42,7 +44,7 @@ Before publishing, at minimum verify:
 - QGA reproduction and the alternate source move order both show Rd1/e4, their
   continuations and deduplicated position comments. Terminal transposition references
   must not hide coverage, and inactive duplicates must not veto active moves;
-- the expanded catalog supports independent and combined selection of all five
+- the expanded catalog supports independent and combined selection of all six
   repertoires. Corpus updates retain edits, selections and Undo; old offline
   packages remain readable. Variation introductions retain their Before move role;
 - streamed downloads accept the current >80 MiB library and reject >128 MiB
@@ -78,6 +80,12 @@ Before publishing, at minimum verify:
   markers/comments, restart and canonical forward navigation. Use
   `PHONE_PREVIEW_ASSETS` to repeat against assets extracted from the signed APK.
   Do not commit private reference results or screenshots;
+- for a library-only compatibility check, supply `REPERTOIRE_TEST_CATALOG` with
+  the server's catalogue response. Optional `move_details` reference fields verify
+  own-side/alternative flags and move comments. `REPERTOIRE_PACKAGE_PREVIEW_OUTPUT`
+  saves the actual native catalogue and position results for local phone previews.
+  Use `:app:testDebugUnitTest --rerun` when changing these environment inputs;
+  Gradle does not otherwise know that an optional private fixture has changed;
 - verify the paired PC serves the read-only repertoire endpoints, rejects
   unauthenticated access and preserves the gateway/Funnel configuration;
 - the APK installs and opens on native Home, while Analysis opens at the
