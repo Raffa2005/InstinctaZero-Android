@@ -157,4 +157,56 @@ class RepertoireStoreTest {
         add(); assertTrue(match())
         assertArrayEquals(bytes,File(context.filesDir,"mobile_repertoire.sqlite").readBytes())
     }
+
+    @Test fun endOfLineIncludesInformationalTailsAndExcludesUnknownHistories() {
+        val terminal = listOf("e2e4","e7e5","g1f3","b8c6")
+        SQLiteDatabase.openDatabase(File(context.filesDir,"mobile_repertoire.sqlite").path,null,SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("INSERT INTO nodes VALUES(9,5,'white',?,'f1b5','Bb5','analysis',0,0,'Information','A tail',?)",arrayOf(RepertoireStore.pathId(root,terminal+"f1b5"),RepertoireStore.position(root)))
+        }
+        assertTrue(result(terminal).getBoolean("end_of_line"))
+        assertEquals(1,result(terminal).getJSONArray("moves").length())
+        assertTrue(result(terminal.dropLast(1)).getJSONArray("moves").getJSONObject(0).getBoolean("end_of_line"))
+        assertFalse(result(listOf("d2d4")).getBoolean("end_of_line"))
+        edit(terminal.take(3),"analysis")
+        assertTrue(result(terminal.take(2)).getBoolean("end_of_line"))
+        assertFalse(result(terminal.take(3)).getBoolean("end_of_line"))
+    }
+
+    @Test fun quickAddExtendsTerminalCoverageAndPersistsOnlyToChosenRepertoire() {
+        val terminal = listOf("e2e4","e7e5","g1f3","b8c6")
+        val extended = terminal + listOf("f1b5","a7a6")
+        assertTrue(result(terminal).getBoolean("end_of_line"))
+        assertTrue(result(extended).getBoolean("can_add")); assertEquals(2,result(extended).getInt("add_count"))
+        val request = request(extended).put("id","white").put("kind","add")
+            .put("entries",JSONArray(extended.map { JSONObject().put("san",it).put("fen",root) }))
+        store.edit(request)
+        store = RepertoireStore(context)
+        assertTrue(result(extended).getBoolean("theory")); assertTrue(result(extended).getBoolean("end_of_line"))
+        assertFalse(result(terminal).getBoolean("end_of_line")); assertFalse(result(extended).getBoolean("can_add"))
+        assertThrows(IllegalArgumentException::class.java) { store.edit(request) }
+        assertFalse(store.lookup(request(extended,listOf("black"))).getJSONArray("results").getJSONObject(0).getBoolean("theory"))
+        assertArrayEquals(bytes,File(context.filesDir,"mobile_repertoire.sqlite").readBytes())
+    }
+
+    @Test fun addEligibilityAndWritesBothRejectExcludedLeavesAndSourceInformation() {
+        edit(listOf("e2e4"),"analysis")
+        for (moves in listOf(listOf("e2e4"),listOf("e2e4","c7c5"),listOf("e2e4","f7f6","g1f3"))) {
+            assertFalse(result(moves).getBoolean("can_add"))
+            assertThrows(IllegalArgumentException::class.java) { store.edit(request(moves).put("id","white").put("kind","add").put("entries",JSONArray(moves.map { JSONObject().put("san",it).put("fen",root) }))) }
+        }
+        edit(listOf("e2e4"),"reset")
+        assertFalse(result(listOf("e2e4","f7f6")).getBoolean("can_add"))
+        assertTrue(result(listOf("e2e4","c7c5")).getBoolean("can_add"))
+        assertEquals(1,result(listOf("e2e4","c7c5")).getInt("add_count"))
+    }
+
+    @Test fun failedMultiMoveAdditionRollsBackAllNewMoves() {
+        val moves = listOf("e2e4","c7c5","g1f3")
+        val entries = JSONArray().put(JSONObject().put("san","e4").put("fen",root))
+            .put(JSONObject().put("san","c5").put("fen",root)).put(JSONObject())
+        assertThrows(org.json.JSONException::class.java) { store.edit(request(moves).put("id","white").put("kind","add").put("entries",entries)) }
+        assertFalse(result(moves.take(2)).getBoolean("theory"))
+        assertEquals(2,result(moves).getInt("add_count"))
+        assertArrayEquals(bytes,File(context.filesDir,"mobile_repertoire.sqlite").readBytes())
+    }
 }

@@ -254,7 +254,7 @@
   repertoireMarker.setAttribute('role', 'img');
   repertoireMarker.innerHTML = window.repertoireBookIcon || '';
   boardEl.appendChild(repertoireMarker);
-  function showRepertoireMarker(kind) {
+  function showRepertoireMarker(kind, endOfLine) {
     const square = cursor.move && cursor.move.to;
     repertoireMarker.hidden = !kind || !square;
     if (repertoireMarker.hidden) return;
@@ -263,8 +263,9 @@
     repertoireMarker.style.left = ((black ? 7 - file : file) + 1) * 12.5 + '%';
     repertoireMarker.style.top = (black ? rank : 7 - rank) * 12.5 + '%';
     repertoireMarker.classList.toggle('transposition', kind === 'transposition');
+    repertoireMarker.classList.toggle('end-of-line', !!endOfLine);
     repertoireMarker.dataset.square = square;
-    repertoireMarker.setAttribute('aria-label', kind === 'theory' ? 'Repertoire move' : 'Repertoire position by transposition');
+    repertoireMarker.setAttribute('aria-label', kind === 'theory' ? endOfLine ? 'Repertoire move · end of line' : 'Repertoire move' : 'Repertoire position by transposition');
   }
   repertoirePanel = window.createRepertoirePanel ? window.createRepertoirePanel({
     key:() => studyContext.gameId,

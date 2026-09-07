@@ -26,6 +26,17 @@ match the derived SQLite index before it can be downloaded.
    Markers check all selected repertoires, independent of the focused move-list view.
 6. The sliders beside a move open local adjustments. Where repertoires overlap,
    choose which repertoire to adjust. **Add current line** is in settings.
+7. **End of line** and a small finish flag on the book badge mark the last active
+   theory move—even if informational continuations remain below it. In combined
+   view, the panel names a repertoire if only some selected repertoires end there;
+   the board flag appears only when none of the currently active selected
+   repertoires has a theory continuation.
+8. Play a new move (or several) on the board, then tap **Add move to repertoire**
+   or **Add line to repertoire** directly below the continuations. Choose a target
+   in combined view; in an individual view it saves directly to that repertoire.
+   A confirmation appears after saving. You can navigate back to see/play the
+   new continuation. There are no move-entry text fields. Comment writing is
+   not included yet; existing comments retain the same read/expand behavior.
 
 ## Alternatives and information
 
@@ -53,6 +64,12 @@ rules and rebuild their index, then update the phone copy.
 
 - One private SQLite download holds the corpus; only indexed current-history
   queries and small result sets enter the WebView. No per-move network request.
+- Already known child eligibility/comments are projected immediately on any move
+  or navigation action. Full visited-position results are cached up to 96 entries
+  and 2 MiB of estimated text data; misses still use native SQLite. The cache is
+  keyed by complete history, initial position and selected repertoires, and is
+  invalidated on edits/download updates. A transposition never becomes theory
+  merely because another history or position was cached.
 - Downloads use the existing paired-device token and HTTPS gateway. Up to 80 MiB
   uncompressed; gzip in transit. Checksummed installation replaces the prior copy
   only after validation. A slow or interrupted download leaves that copy usable.

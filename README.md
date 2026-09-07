@@ -1,6 +1,6 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.7.1 makes the repertoire companion move-first, with readable comments and optional board markers.
+InstinctaZero Android 0.7.2 adds quicker repertoire markers, visible line endings, and direct move/line additions.
 
 The board, arrows, mainline navigation and portrait configuration remain unchanged
 from the simple version. This is not a return of the reverted multi-study redesign.
@@ -15,6 +15,13 @@ position by a different history, without clearing the deviation. All checks run 
 an indexed on-device database; the corpus is not loaded into the WebView or shipped
 in this repository/APK. See [Repertoires](docs/repertoires.md) for meaning, edits and
 limits. **How to use** in repertoire settings opens the same usage guidance.
+
+Known move markers and comments appear immediately from the previous lookup;
+visited positions use a bounded cache. A small finish flag marks the end of
+active repertoire coverage. To extend a line, play moves on the board, then tap
+**Add move** or **Add line** in the repertoire tab. In combined view, choose the
+target repertoire explicitly. Additions save on this phone and survive restarts;
+source PGNs and archived game PGNs remain unchanged. Comment writing is deferred.
 
 Menus use quieter warm accents, rounded touch controls and short tab transitions.
 No local PGN files, archived game PGNs, pairing or PC annotations are modified.

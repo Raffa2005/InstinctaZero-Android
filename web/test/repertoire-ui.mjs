@@ -28,6 +28,8 @@ try {
       let sequence=0, installed=true;
       const catalog=[{id:'white',name:'Tame the Sicilian',side:'white'},{id:'qga',name:'Queen’s Gambit Accepted',side:'black'},{id:'black',name:'Taimanov Sicilian',side:'black'}];
       const settings=JSON.parse(localStorage.getItem('repertoires') || '{"analysis":["white","black"]}');window.__test={requests:[],saved:localStorage.getItem('study') || '{}',edits:[],failDownload:false,delay:12};
+      const additions=JSON.parse(localStorage.getItem('additions') || '{}');
+      window.__test.additions=additions;window.__test.extensionMode=localStorage.getItem('extensionMode')==='true';
       window.InstinctaZeroNative={
         getUiSettings:()=>'{"leelaEnabled":false}',saveUiSettings:()=>{},getStudyState:()=>window.__test.saved,saveStudyState:raw=>{window.__test.saved=raw;localStorage.setItem('study',raw);},
         cancelAnalysis:()=>{},leaveAnalysis:()=>{window.__test.left=true;},
@@ -36,7 +38,17 @@ try {
           const request=JSON.parse(raw),id='rep-'+(++sequence);window.__test.requests.push(request);
           let result;
           if(request.action==='catalog')result={installed,repertoires:catalog};
-          if(request.action==='edit'){window.__test.edits.push(request);result={saved:true};}
+          if(request.action==='edit'){
+            window.__test.edits.push(request);result={saved:true};
+            if(request.kind==='add'){
+              additions[request.id]=additions[request.id] || [];
+              for(let ply=4;ply<=request.history.length;ply++) {
+                const path=request.history.slice(0,ply).join(' ');
+                if(!additions[request.id].includes(path))additions[request.id].push(path);
+              }
+              localStorage.setItem('additions',JSON.stringify(additions));
+            }
+          }
           if(request.action==='lookup') {
             const length=request.history.length;
             const next=length===0?['e2e4','e4']:length===1?['c7c5','c5']:length===2?['g1f3','Nf3']:['b8c6','Nc6'];
@@ -46,6 +58,14 @@ try {
                 {uci:next[0],san:next[1],theory:true,alternative:length>0,own:length%2===0?rep==='white':rep!=='white',reason:'Source annotation',comments:['Develop naturally and prepare the centre.',rep==='white'?'A second file contributes another useful comment.':'Black’s perspective on this position.'],kind:length>0&&rep!=='white'?'alternative':'repertoire'},
                 ...(length<2?[{uci:length===0?'d2d4':'e7e5',san:length===0?'d4':'e5',theory:false,alternative:false,own:false,kind:'analysis',reason:'Informational only; does not reactivate theory',comment:''}]:[])
               ]}))};
+            if(window.__test.extensionMode) result={results:request.selected.map(rep=>{
+              const path=request.history.join(' '), stored=additions[rep] || [], theory=length<=3 || stored.includes(path);
+              const continuations=stored.filter(p=>p.startsWith(path+' ') && p.split(' ').length===length+1).map(p=>p.split(' ').at(-1));
+              const missing=request.history.slice(3).filter((_,i)=>!stored.includes(request.history.slice(0,i+4).join(' '))).length;
+              return {...catalog.find(r=>r.id===rep),theory,end_of_line:theory&&length>=3&&!continuations.length,
+                can_add:!theory,add_count:missing,deviation:theory?0:4,comments:['Keep an eye on the d5 break.'],
+                moves:(length<3?[next[0]]:continuations).map(uci=>({uci,san:uci==='b8c6'?'Nc6':uci,theory:true,deviation:0,comments:['Keep an eye on the d5 break.'],end_of_line:!stored.some(p=>p.startsWith(path+' '+uci+' '))}))};
+            })};
           }
           setTimeout(()=>window.InstinctaZero.onNativeRepertoire(id,result),window.__test.delay);return id;
         },
@@ -147,9 +167,52 @@ try {
     await page.getByRole('alert').waitFor();
     assert.equal(await page.evaluate(()=>window.__test.requests.length),beforeFailure,'download error stays visible');
     assert.equal(await page.locator('.rep-card.checked').count(),1);
+    // Terminal coverage -> a real board move -> add to one repertoire, then a whole line.
+    await page.evaluate(()=>{window.__test.extensionMode=true;window.__test.failDownload=false;localStorage.setItem('extensionMode','true');});
+    await page.getByRole('checkbox',{name:/Queen/}).tap();
+    await page.getByRole('checkbox',{name:/Tame/}).tap();
+    await page.getByRole('checkbox',{name:/Taimanov/}).tap();
+    await page.getByRole('button',{name:/Update from PC/}).tap();
+    await page.waitForFunction(()=>!document.querySelector('[data-rep-action=download]').disabled);
+    await page.locator('[data-action=settings]').tap();
+    await page.getByRole('img',{name:'Repertoire move · end of line',exact:true}).waitFor();
+    assert.match(await page.locator('.rep-end').innerText(),/End of line/);
+    await page.waitForTimeout(150);
+    await page.screenshot({path:`${output}/end-of-line-${width}.png`});
+    const playBoardMove=async(from,to)=>{
+      const box=await page.locator('#board').boundingBox();
+      for(const square of [from,to])await page.touchscreen.tap(box.x+(square.charCodeAt(0)-97+.5)*box.width/8,box.y+(8-Number(square[1])+.5)*box.height/8);
+    };
+    await playBoardMove('b8','c6');
+    await page.getByRole('button',{name:'+ Add move to repertoire',exact:true}).tap();
+    await page.screenshot({path:`${output}/choose-add-${width}.png`});
+    await page.getByRole('button',{name:'Tame the Sicilian',exact:true}).tap();
+    await page.waitForFunction(()=>window.__test.additions.white?.includes('e2e4 c7c5 g1f3 b8c6'));
+    assert.equal(await page.evaluate(()=>window.__test.additions.black?.length || 0),0);
+    await page.getByRole('img',{name:'Repertoire move · end of line',exact:true}).waitFor();
+    await page.screenshot({path:`${output}/added-${width}.png`});
+    const savedEdits=await page.evaluate(()=>window.__test.edits.length);
+    await page.getByRole('button',{name:'+ Add move to repertoire',exact:true}).tap();
+    assert.equal(await page.evaluate(()=>window.__test.edits.length),savedEdits,'remaining target still needs an explicit choice in combined view');
+    await page.getByRole('button',{name:'Taimanov Sicilian',exact:true}).waitFor();
+    await page.getByRole('button',{name:'+ Add move to repertoire',exact:true}).tap();
+    await playBoardMove('f1','b5');await playBoardMove('a7','a6');
+    await page.getByRole('button',{name:'+ Add line to repertoire',exact:true}).tap();
+    await page.getByRole('button',{name:'Tame the Sicilian',exact:true}).tap();
+    await page.waitForFunction(()=>window.__test.additions.white?.length===3);
+    await page.getByRole('img',{name:'Repertoire move · end of line',exact:true}).waitFor();
+    await page.waitForFunction(()=>JSON.parse(window.__test.saved).cursor?.length===6);
+    await page.reload();
+    await page.getByRole('img',{name:'Repertoire move · end of line',exact:true}).waitFor();
+    await page.locator('[data-action=prev]').tap();
+    await page.locator('[data-rep-play=a7a6]').waitFor();
+    await page.evaluate(()=>{window.__test.delay=2000;});
+    const start=Date.now();await page.locator('[data-action=next]').tap();
+    assert.equal(await page.getByRole('img',{name:'Repertoire move · end of line',exact:true}).isVisible(),true);
+    assert.ok(Date.now()-start<1000,'known badge must precede the delayed native reply');
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     assert.deepEqual(errors,[]);
-    console.log(`${width}×${height}: compact moves, all comments, saved choices, independent edits, marker toggle/flip/navigation/transposition/stale replies and errors passed`);
+    console.log(`${width}×${height}: comments, preferences, immediate markers, terminal flags, single/multi-move additions, independent persistence and navigation passed`);
     await page.close();
   }
 } finally {await browser.close();server.close();}

@@ -171,6 +171,43 @@ internal class RepertoireStore(context: Context) {
         require(raw.length() <= 512)
         return (0 until raw.length()).map { raw.getString(it).also { move -> require(move.matches(Regex("[a-h][1-8][a-h][1-8][qrbn]?"))) } }
     }
+    private fun children(db: SQLiteDatabase, rep: String, root: String, moves: List<String>): Map<String, List<Node>> {
+        val result = source(db, rep, root, moves, true).groupBy { it.uci }.toMutableMap()
+        val parent = pathId(root, moves)
+        val local = overrides(rep)
+        local.keys().forEach { key ->
+            val edit = local.getJSONObject(key)
+            if (edit.optBoolean("added") && edit.optString("parent") == parent) {
+                val uci = edit.getString("uci")
+                if (!result.containsKey(uci)) result[uci] = listOf(Node(uci, edit.getString("san"), "repertoire", true, false, "Added on this phone", "", edit.getString("fen")))
+            }
+        }
+        return result.filterKeys { it.matches(Regex("[a-h][1-8][a-h][1-8][qrbn]?")) }
+    }
+    /** Call only for an active parent. Informational tails do not extend its theory. */
+    private fun hasTheoryChild(db: SQLiteDatabase, rep: String, root: String, moves: List<String>): Boolean {
+        val local = overrides(rep)
+        return children(db, rep, root, moves).any { (uci, occurrences) ->
+            occurrences.any { it.theory } && local.optJSONObject(pathId(root, moves + uci))?.optString("kind") != "analysis"
+        }
+    }
+    /** -1 is blocked, 0 already present, otherwise the number of missing moves to add.
+     * Check the whole path so neither a last-ply exclusion nor a source information bridge
+     * can be silently promoted. The same check powers the UI and the atomic write.
+     */
+    private fun extensionSize(db: SQLiteDatabase, rep: String, root: String, moves: List<String>): Int {
+        val local = overrides(rep)
+        if (source(db, rep, root, emptyList()).none { it.theory } || local.optJSONObject(pathId(root, emptyList()))?.optString("kind") == "analysis") return -1
+        var missing = 0
+        for (ply in 1..moves.size) {
+            val path = moves.take(ply)
+            val original = source(db, rep, root, path)
+            val edit = local.optJSONObject(pathId(root, path))
+            if (edit?.optString("kind") == "analysis" || (original.isNotEmpty() && original.none { it.theory })) return -1
+            if (original.isEmpty() && edit?.optBoolean("added") != true) missing++
+        }
+        return missing
+    }
     @Synchronized fun lookup(request: JSONObject): JSONObject {
         val root = position(request.getString("root")); val moves = checkedMoves(request)
         val selected = request.getJSONArray("selected")
@@ -184,30 +221,31 @@ internal class RepertoireStore(context: Context) {
                 val memo = mutableMapOf<String, State>()
                 val current = state(db, rep, identity.second, root, moves, memo)
                 val currentNodes = source(db, rep, root, moves)
-                val children = source(db, rep, root, moves, true).groupBy { it.uci }.toMutableMap()
+                val children = children(db, rep, root, moves)
                 val local = overrides(rep)
-                local.keys().forEach { key ->
-                    val edit = local.getJSONObject(key)
-                    if (edit.optBoolean("added") && edit.optString("parent") == pathId(root, moves)) {
-                        val uci = edit.getString("uci")
-                        if (!children.containsKey(uci)) children[uci] = listOf(Node(uci, edit.getString("san"), "repertoire", true, false, "Added on this phone", "", edit.getString("fen")))
-                    }
-                }
                 val lines = JSONArray()
+                var hasContinuation = false
                 for ((uci, occurrences) in children) {
                     if (!uci.matches(Regex("[a-h][1-8][a-h][1-8][qrbn]?"))) continue
                     val child = state(db, rep, identity.second, root, moves + uci, memo)
                     val best = occurrences.firstOrNull { it.theory && !it.alternative } ?: occurrences.firstOrNull { it.theory } ?: occurrences.first()
+                    hasContinuation = hasContinuation || child.theory
                     lines.put(JSONObject().put("uci", uci).put("san", best.san).put("kind", child.kind).put("theory", child.theory)
                         .put("alternative", child.alternative).put("own", ownMove(identity.second, root, moves.size + 1))
+                        .put("deviation", child.deviation)
+                        .put("end_of_line", child.theory && !hasTheoryChild(db, rep, root, moves + uci))
+                        .put("position_match", !child.theory && positionMatches(db, rep, best.fen, pathId(root, moves + uci)) > 0)
                         .put("reason", child.reason).put("comment", best.comment).put("comments", comments(occurrences))
                         .put("edited", local.has(pathId(root, moves + uci))))
                 }
                 val candidates = if (!current.theory) positionMatches(db, rep, request.getString("fen"), pathId(root, moves)) else 0
+                val additions = if (current.theory) 0 else extensionSize(db, rep, root, moves)
                 results.put(JSONObject().put("id", rep).put("name", identity.first).put("side", identity.second)
                     .put("known", current.known).put("theory", current.theory).put("alternative", current.alternative)
                     .put("kind", current.kind).put("reason", current.reason).put("deviation", current.deviation)
                     .put("candidates", candidates).put("position_match", candidates > 0)
+                    .put("end_of_line", current.theory && !hasContinuation)
+                    .put("can_add", additions > 0).put("add_count", maxOf(0, additions))
                     .put("comments", comments(currentNodes)).put("moves", lines))
             }
         }
@@ -231,14 +269,13 @@ internal class RepertoireStore(context: Context) {
                 else if (kind == "add") {
                     val entries = request.getJSONArray("entries")
                     require(entries.length() == moves.size)
+                    val additions = extensionSize(db, rep, root, moves)
+                    require(additions >= 0) { "This line crosses an informational or excluded move. Restore the excluded branch or review its PC annotations first." }
+                    require(additions > 0) { "This line is already in the repertoire." }
                     for (ply in 1..moves.size) {
                         val path = moves.take(ply)
                         val original = source(db, rep, root, path)
-                        require(state(db, rep, side, root, path.dropLast(1)).theory) { "This line crosses an informational or excluded move. Restore that branch first." }
-                        if (original.isNotEmpty()) {
-                            require(original.any { it.theory }) { "Informational source lines cannot be silently promoted. Edit and revalidate their PC annotations first." }
-                            continue
-                        }
+                        if (original.isNotEmpty()) continue
                         val entry = entries.getJSONObject(ply - 1)
                         val addedKey = pathId(root, path)
                         if (!local.has(addedKey)) local.put(addedKey, JSONObject().put("added", true).put("kind", "repertoire")
