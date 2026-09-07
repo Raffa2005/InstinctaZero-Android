@@ -192,7 +192,8 @@ try {
     await page.getByRole('checkbox',{name:/Queen/}).tap();
     await page.getByRole('button',{name:'How to use',exact:true}).tap();
     await page.screenshot({path:`${output}/guide-${width}.png`});
-    assert.match(await page.locator('.rep-guide').innerText(),/full history/);
+    assert.match(await page.locator('.rep-guide').innerText(),/book follows the board position, not your move order/);
+    assert.doesNotMatch(await page.locator('.rep-guide').innerText(),/outlined book|history has already left/);
     await page.evaluate(()=>{window.__test.failDownload=true;});
     await page.waitForTimeout(50);
     const beforeFailure=await page.evaluate(()=>window.__test.requests.length);

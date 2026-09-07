@@ -49,6 +49,7 @@ try{
     assert.equal(await page.locator('.rep-end').count(),0);
     assert.equal(await page.getByRole('img',{name:'Repertoire move',exact:true}).isVisible(),true);
     assert.doesNotMatch(await page.locator('.repertoire-panel').innerText(),/different move order|No continuation for this history/);
+    await page.waitForTimeout(300); // Let the existing board/tab animations finish for visual inspection.
     await page.screenshot({path:`${output}/qga-moves-${width}.png`});
     await page.getByRole('button',{name:'Comment on played move'}).tap();
     assert.match(await page.locator('.rep-comments').innerText(),/knight belongs on d7/);
