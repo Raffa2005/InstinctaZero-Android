@@ -3,6 +3,8 @@ package com.instinctazero.android
 import android.annotation.SuppressLint
 import android.content.res.ColorStateList
 import android.content.Context
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -71,6 +73,7 @@ class MainActivity : ComponentActivity() {
     private val pairingCode = PairingCodeBuffer()
     private var webPageLoaded = false
     private var pendingRepertoires = false
+    private var pendingBoardEditor = false
     private var pendingRepertoireId: String? = null
     private val repertoireLibrary = RepertoireLibraryState()
     private var connectionMessage: String? = null
@@ -304,7 +307,7 @@ class MainActivity : ComponentActivity() {
         archiveLoading = false
         nativeLayer.visibility = View.GONE
         webView.visibility = View.VISIBLE
-        if (webPageLoaded && pendingArchivedGame == null) setAnalysisActive(true)
+        if (webPageLoaded && pendingArchivedGame == null && !pendingBoardEditor) setAnalysisActive(true)
     }
 
     private fun showRepertoires(id: String? = null) {
@@ -312,6 +315,17 @@ class MainActivity : ComponentActivity() {
         pendingRepertoires = true
         showAnalysisScreen()
         if (webPageLoaded) openRepertoirePage()
+    }
+
+    private fun showBoardEditor() {
+        nativeBridge.cancelAll("opened board editor")
+        pendingBoardEditor=true;showAnalysisScreen()
+        if(webPageLoaded)openBoardEditorPage()
+    }
+    private fun openBoardEditorPage() {
+        pendingBoardEditor=false
+        webView.evaluateJavascript("window.InstinctaZero&&window.InstinctaZero.openBoardEditor&&window.InstinctaZero.openBoardEditor();void 0;",null)
+        setAnalysisActive(true)
     }
 
     private fun openRepertoirePage() {
@@ -528,7 +542,7 @@ class MainActivity : ComponentActivity() {
         val paired = nativeBridge.isPaired()
         val menu = WorkspaceMenu(this)
         return menu.home(paired,connectionSummary(),::showAnalysisScreen,
-            { if(paired)showGamesScreen() else showProfileScreen() },::showRepertoireLibrary,{showRepertoires()},::showProfileScreen)
+            { if(paired)showGamesScreen() else showProfileScreen() },::showRepertoireLibrary,{showRepertoires()},::showProfileScreen,::showBoardEditor)
     }
 
     private fun gamesContent(): View {
@@ -928,6 +942,7 @@ class MainActivity : ComponentActivity() {
             addView(menu.row("\uf015","Home") { showHomeScreen() })
             addView(menu.section("Analysis"))
             addView(menu.row("\uf201","Analysis board") { showAnalysisScreen() })
+            addView(menu.row("\uf044","Board editor") { showBoardEditor() })
             addView(menu.row("\uf009","Games") { if (nativeBridge.isPaired()) showGamesScreen() else showProfileScreen() })
             addView(menu.section("Repertoires"))
             addView(menu.row("\uf02d","Repertoire library") { showRepertoireLibrary() })
@@ -1022,9 +1037,10 @@ class MainActivity : ComponentActivity() {
         override fun onPageFinished(view: WebView, url: String) {
             if (AnalysisWebPolicy.isAllowedMainFrameUrl(url)) {
                 webPageLoaded = true
-                setAnalysisActive(navigation.screen == ShellScreen.ANALYSIS && pendingArchivedGame == null)
+                setAnalysisActive(navigation.screen == ShellScreen.ANALYSIS && pendingArchivedGame == null && !pendingBoardEditor)
                 deliverPendingArchivedGame()
                 if (pendingRepertoires) openRepertoirePage()
+                if (pendingBoardEditor) openBoardEditorPage()
             }
         }
     }
@@ -1296,20 +1312,24 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     }
 
     @JavascriptInterface
-    fun getStudyState(): String = studyPreferences.getString("state_v1", "{}") ?: "{}"
+    fun getStudyState(): String = studyWorkspaces.current()
+
+    private val studyWorkspaces by lazy { StudyWorkspaceStore(studyPreferences) }
+    @JavascriptInterface fun getSourceStudyState(): String = studyWorkspaces.source()
+    @JavascriptInterface fun getEditorDraft(): String = studyWorkspaces.draft()
+    @JavascriptInterface fun saveEditorDraft(raw: String?): Boolean = studyWorkspaces.saveDraft(raw)
+    @JavascriptInterface fun pastePositionFen(): String = runCatching {
+        val clipboard=activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.primaryClip?.takeIf { it.itemCount>0 }?.getItemAt(0)?.text?.toString()?.take(200).orEmpty()
+    }.getOrDefault("")
+    @JavascriptInterface fun copyPositionFen(raw: String): Boolean = runCatching {
+        val fen=PositionFen.checked(raw)
+        (activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Chess position FEN",fen))
+        true
+    }.getOrDefault(false)
 
     @JavascriptInterface
-    fun saveStudyState(rawState: String?): Boolean = try {
-        require(rawState != null && rawState.length <= MAX_STUDY_JSON) { "Study is too large." }
-        val parsed = JSONObject(rawState)
-        require(parsed.optInt("v") == 1) { "Unsupported study state." }
-        val cursor = parsed.optJSONArray("cursor") ?: JSONArray()
-        require(cursor.length() <= 512) { "Study cursor is too long." }
-        studyPreferences.edit().putString("state_v1", parsed.toString()).apply()
-        true
-    } catch (_: Exception) {
-        false
-    }
+    fun saveStudyState(rawState: String?): Boolean = studyWorkspaces.save(rawState)
 
     fun clearArchivedStudyContext() {
         val state = runCatching {
@@ -1795,13 +1815,16 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
             require(move.matches(Regex("[a-h][1-8][a-h][1-8][qrbn]?"))) { "Invalid move history." }
             normalizedHistory.put(move)
         }
-        // The server reconstructs and validates this sequence from standard chess initial state.
-        // Deliberately do not forward a client FEN, even if an older local page still includes one.
+        // Only a separate position study may supply a root. The PC validates its
+        // legality and replays every move; stored games always keep their own root.
         JSONObject().put("history", normalizedHistory).apply {
             if (parsed.has("game_id")) {
+                require(!parsed.has("initial_fen")) { "An edited position cannot replace a stored game root." }
                 val gameId = parsed.getString("game_id")
                 require(gameId.matches(Regex("[A-Za-z0-9]{8,16}"))) { "Invalid stored game." }
                 put("game_id", gameId)
+            } else if(parsed.has("initial_fen")) {
+                put("initial_fen",PositionFen.checked(parsed.getString("initial_fen")))
             }
             if (target == "analysis") {
                 put("nodes", parsed.optInt("nodes", 1000).coerceIn(1, 100_000))

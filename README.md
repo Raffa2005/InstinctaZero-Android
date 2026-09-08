@@ -1,5 +1,16 @@
 # InstinctaZero Android
 
+Version **0.8.2** adds **Board editor** on Home, in the sidebar, and under More
+on the analysis board. Place, move or erase pieces; set the turn, castling and
+en-passant state; paste/import or copy a FEN. Invalid setups explain what needs
+fixing before analysis. Drafts are retained on this phone.
+
+**Analyse position** opens a separate saved scratch board, never changes the
+source game/PGN, and retains custom roots for Leela, the opening explorer and local
+repertoire lookup. More → **Return to saved board** restores the original board.
+The paired PC needs the corresponding custom-position API update. See
+[Board editor](docs/board-editor.md).
+
 InstinctaZero Android 0.8.1 fixes stale work when opening completed games. The old
 board no longer starts repertoire/engine requests during the transition; obsolete
 reads are canceled, history checks are batched and long imports yield to touch UI.

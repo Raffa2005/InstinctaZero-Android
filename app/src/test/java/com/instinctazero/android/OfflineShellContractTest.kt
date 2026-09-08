@@ -16,8 +16,8 @@ class OfflineShellContractTest {
     @Test
     fun pendingNewGameDoesNotActivateOldBoardAndLateHttpDeliveryIsRevoked() {
         val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
-        assertTrue(activity.contains("if (webPageLoaded && pendingArchivedGame == null) setAnalysisActive(true)"))
-        assertTrue(activity.contains("setAnalysisActive(navigation.screen == ShellScreen.ANALYSIS && pendingArchivedGame == null)"))
+        assertTrue(activity.contains("if (webPageLoaded && pendingArchivedGame == null && !pendingBoardEditor) setAnalysisActive(true)"))
+        assertTrue(activity.contains("setAnalysisActive(navigation.screen == ShellScreen.ANALYSIS && pendingArchivedGame == null && !pendingBoardEditor)"))
         assertTrue(activity.contains("archivedGameRequest.getAndSet(pending)?.cancel()"))
         assertTrue(activity.contains("archivedGameRequest.getAndSet(null)?.cancel()"))
         val worker = activity.substringAfter("private fun loadArchivedGameOnWorker").substringBefore("private fun executeJson")
@@ -289,14 +289,16 @@ class OfflineShellContractTest {
     @Test
     fun localStudyStateIsBoundedVersionedAndStoredWithoutWebStorage() {
         val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
+        val storage = projectFile("src/main/java/com/instinctazero/android/StudyWorkspaceStore.kt").readText()
         val controller = projectFile("src/main/assets/analysis/analysis.js").readText()
         assertTrue(activity.contains("MAX_STUDY_JSON = 256 * 1024"))
         assertTrue(activity.contains("fun getStudyState()"))
         assertTrue(activity.contains("fun saveStudyState"))
-        assertTrue(activity.contains("require(parsed.optInt(\"v\") == 1)"))
-        assertTrue(activity.contains("require(cursor.length() <= 512)"))
+        assertTrue(storage.contains("raw.length<=256*1024"))
+        assertTrue(storage.contains("require(state.optInt(\"v\")==1)"))
+        assertTrue(storage.contains("state.optJSONArray(\"cursor\")?.length() ?: 0)<=512"))
         assertTrue(activity.contains("window.InstinctaZero.persistStudy"))
-        assertTrue(activity.contains("putString(\"state_v1\", parsed.toString()).apply()"))
+        assertTrue(activity.contains("studyWorkspaces.save(rawState)"))
         assertFalse(controller.contains("localStorage"))
     }
 

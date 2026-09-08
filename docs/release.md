@@ -1,7 +1,8 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.8.1). This update cancels obsolete game/repertoire reads, avoids old-board
+(version 0.8.2). This adds a separate board editor/position workspace and the narrow
+custom-root PC API handoff. The v0.8.1 update cancels obsolete game/repertoire reads, avoids old-board
 activation during game loading, batches history/edited ancestry checks, and imports
 games in short UI slices. The grouped menus, comment editing and automatic extension
 targeting remain unchanged. No repertoire redownload or data migration is needed.
@@ -42,7 +43,15 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 29 / 0.8.1 release values;
+- versionCode/versionName are the intended 30 / 0.8.2 release values;
+- run `node web/test/position-editor-ui.mjs` against the signed APK's extracted
+  assets. Check placement, actual touch drag, erase, Undo/reset, turn, castling,
+  en-passant, clipboard import/export, keyboard layout, custom-root analysis and
+  explorer payloads, source-board preservation, Return to saved board and restart;
+- run `StudyWorkspaceStoreTest` and the position-editor controller tests, plus
+  the PC mobile API tests. Verify the PC loads the matching `initial_fen` support
+  without bypassing device authentication, fair-play gates or stored-game roots.
+  Coordinate the PC service restart; do not interrupt active analysis unannounced;
 - run `node web/test/game-load-ui.mjs` at the same phone-preview settings below,
   including assets extracted from the signed APK. Hidden warmup must not start a
   study lookup; switching games must cancel old reads and ignore delayed callbacks.

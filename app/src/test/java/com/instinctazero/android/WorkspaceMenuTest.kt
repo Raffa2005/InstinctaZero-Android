@@ -36,12 +36,12 @@ class WorkspaceMenuTest {
         for((width,height) in listOf(360 to 584,390 to 724,412 to 788)) {
             val clicked=mutableListOf<String>()
             val home=menu.home(false,"Not paired · tap to connect",{clicked.add("analysis")},{clicked.add("games")},
-                {clicked.add("library")},{clicked.add("repertoire")},{clicked.add("profile")})
+                {clicked.add("library")},{clicked.add("repertoire")},{clicked.add("profile")},{clicked.add("editor")})
             snapshot(home,"home",width,height)
             val rows=views(home).filter { it.isClickable }
-            assertEquals(5,rows.size)
+            assertEquals(6,rows.size)
             for(row in rows) { assertTrue(row.height>=48);row.performClick() }
-            assertEquals(listOf("analysis","games","library","repertoire","profile"),clicked)
+            assertEquals(listOf("analysis","editor","games","library","repertoire","profile"),clicked)
             val text=views(home).filterIsInstance<TextView>().map { it.text.toString() }
             assertTrue(text.containsAll(listOf("ANALYSIS","REPERTOIRES","CONNECTION")))
         }

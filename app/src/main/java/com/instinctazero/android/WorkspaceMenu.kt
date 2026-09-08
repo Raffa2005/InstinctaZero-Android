@@ -41,10 +41,11 @@ internal class WorkspaceMenu(private val context: Context) {
     }
     fun scroll(content: View) = ScrollView(context).apply { isFillViewport=true; addView(content) }
     fun home(paired: Boolean, connection: String, analysis: () -> Unit, games: () -> Unit,
-        library: () -> Unit, repertoire: () -> Unit, profile: () -> Unit): View = scroll(column().apply {
+        library: () -> Unit, repertoire: () -> Unit, profile: () -> Unit, editor: () -> Unit): View = scroll(column().apply {
         setPadding(dp(16),dp(2),dp(16),dp(18))
         addView(section("Analysis"))
         addView(row("\uf201","Analysis board","Continue where you left off",analysis))
+        addView(row("\uf044","Board editor","Set up a position to analyse",editor))
         addView(row("\uf009","Games",if(paired)"Your completed games" else "Connect your PC to browse games",games))
         addView(section("Repertoires"))
         addView(row("\uf02d","Repertoire library","Create and manage your openings",library))
