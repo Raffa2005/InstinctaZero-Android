@@ -5,10 +5,10 @@ import test from 'node:test';
 
 const source = readFileSync(new URL('../../app/src/main/assets/analysis/repertoire.js',import.meta.url),'utf8');
 function harness() {
-  const requests=[], timers=[], markers=[];
+  const requests=[], timers=[], markers=[],cancellations=[];
   const settings={analysis:['r']};
   let context={root:'start w - - 0 1',history:[],entries:[]}, renders=0;
-  const window={InstinctaZeroNative:{getRepertoireSettings:()=>JSON.stringify(settings),
+  const window={InstinctaZeroNative:{getRepertoireSettings:()=>JSON.stringify(settings),cancelRepertoireLookup:()=>cancellations.push(true),
     saveRepertoireSettings:raw=>Object.assign(settings,JSON.parse(raw)),
     requestRepertoire:raw=>{const id=String(requests.length+1);requests.push({requestId:id,...JSON.parse(raw)});return id;},
     downloadRepertoires:()=>{const id=String(requests.length+1);requests.push({requestId:id,action:'download'});return id;}}};
@@ -17,7 +17,7 @@ function harness() {
     marker:(kind,end)=>markers.push({kind,end}),render:()=>renders++,settings:()=>{},closeSettings:()=>{},tab:()=>{}});
   const reply=(request,data)=>window.InstinctaZero.onNativeRepertoire(request.requestId,JSON.stringify(data));
   timers.shift()();reply(requests.at(-1),{installed:true,repertoires:[{id:'r',name:'Test',side:'white'}]});
-  return {panel,requests,markers,settings,reply,go(history,root=context.root){context={...context,history,root};panel.refresh();},
+  return {panel,requests,markers,settings,reply,cancellations,go(history,root=context.root){context={...context,history,root};panel.refresh();},
     click(dataset){const element={dataset};panel.bind({querySelectorAll:selector=>selector==='[data-rep-action]'?[element]:[]});element.onclick();},
     select(id){const element={dataset:{repSelect:id}};panel.bind({querySelectorAll:selector=>selector==='[data-rep-select]'?[element]:[]});element.onclick();},
     get last(){return requests.at(-1);},get marker(){return markers.at(-1);},get renders(){return renders;}};
@@ -31,6 +31,17 @@ test('extension chooses the nearest covered repertoire, never arbitrary catalog 
     result({id:'english',name:'English',theory:false,can_add:true,add_count:1,deviation:17})]});
   h.click({repAction:'quick-add'});
   assert.equal(h.last.action,'edit');assert.equal(h.last.id,'english');assert.equal(h.last.kind,'add');
+});
+
+test('loading another game clears old display and cancels even when the next position is cached',()=>{
+  const h=harness();h.reply(h.last,{results:[result({moves:[move('e2e4')]})]});
+  h.go(['e2e4']);const old=h.last;const cancellations=h.cancellations.length;
+  h.panel.beginGame();assert.equal(h.marker.kind,'');assert.ok(h.cancellations.length>cancellations);
+  const count=h.requests.length;h.go(['d2d4']);assert.equal(h.requests.length,count,'hidden/loading board must not enqueue work');
+  h.reply(old,{results:[result({comments:['Old game comment']})]});assert.doesNotMatch(h.panel.html(),/Old game comment/);
+  h.panel.setActive(true);assert.equal(h.requests.length,count+1);h.reply(h.last,{results:[result({comments:['New game comment']})]});
+  const ready=h.requests.length;h.go([]);assert.equal(h.requests.length,ready,'position cache reuse still cancels obsolete native reads');
+  assert.doesNotMatch(h.panel.html(),/New game comment/);
 });
 
 test('equally plausible repertoires keep the chooser and a single candidate needs no extra choice',()=>{

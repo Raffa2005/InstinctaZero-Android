@@ -1,9 +1,10 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.8.0). This update adds grouped native menus, phone-created repertoires,
-position comment editing and automatic extension targeting. The v0.7.6 indexed
-lookup/cache behavior remains. No repertoire redownload or data migration is needed.
+(version 0.8.1). This update cancels obsolete game/repertoire reads, avoids old-board
+activation during game loading, batches history/edited ancestry checks, and imports
+games in short UI slices. The grouped menus, comment editing and automatic extension
+targeting remain unchanged. No repertoire redownload or data migration is needed.
 Before producing a release APK, rebuild and verify the two
 checked-in browser assets from their retained sources:
 
@@ -41,7 +42,16 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 28 / 0.8.0 release values;
+- versionCode/versionName are the intended 29 / 0.8.1 release values;
+- run `node web/test/game-load-ui.mjs` at the same phone-preview settings below,
+  including assets extracted from the signed APK. Hidden warmup must not start a
+  study lookup; switching games must cancel old reads and ignore delayed callbacks.
+  Invalid, superseded and Back-canceled imports must not replace the saved board.
+  Check new-game comments, Black orientation, resume and restart;
+- run `LatestRepertoireReadTest` with native SQLite cancellation, plus bounded
+  activity/transition-cache and existing edit/Undo/reinstall regression coverage.
+  Optional end-of-game corpus benchmarks are documented in
+  [`release-v0.8.1.md`](release-v0.8.1.md);
 - run `WorkspaceMenuTest` with `NATIVE_MENU_PREVIEW` set to a private output folder
   for actual native View/Skia snapshots at phone sizes. Check groups/icons, naming
   and colour selection without starting a real account or using the USB phone;

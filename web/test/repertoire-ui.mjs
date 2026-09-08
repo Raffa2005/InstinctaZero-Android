@@ -134,7 +134,7 @@ try {
     assert.deepEqual(selection,['white','black','ruy_lopez','jobava_london']);
     await page.locator('[data-action=settings]').tap();
     await page.waitForFunction(()=>window.__test.requests.some(r=>r.action==='lookup'&&r.selected.includes('ruy_lopez')&&r.selected.includes('jobava_london')));
-    await page.reload();
+    await page.reload(); await page.evaluate(() => window.InstinctaZero.setAnalysisActive(true));
     await page.locator('[data-rep-play=c7c5]').waitFor();
     await page.locator('[data-action=settings]').tap();
     assert.equal(await page.getByRole('checkbox',{name:/Ruy Lopez/}).getAttribute('aria-checked'),'true');
@@ -154,7 +154,7 @@ try {
     await page.locator('[data-action=settings]').tap();
     // Wait for the debounced board save before recreating the whole WebView.
     await page.waitForFunction(()=>JSON.parse(window.__test.saved).cursor?.length===1);
-    await page.reload();
+    await page.reload(); await page.evaluate(() => window.InstinctaZero.setAnalysisActive(true));
     await page.locator('[data-rep-play=c7c5]').waitFor();
     assert.equal(await page.locator('.rep-card,.rep-filters').count(),0,'reopen directly into moves');
     assert.equal(await page.locator('.repertoire-book-marker').isVisible(),false,'marker preference survives restart');
@@ -186,7 +186,7 @@ try {
     await page.locator('[data-action=settings]').tap();
     await page.getByText('No repertoire selected.').waitFor();
     assert.equal(await page.locator('.repertoire-book-marker').isVisible(),false);
-    await page.reload();
+    await page.reload(); await page.evaluate(() => window.InstinctaZero.setAnalysisActive(true));
     await page.getByText('No repertoire selected.').waitFor();
     await page.getByRole('button',{name:'Choose repertoires',exact:true}).tap();
     await page.getByRole('checkbox',{name:/Queen/}).tap();
@@ -248,7 +248,7 @@ try {
     await page.waitForFunction(()=>window.__test.additions.white?.length===3);
     await page.getByRole('img',{name:'Repertoire move · end of line',exact:true}).waitFor();
     await page.waitForFunction(()=>JSON.parse(window.__test.saved).cursor?.length===6);
-    await page.reload();
+    await page.reload(); await page.evaluate(() => window.InstinctaZero.setAnalysisActive(true));
     await page.getByRole('img',{name:'Repertoire move · end of line',exact:true}).waitFor();
     await page.locator('[data-action=prev]').tap();
     await page.locator('[data-rep-play=a7a6]').waitFor();

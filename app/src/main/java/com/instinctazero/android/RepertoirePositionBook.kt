@@ -1,12 +1,15 @@
 package com.instinctazero.android
 
 import android.database.sqlite.SQLiteDatabase
+import android.os.CancellationSignal
+import com.instinctazero.android.RepertoireActivityCache.Transition
 import org.json.JSONArray
 import org.json.JSONObject
 
 /** Position graph for the opening book. Source-path annotations describe occurrences,
  * not the route the player must take to reach a position. Queries remain index-backed. */
-internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private val rep: String, private val local: JSONObject, private val localRoot: String? = null) {
+internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private val rep: String, private val local: JSONObject, private val localRoot: String? = null,
+    private val cancellation: CancellationSignal? = null, private val sharedActivity: RepertoireActivityCache? = null) {
     companion object {
         fun edgeKey(before: String, uci: String) = RepertoireStore.hash(
             "repertoire-edge-v1\n${RepertoireStore.position(before)}\n$uci".toByteArray()).take(32)
@@ -27,8 +30,10 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
     private val inherited = mutableMapOf<Long,Flags>()
     private val edgeCache = mutableMapOf<String,List<Edge>>()
     private val activeCache = mutableMapOf<String,Boolean>()
+    private val positionEdits = mutableMapOf<String,JSONObject?>()
+    private val transitions = mutableMapOf<Pair<String,String>,Transition>()
     private val hasLabels = local.keys().asSequence().any { local.getJSONObject(it).optString("kind") in listOf("analysis","alternative") }
-    private val columns = db?.rawQuery("PRAGMA table_info(nodes)",null)?.use { rows ->
+    private val columns = db?.rawQuery("PRAGMA table_info(nodes)",null,cancellation)?.use { rows ->
         buildSet { while (rows.moveToNext()) add(rows.getString(1)) }
     } ?: emptySet()
     private val intro = if ("starting_comment" in columns) "n.starting_comment" else "''"
@@ -36,8 +41,9 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
     private val select = "SELECT n.id,n.parent_id,n.path_id,n.uci,n.san,n.fen,p.fen,n.theory,n.line_alternative,n.kind,n.reason,n.comment,$intro,$sourceOrder " +
         "FROM nodes n LEFT JOIN nodes p ON p.id=n.parent_id WHERE n.repertoire_id=? AND "
     private fun read(where: String, args: Array<String>): List<Node> = readQuery(select+where,arrayOf(rep,*args))
-    private fun readQuery(sql: String, args: Array<String>): List<Node> = db?.rawQuery(sql,args)?.use { rows ->
+    private fun readQuery(sql: String, args: Array<String>): List<Node> = db?.rawQuery(sql,args,cancellation)?.use { rows ->
         buildList { while (rows.moveToNext()) {
+            cancellation?.throwIfCanceled()
             val node = Node(rows.getLong(0),if(rows.isNull(1))0 else rows.getLong(1),rows.getString(2),rows.getString(3) ?: "",
                 rows.getString(4) ?: "",rows.getString(5),rows.getString(6) ?: "",rows.getInt(7)==1,rows.getInt(8)==1,
                 rows.getString(9),rows.getString(10) ?: "",rows.getString(11) ?: "",rows.getString(12) ?: "",sourceOrder=rows.getInt(13))
@@ -65,13 +71,32 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         return if("fen_before" in columns) nodes.sortedWith(compareBy<Node> { it.sourceOrder }.thenBy { it.id }) else nodes
     }
     private fun sourceChildren(fen: String) = children.getOrPut(fen) { readChildren(fen) }
-    private fun positionEdit(n: Node): JSONObject? = local.optJSONObject(edgeKey(n.before,n.uci))?.takeIf { it.optString("scope") == "position" }
+    private fun positionEdit(n: Node): JSONObject? {
+        val key="${n.before}\n${n.uci}"
+        if(!positionEdits.containsKey(key))positionEdits[key]=local.optJSONObject(edgeKey(n.before,n.uci))?.takeIf { it.optString("scope") == "position" }
+        return positionEdits[key]
+    }
+    /** Batch the same ancestors flags() already visits; retain occurrence-scoped semantics. */
+    private fun prepareFlags(nodes: List<Node>) {
+        if(!hasLabels)return
+        var frontier=nodes
+        val visited=mutableSetOf<Long>()
+        while(frontier.isNotEmpty()) {
+            cancellation?.throwIfCanceled()
+            val parents=frontier.map { it.parent }.filter { it!=0L && it !in inherited && visited.add(it) }
+            parents.filter { it !in nodesById }.chunked(400).forEach { chunk ->
+                read("n.id IN (${chunk.joinToString(",") { "?" }})",chunk.map(Long::toString).toTypedArray())
+            }
+            frontier=parents.mapNotNull { nodesById[it] }
+        }
+    }
     // Existing path-scoped exclusions and optional labels still mask their source subtree.
     // A separately active occurrence at the same board position can nevertheless supply book moves.
     private fun flags(n: Node): Flags {
         if (!hasLabels) return Flags(n.theory,n.optional)
         val chain = mutableListOf<Node>(); val seen = mutableSetOf<Long>(); var current: Node? = n
         while (current != null && !inherited.containsKey(current.id)) {
+            cancellation?.throwIfCanceled()
             if (!seen.add(current.id) || chain.size > 512) return Flags(false)
             chain.add(current); current = if(current.parent==0L)null else node(current.parent)
         }
@@ -110,7 +135,8 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
                 optional = optional || global?.optString("kind")=="alternative"
                 key = edit.optString("parent")
             } else {
-                val active = path(key).map(::flags).filter { it.active }
+                val source=path(key);prepareFlags(source)
+                val active = source.map(::flags).filter { it.active }
                 return Flags(active.isNotEmpty(),optional || active.all { it.optional })
             }
         }
@@ -129,7 +155,8 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         }
         val edges = localNodes.filter { local.getJSONObject(it.path).optString("scope")=="position" }.groupBy { it.before }
         for (before in edges.keys) {
-            val active = at(before).map(::flags).filter { it.active }
+            val source=at(before);prepareFlags(source)
+            val active = source.map(::flags).filter { it.active }
             if (active.isNotEmpty()) reach(before,active.all { it.optional })
         }
         while (queue.isNotEmpty()) {
@@ -143,14 +170,32 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
     }
     private fun effective(n: Node) = if(n.added)localFlags[n.path] ?: Flags(false) else flags(n)
     private fun allAt(fen: String) = at(fen) + localNodes.filter { it.fen==fen }
-    fun active(fen: String) = activeCache.getOrPut(fen) {
+    fun active(fen: String): Boolean {
+        cancellation?.throwIfCanceled()
+        sharedActivity?.get(rep,fen)?.let { return it }
+        return activeCache.getOrPut(fen) {
         // Departure/extension checks only need existence. Do not load hundreds of
         // duplicate occurrence comments at every historical position in an unedited book.
-        if(!hasLabels && localNodes.isEmpty()) localRoot==fen || db?.rawQuery("SELECT 1 FROM nodes WHERE repertoire_id=? AND fen=? AND theory=1 LIMIT 1",arrayOf(rep,fen))?.use { it.moveToFirst() } == true
-        else allAt(fen).any { effective(it).active }
+        if(!hasLabels && localNodes.isEmpty()) localRoot==fen || db?.rawQuery("SELECT 1 FROM nodes WHERE repertoire_id=? AND fen=? AND theory=1 LIMIT 1",arrayOf(rep,fen),cancellation)?.use { it.moveToFirst() } == true
+        else { val nodes=allAt(fen);prepareFlags(nodes);nodes.any { effective(it).active } }
+        }.also { sharedActivity?.put(rep,fen,it) }
+    }
+    /** A new game can have hundreds of past positions. Resolve unedited membership
+     * with indexed batches rather than one SQL round trip per position/repertoire. */
+    fun prepareHistory(history: List<String>) {
+        if(hasLabels || localNodes.isNotEmpty())return
+        val missing=history.distinct().filter { !activeCache.containsKey(it) && sharedActivity?.get(rep,it)==null }
+        for(chunk in missing.chunked(400)) {
+            cancellation?.throwIfCanceled()
+            val active=mutableSetOf<String>()
+            db?.rawQuery("SELECT DISTINCT fen FROM nodes WHERE repertoire_id=? AND fen IN (${chunk.joinToString(",") { "?" }}) AND theory=1",arrayOf(rep,*chunk.toTypedArray()),cancellation)?.use {
+                while(it.moveToNext()) { cancellation?.throwIfCanceled();active.add(it.getString(0)) }
+            }
+            for(fen in chunk) { val value=fen==localRoot || fen in active;activeCache[fen]=value;sharedActivity?.put(rep,fen,value) }
+        }
     }
     private fun mergeEdges(fen: String, nodes: List<Node>): List<Edge> =
-        nodes.filter { it.uci.matches(Regex("[a-h][1-8][a-h][1-8][qrbn]?")) }
+        nodes.also { cancellation?.throwIfCanceled();prepareFlags(it) }.filter { it.uci.matches(Regex("[a-h][1-8][a-h][1-8][qrbn]?")) }
             .groupBy { it.uci }.map { (uci,nodes) ->
                 val eligible = nodes.filter { effective(it).active }
                 val best = eligible.firstOrNull { !effective(it).optional } ?: eligible.firstOrNull() ?: nodes.first()
@@ -170,13 +215,42 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         val source = children[fen]?.filter { it.uci==uci } ?: readChildren(fen,uci)
         return mergeEdges(fen,source + localNodes.filter { it.before==fen && it.uci==uci }).firstOrNull()
     }
+    private fun transition(fen: String, uci: String): Transition = sharedActivity?.transition(rep,fen,uci) ?: transitions.getOrPut(fen to uci) {
+        val edge=edge(fen,uci)
+        when {
+            edge==null -> Transition.MISSING
+            edge.active -> Transition.ACTIVE
+            edge.nodes.all { it.added && it.kind!="analysis" } -> Transition.RECONNECTABLE
+            else -> Transition.BLOCKED
+        }.also { sharedActivity?.putTransition(rep,fen,uci,it) }
+    }
+    private fun prepareTransitions(positions: List<String>, moves: List<String>, anchor: Int) {
+        if(hasLabels || localNodes.isNotEmpty() || (db!=null && "fen_before" !in columns))return
+        val missing=(anchor until moves.size).map { positions[it] to moves[it] }.distinct().filter {
+            it !in transitions && sharedActivity?.transition(rep,it.first,it.second)==null
+        }
+        for(chunk in missing.map { it.first }.distinct().chunked(400)) {
+            cancellation?.throwIfCanceled()
+            val states=mutableMapOf<Pair<String,String>,Transition>()
+            // Only edge existence/activity is needed to validate an extension. Do not
+            // read every source occurrence's SAN/comment for each past game move.
+            db?.rawQuery("SELECT fen_before,uci,MAX(theory) FROM nodes WHERE repertoire_id=? AND fen_before IN (${chunk.joinToString(",") { "?" }}) GROUP BY fen_before,uci",arrayOf(rep,*chunk.toTypedArray()),cancellation)?.use {
+                while(it.moveToNext()) { cancellation?.throwIfCanceled();states[it.getString(0) to it.getString(1)]=if(it.getInt(2)==1)Transition.ACTIVE else Transition.BLOCKED }
+            }
+            for(pair in missing.filter { it.first in chunk }) {
+                val state=states[pair] ?: Transition.MISSING
+                transitions[pair]=state;sharedActivity?.putTransition(rep,pair.first,pair.second,state)
+            }
+        }
+    }
     private fun comments(nodes: List<Node>, introduction: Boolean = false) = JSONArray(nodes.map { if(introduction)it.introduction else it.comment }.filter { it.isNotBlank() }.distinct())
     private fun positionComments(fen: String, original: JSONArray): JSONArray {
         val note = local.optJSONObject(commentKey(fen)) ?: return original
         return if(note.has("comment")) JSONArray().also { if(note.getString("comment").isNotEmpty()) it.put(note.getString("comment")) } else original
     }
     fun status(fen: String): JSONObject {
-        val nodes = allAt(fen); val eligible = nodes.filter { effective(it).active }
+        cancellation?.throwIfCanceled()
+        val nodes = allAt(fen);prepareFlags(nodes);val eligible = nodes.filter { effective(it).active }
         val optional = eligible.isNotEmpty() && eligible.all { effective(it).optional }
         val best = eligible.firstOrNull { !effective(it).optional } ?: eligible.firstOrNull() ?: nodes.firstOrNull()
         return JSONObject().put("fen",fen).put("known",nodes.isNotEmpty()).put("theory",eligible.isNotEmpty()).put("alternative",optional)
@@ -184,7 +258,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
             .put("reason",best?.reason ?: "Outside this repertoire.").put("deviation",0)
             .put("end_of_line",eligible.isNotEmpty() && edges(fen).none { it.active })
             .put("comments",positionComments(fen,comments(nodes))).put("starting_comments",comments(nodes,true))
-            .also { if(local.optJSONObject(commentKey(fen))?.has("comment")==true) it.put("comment_edited",true) }
+            .also { sharedActivity?.put(rep,fen,eligible.isNotEmpty());if(local.optJSONObject(commentKey(fen))?.has("comment")==true) it.put("comment_edited",true) }
     }
     fun moveJson(edge: Edge, side: String): JSONObject {
         val own = edge.before.split(' ').getOrNull(1) == if(side=="white")"w" else "b"
@@ -199,13 +273,15 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
     fun additions(positions: List<String>, moves: List<String>, entries: JSONArray, anchor: Int = positions.indexOfLast(::active)): List<Addition>? {
         if (positions.size != moves.size+1 || entries.length()!=moves.size) return null
         if (anchor < 0) return null
+        prepareTransitions(positions,moves,anchor)
         val additions = linkedMapOf<String,Addition>()
         for (ply in anchor until moves.size) {
-            val edge = edge(positions[ply],moves[ply])
+            cancellation?.throwIfCanceled()
+            val state = transition(positions[ply],moves[ply])
             // Re-adding a missing local prefix may reconnect its saved descendants. This
             // does not authorize an explicit exclusion or an informational source edge.
-            if (edge!=null && !edge.active && !edge.nodes.all { it.added && it.kind!="analysis" }) return null
-            if (edge==null) {
+            if (state==Transition.BLOCKED) return null
+            if (state==Transition.MISSING) {
                 val entry = entries.getJSONObject(ply)
                 additions[edgeKey(positions[ply],moves[ply])] = Addition(positions[ply],positions[ply+1],moves[ply],entry.getString("san").take(16))
             }

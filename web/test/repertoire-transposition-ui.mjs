@@ -42,6 +42,7 @@ try{
     await page.waitForFunction(()=>!document.documentElement.classList.contains('board-assets-loading'));
     const load=async(name)=>{
       await page.evaluate(({line})=>window.InstinctaZero.loadArchivedGame({id:'QgaTest1',initial_fen:line.root,moves:line.history.slice(0,16).map(uci=>({uci})),white:{name:'White'},black:{name:'Black'}}),{line:fixture[name]});
+      await page.evaluate(() => window.InstinctaZero.setAnalysisActive(true));
       await page.getByRole('button',{name:'Repertoires',exact:true}).tap();
       await page.locator('[data-rep-play=f1d1]').waitFor();await page.locator('[data-rep-play=e3e4]').waitFor();
     };
@@ -72,7 +73,7 @@ try{
     // Ordinary forward still chooses the first variation (Rd1), not the most recently visited e4.
     await page.locator('[data-rep-play=b7b5]').waitFor();
     await page.waitForFunction(()=>JSON.parse(window.__test.saved).cursor?.at(-1)==='f1d1');
-    await page.reload();await page.locator('[data-rep-play=b7b5]').waitFor();
+    await page.reload(); await page.evaluate(() => window.InstinctaZero.setAnalysisActive(true));await page.locator('[data-rep-play=b7b5]').waitFor();
     assert.equal(await page.getByRole('img',{name:'Repertoire move',exact:true}).isVisible(),true);
     await load('canonical');
     await page.waitForFunction(()=>JSON.parse(window.__test.saved).cursor?.length===16);

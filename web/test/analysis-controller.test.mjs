@@ -221,8 +221,8 @@ test('reset clears the tree and game context, Leela off clears engine state, and
   assert.match(controller, /function clearEngine\(nextStatus\)/);
   assert.match(controller, /engine\.lastGood = null; engine\.lines = \[\]; engine\.stats = null; engine\.progress = null/);
   assert.match(controller, /clearEngine\('off'\)/);
-  assert.match(controller, /function setTab\(next\) \{[^}]*if \(tab === 'book'\) requestBook\(\); \}/);
-  const setTabBody = controller.match(/function setTab\(next\) \{([^}]*)\}/)[1];
+  const setTabBody = functionSource(controller, 'setTab', 'stopActiveNavigation');
+  assert.match(setTabBody, /if \(tab === 'book'\) requestBook\(\);/);
   assert.doesNotMatch(setTabBody, /scheduleAnalysis|cancelAnalysis/);
 });
 
@@ -279,7 +279,7 @@ test('menus are touch-first full-panel views and Back dismisses them', async () 
 
   assert.match(controller, /function panelViewHtml\(\)/);
   assert.match(controller, /panel\.innerHTML = panelView \? panelViewHtml\(\)/);
-  assert.match(controller, /handleAndroidBack = function \(\) \{ if \(promotionPicker\)[^\n]*if \(panelView\) \{ closePanelView\(\); return true; \}/);
+  assert.match(controller, /handleAndroidBack = function \(\) \{[^\n]*if \(promotionPicker\)[^\n]*if \(panelView\) \{ closePanelView\(\); return true; \}/);
   assert.doesNotMatch(controller, /study-overlay|overlay-card|document\.body\.appendChild\(overlay\)/);
   assert.match(style, /\.panel-view\{width:100%/);
   assert.match(style, /\.panel-buttons button\{min-height:40px/);
@@ -602,6 +602,6 @@ test('stored completed games extend study requests only by trusted game id', asy
 
 test('account changes and missing stored games safely detach archived context', async () => {
   const controller = await readFile(controllerUrl, 'utf8');
-  assert.match(controller, /onAccountChanged = function \(\) \{ if \(studyContext\.gameId\) resetStudy\(\); \}/);
+  assert.match(controller, /onAccountChanged = function \(\) \{ if \(studyContext\.gameId \|\| gameLoading\) resetStudy\(\); \}/);
   assert.match(controller, /studyContext\.gameId && Number\(payload\.code \|\| data\.code\) === 404/);
 });

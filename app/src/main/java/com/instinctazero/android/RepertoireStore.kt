@@ -3,6 +3,7 @@ package com.instinctazero.android
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.util.AtomicFile
+import android.os.CancellationSignal
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -16,6 +17,8 @@ internal class RepertoireStore(context: Context) {
     private val prefs = context.getSharedPreferences("mobile_repertoire_preferences", Context.MODE_PRIVATE)
     private val editsFile = AtomicFile(File(context.filesDir, "mobile_repertoire_edits.json"))
     private val positionCache = RepertoireLookupCache()
+    private val activityCache = RepertoireActivityCache()
+    private fun clearCaches() { positionCache.clear();activityCache.clear() }
     private var undoRecord: JSONObject? = null
     private val edits: JSONObject by lazy {
         val saved = runCatching { JSONObject(String(editsFile.readFully(), Charsets.UTF_8)) }.getOrDefault(JSONObject())
@@ -37,7 +40,12 @@ internal class RepertoireStore(context: Context) {
         const val START_POSITION = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -"
         fun position(fen: String): String = fen.trim().split(Regex("\\s+")).take(4).joinToString(" ")
         fun pathId(root: String, moves: List<String>): String = hash(("repertoire-path-v1\n${position(root)}\n${moves.joinToString(" ")}").toByteArray()).take(32)
-        fun hash(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+        fun hash(bytes: ByteArray): String {
+            val hex="0123456789abcdef"
+            return buildString(64) { for(byte in MessageDigest.getInstance("SHA-256").digest(bytes)) {
+                val value=byte.toInt() and 255;append(hex[value ushr 4]);append(hex[value and 15])
+            } }
+        }
     }
 
     fun install(input: InputStream, expected: String) {
@@ -65,7 +73,7 @@ internal class RepertoireStore(context: Context) {
             }
             synchronized(this) {
                 check(temporary.renameTo(file)) { "Unable to install repertoire download" }
-                positionCache.clear()
+                clearCaches()
                 prefs.edit().putString("fingerprint", expected).apply()
             }
         } finally { temporary.delete() }
@@ -99,7 +107,7 @@ internal class RepertoireStore(context: Context) {
             return catalog().put("created_id",id)
         } catch(error: Exception) {
             restoreEdits(before); undoRecord = previousUndo?.let(::JSONObject); throw error
-        } finally { positionCache.clear() }
+        } finally { clearCaches() }
     }
     private fun canonical(value: Any?): String = when (value) {
         null, JSONObject.NULL -> "null"
@@ -147,7 +155,7 @@ internal class RepertoireStore(context: Context) {
             persistEdits(null)
             undoRecord = null
         } catch (error: Exception) { restoreEdits(before); throw error }
-        finally { positionCache.clear() }
+        finally { clearCaches() }
     }
     @Synchronized fun settings(): String = prefs.getString("settings", "{}") ?: "{}"
     @Synchronized fun saveSettings(raw: String) {
@@ -184,7 +192,8 @@ internal class RepertoireStore(context: Context) {
             position(entries.getJSONObject(it).getString("fen").also { fen -> require(fen.length<=100) })
         }
     }
-    @Synchronized fun lookup(request: JSONObject): JSONObject {
+    @Synchronized fun lookup(request: JSONObject, cancellation: CancellationSignal? = null): JSONObject {
+        cancellation?.throwIfCanceled()
         val moves = checkedMoves(request); val fen = position(request.getString("fen"))
         val history = positionHistory(request,moves)
         val selected = request.getJSONArray("selected")
@@ -193,8 +202,9 @@ internal class RepertoireStore(context: Context) {
         if (!file.isFile && localLibrary().length()==0) return JSONObject().put("results", results)
         source().use { db ->
             for (index in 0 until selected.length()) {
+                cancellation?.throwIfCanceled()
                 val rep = selected.getString(index)
-                val book by lazy { RepertoirePositionBook(db,rep,overrides(rep),localRoot(rep)) }
+                val book by lazy { RepertoirePositionBook(db,rep,overrides(rep),localRoot(rep),cancellation,activityCache) }
                 val current = positionCache.get(rep,fen) ?: run {
                     val identity = identity(db,rep)
                     book.status(fen).put("id",rep).put("name",identity.first).put("side",identity.second)
@@ -203,6 +213,8 @@ internal class RepertoireStore(context: Context) {
                 }
                 // Identical positions may have different departure points and missing local
                 // prefixes. Recompute these from this request, even on a position-cache hit.
+                activityCache.put(rep,fen,current.getBoolean("theory"))
+                if(!current.getBoolean("theory"))book.prepareHistory(history)
                 val anchor = if(current.getBoolean("theory")) -1 else history.indexOfLast(book::active)
                 val additions = if(current.getBoolean("theory"))emptyList() else book.additions(history,moves,request.optJSONArray("entries") ?: JSONArray(),anchor)
                 if (!current.getBoolean("theory") && moves.isNotEmpty()) {
@@ -211,6 +223,7 @@ internal class RepertoireStore(context: Context) {
                 results.put(current.put("can_add",!additions.isNullOrEmpty()).put("add_count",additions?.size ?: 0))
             }
         }
+        cancellation?.throwIfCanceled()
         return JSONObject().put("results",results)
     }
     private fun identity(db: SQLiteDatabase?, rep: String): Pair<String, String> {
@@ -299,6 +312,6 @@ internal class RepertoireStore(context: Context) {
         } catch (error: Exception) {
             restoreEdits(before)
             throw error
-        } finally { positionCache.clear() }
+        } finally { clearCaches() }
     }
 }

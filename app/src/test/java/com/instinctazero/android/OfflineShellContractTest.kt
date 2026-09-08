@@ -14,6 +14,19 @@ import org.junit.Test
  */
 class OfflineShellContractTest {
     @Test
+    fun pendingNewGameDoesNotActivateOldBoardAndLateHttpDeliveryIsRevoked() {
+        val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
+        assertTrue(activity.contains("if (webPageLoaded && pendingArchivedGame == null) setAnalysisActive(true)"))
+        assertTrue(activity.contains("setAnalysisActive(navigation.screen == ShellScreen.ANALYSIS && pendingArchivedGame == null)"))
+        assertTrue(activity.contains("archivedGameRequest.getAndSet(pending)?.cancel()"))
+        assertTrue(activity.contains("archivedGameRequest.getAndSet(null)?.cancel()"))
+        val worker = activity.substringAfter("private fun loadArchivedGameOnWorker").substringBefore("private fun executeJson")
+        assertEquals(3, Regex("archivedGameRequest.compareAndSet\\(pending, null\\)").findAll(worker).count())
+        assertTrue(activity.contains("repertoireStore.lookup(request,read)"))
+        assertTrue(activity.contains("!activity.isDestroyed && current()"))
+    }
+
+    @Test
     fun mainActivityIsPortraitLockedAndRetainsSafeLifecyclePersistence() {
         val manifest = projectFile("src/main/AndroidManifest.xml").readText()
         val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()

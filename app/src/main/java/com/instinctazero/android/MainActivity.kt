@@ -304,7 +304,7 @@ class MainActivity : ComponentActivity() {
         archiveLoading = false
         nativeLayer.visibility = View.GONE
         webView.visibility = View.VISIBLE
-        if (webPageLoaded) setAnalysisActive(true)
+        if (webPageLoaded && pendingArchivedGame == null) setAnalysisActive(true)
     }
 
     private fun showRepertoires(id: String? = null) {
@@ -1022,7 +1022,7 @@ class MainActivity : ComponentActivity() {
         override fun onPageFinished(view: WebView, url: String) {
             if (AnalysisWebPolicy.isAllowedMainFrameUrl(url)) {
                 webPageLoaded = true
-                setAnalysisActive(navigation.screen == ShellScreen.ANALYSIS)
+                setAnalysisActive(navigation.screen == ShellScreen.ANALYSIS && pendingArchivedGame == null)
                 deliverPendingArchivedGame()
                 if (pendingRepertoires) openRepertoirePage()
             }
@@ -1142,10 +1142,12 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     private val repertoireStore = RepertoireStore(activity)
     private val repertoireExecutor = Executors.newSingleThreadExecutor()
     private val repertoireDownloading = java.util.concurrent.atomic.AtomicBoolean(false)
-    private val repertoireLookupGeneration = java.util.concurrent.atomic.AtomicLong(0)
+    private val repertoireReads = LatestRepertoireRead()
+    private val archivedGameRequest = java.util.concurrent.atomic.AtomicReference<PendingCall?>()
 
     @JavascriptInterface fun getRepertoireSettings(): String = repertoireStore.settings()
     @JavascriptInterface fun saveRepertoireSettings(raw: String) { runCatching { repertoireStore.saveSettings(raw) } }
+    @JavascriptInterface fun cancelRepertoireLookup() { repertoireReads.cancel() }
     @JavascriptInterface fun openRepertoireLibrary() { activity.runOnUiThread { activity.showRepertoireLibrary() } }
     fun manageRepertoires(request: JSONObject, done: (JSONObject) -> Unit) {
         repertoireExecutor.execute {
@@ -1157,25 +1159,25 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     }
     @JavascriptInterface fun requestRepertoire(requestJson: String): String = newRequestId().also { id ->
         val lookup = requestJson.length <= 128 * 1024 && runCatching { JSONObject(requestJson).optString("action") == "lookup" }.getOrDefault(false)
-        val generation = if (lookup) repertoireLookupGeneration.incrementAndGet() else 0
+        val read = if (lookup) repertoireReads.begin() else null
         repertoireExecutor.execute {
             try {
-                if (lookup && generation != repertoireLookupGeneration.get()) {
-                    emit("onNativeRepertoire", id, "{\"obsolete\":true}")
-                    return@execute
-                }
+                read?.throwIfCanceled()
                 require(requestJson.length <= 128 * 1024)
                 val request = JSONObject(requestJson)
                 val result = when (request.optString("action")) {
                     "catalog" -> repertoireStore.catalog()
                     "edit" -> { repertoireStore.edit(request); JSONObject().put("saved", true).put("undo", repertoireStore.undoInfo() ?: JSONObject.NULL) }
                     "undo" -> { repertoireStore.undo(request.getString("token")); JSONObject().put("saved", true).put("undo", JSONObject.NULL) }
-                    "lookup" -> repertoireStore.lookup(request)
+                    "lookup" -> repertoireStore.lookup(request,read)
                     else -> throw IllegalArgumentException("Unknown repertoire action")
                 }
-                emit("onNativeRepertoire", id, result.toString())
+                read?.throwIfCanceled()
+                emit("onNativeRepertoire", id, result.toString()) { read==null || repertoireReads.isCurrent(read) }
+            } catch (_: android.os.OperationCanceledException) {
+                // Obsolete reads are replaceable, unlike edits/Undo. No stale UI/error callback.
             } catch (error: Exception) { emit("onNativeRepertoire", id, JSONObject(errorPayload(error.safeMessage()))
-                .put("undo", runCatching { repertoireStore.undoInfo() }.getOrNull() ?: JSONObject.NULL).toString()) }
+                .put("undo", runCatching { repertoireStore.undoInfo() }.getOrNull() ?: JSONObject.NULL).toString()) { read==null || repertoireReads.isCurrent(read) } }
         }
     }
     @JavascriptInterface fun downloadRepertoires(): String = newRequestId().also { id ->
@@ -1379,6 +1381,8 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
             return@also
         }
         val pending = PendingCall()
+        repertoireReads.cancel()
+        archivedGameRequest.getAndSet(pending)?.cancel()
         calls[id] = pending
         executor.execute { loadArchivedGameOnWorker(id, pending, gameId) }
     }
@@ -1439,6 +1443,9 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     }
 
     fun cancelAll(reason: String) {
+        repertoireReads.cancel()
+        // A completed HTTP worker may already have queued its UI delivery.
+        archivedGameRequest.getAndSet(null)?.cancel()
         calls.entries.toList().forEach { (id, pending) ->
             calls.remove(id, pending)
             pending.cancel()
@@ -1649,7 +1656,11 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         val token = encryptedPreferences.getString(TOKEN_KEY, null)
         if (token.isNullOrBlank()) {
             calls.remove(id, pending)
-            activity.runOnUiThread { activity.onArchivedGame(null, "Pair the analysis PC first.") }
+            activity.runOnUiThread {
+                if (!pending.isCanceled() && archivedGameRequest.compareAndSet(pending, null)) {
+                    activity.onArchivedGame(null, "Pair the analysis PC first.")
+                }
+            }
             return
         }
         try {
@@ -1660,10 +1671,12 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
                     .get().build(),
                 MAX_ARCHIVE_JSON,
             )
-            if (!pending.isCanceled()) activity.runOnUiThread { activity.onArchivedGame(payload, null) }
+            if (!pending.isCanceled()) activity.runOnUiThread {
+                if (!pending.isCanceled() && archivedGameRequest.compareAndSet(pending, null)) activity.onArchivedGame(payload, null)
+            }
         } catch (error: Exception) {
             if (!pending.isCanceled()) activity.runOnUiThread {
-                activity.onArchivedGame(null, error.safeMessage())
+                if (!pending.isCanceled() && archivedGameRequest.compareAndSet(pending, null)) activity.onArchivedGame(null, error.safeMessage())
             }
         } finally {
             calls.remove(id, pending)
@@ -1885,7 +1898,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         connectionState().put("error", message).apply { code?.let { put("code", it) } },
     )
 
-    private fun emit(callback: String, requestId: String?, payload: String) {
+    private fun emit(callback: String, requestId: String?, payload: String, current: () -> Boolean = { true }) {
         val invocation = buildString {
             append("window.InstinctaZero&&window.InstinctaZero.")
             append(callback)
@@ -1898,7 +1911,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         }
         activity.runOnUiThread {
             // A callback may race with Activity destruction; simply discard it then.
-            if (!activity.isFinishing && !activity.isDestroyed) webView?.evaluateJavascript(invocation, null)
+            if (!activity.isFinishing && !activity.isDestroyed && current()) webView?.evaluateJavascript(invocation, null)
         }
     }
 

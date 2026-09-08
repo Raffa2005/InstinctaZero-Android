@@ -10,6 +10,7 @@
     let help = false, adjusting = null, expanded = '', generation = 0, lookupId = null, commentEditor = null, addedTo = '';
     const cache = new Map();
     let cacheBytes = 0, editing = false, addedMessage = '', lastChange = null;
+    let suspended = api.isActive ? !api.isActive() : false;
     const native = () => window.InstinctaZeroNative;
     try { settings = JSON.parse(native()?.getRepertoireSettings?.() || '{}') || {}; } catch (_) {}
     const contextKey = () => api.key() || 'analysis';
@@ -39,9 +40,14 @@
         cacheBytes -= cache.get(oldest).bytes; cache.delete(oldest);
       }
     }
-    function invalidate() {
-      cache.clear(); cacheBytes = 0; ++generation;
+    function stopLookup() {
+      ++generation;
       if (lookupId) pending.delete(lookupId);
+      lookupId = null;
+      native()?.cancelRepertoireLookup?.();
+    }
+    function invalidate() {
+      cache.clear(); cacheBytes = 0; stopLookup();
     }
     function cacheResult(context, ids, data) {
       // Child-position coverage/comments already merge every source move order. Project
@@ -89,12 +95,12 @@
       }, download);
     }
     function refresh() {
-      const current = ++generation;
-      if (lookupId) pending.delete(lookupId);
+      stopLookup();
+      const current = generation;
       const context = api.context(), ids = selected(), key = cacheKey(context,ids), cached = cache.get(key);
       results = cached?.data || []; adjusting = null; expanded = ''; addedMessage = ''; updateMarker();
       api.render(); // Clear old play/edit targets; known markers appear before the native call.
-      if (!ids.length || cached?.complete) {
+      if (suspended || !ids.length || cached?.complete) {
         if (cached) { cache.delete(key); cache.set(key,cached); }
         return;
       }
@@ -315,6 +321,8 @@
     function summary() { if (!results.length) return ''; if (results.length === 1) return status(results[0]); const count = results.filter(r => r.theory).length; return count ? count + '/' + results.length + ' repertoires' : 'Outside repertoires'; }
     setTimeout(() => loadCatalog(), 0);
     return {html, settingsHtml, bind, refresh, summary, updateMarker,
+      setActive:(active,refreshNow = true) => { suspended = !active; if(suspended) stopLookup(); else if(refreshNow) refresh(); },
+      beginGame:() => { suspended = true; stopLookup(); results = []; error = ''; expanded = ''; adjusting = commentEditor = null; addedMessage = ''; addedTo = ''; updateMarker(); },
       hasEditorFocus:() => !!commentEditor && !!document.activeElement?.matches?.('[data-rep-comment-input]'),
       beginSettings:() => { adjusting = null; commentEditor = null; help = false; },
       openLibrary:id => { api.tab(); if(id) loadCatalog(false,id); }, isLibrary:() => false, back:() => false};

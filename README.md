@@ -1,6 +1,13 @@
 # InstinctaZero Android
 
-InstinctaZero Android 0.8.0 adds grouped, icon-led menus and a **Repertoire library**.
+InstinctaZero Android 0.8.1 fixes stale work when opening completed games. The old
+board no longer starts repertoire/engine requests during the transition; obsolete
+reads are canceled, history checks are batched and long imports yield to touch UI.
+Existing downloads, selections, local comments/edits and Undo remain usable. No
+repertoire redownload or re-pairing is needed. See the
+[release checks and host measurements](docs/release-v0.8.1.md).
+
+The 0.8.0 grouped, icon-led menus and **Repertoire library** remain unchanged.
 Create named White/Black repertoires on the phone, open them on the existing board,
 and rename your own books. Write/edit position comments from a comment bubble,
 move adjustments, position settings or the confirmation after adding a line.
@@ -46,7 +53,7 @@ active repertoire coverage. To extend a line, play moves on the board, then tap
 **Add move** or **Add line** in the repertoire tab. The closest covered repertoire is
 chosen automatically; when multiple candidates are equally close, choose the
 target repertoire explicitly. Additions save on this phone and survive restarts;
-source PGNs and archived game PGNs remain unchanged. Comment writing is deferred.
+source PGNs and archived game PGNs remain unchanged. Position comments can be edited.
 
 Tap **Undo** beside a repertoire-edit confirmation, or **Undo last repertoire
 change** in repertoire settings—even after restarting. This reverses the entire

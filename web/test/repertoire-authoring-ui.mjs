@@ -60,7 +60,7 @@ try{for(const [width,height] of [[360,640],[390,780],[412,844]]){
  await page.screenshot({path:`${output}/keyboard-${width}.png`});await page.setViewportSize({width,height});
  await page.getByRole('button',{name:'Save comment',exact:true}).tap();await page.getByRole('button',{name:'Comment on position',exact:true}).waitFor();
  await page.getByRole('button',{name:'Comment on position',exact:true}).tap();assert.match(await page.locator('.rep-comments').innerText(),/My plan ♞/);assert.equal(await page.locator('.rep-comments img').count(),0);
- await page.reload();await page.getByRole('button',{name:'Comment on position',exact:true}).waitFor();await page.getByRole('button',{name:'Comment on position',exact:true}).tap();
+ await page.reload(); await page.evaluate(() => window.InstinctaZero.setAnalysisActive(true));await page.getByRole('button',{name:'Comment on position',exact:true}).waitFor();await page.getByRole('button',{name:'Comment on position',exact:true}).tap();
  await page.getByRole('button',{name:'Edit comment',exact:true}).tap();assert.match(await input.inputValue(),/My plan/);
  await page.getByRole('button',{name:'Restore source text',exact:true}).tap();await page.getByRole('button',{name:'Comment on position',exact:true}).waitFor();
  assert.match(await page.getByRole('button',{name:'Comment on position',exact:true}).innerText(),/Keep the centre/);
