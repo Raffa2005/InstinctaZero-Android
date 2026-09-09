@@ -1,6 +1,12 @@
 # InstinctaZero Android
 
-Version **0.8.2** adds **Board editor** on Home, in the sidebar, and under More
+Version **0.8.3** improves **Board editor**: drag pieces in any tool mode, tap a
+matching piece to remove it, and deselect the palette to erase. Compact labelled
+icons and readable coordinates keep setup simple. **Reverse** rotates the actual
+position 180° to correct entry from the wrong side; **Flip** changes only the view.
+Reverse is undoable. This update needs no PC restart, re-pairing or data download.
+
+**Board editor** is on Home, in the sidebar, and under More
 on the analysis board. Place, move or erase pieces; set the turn, castling and
 en-passant state; paste/import or copy a FEN. Invalid setups explain what needs
 fixing before analysis. Drafts are retained on this phone.

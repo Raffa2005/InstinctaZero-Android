@@ -3,11 +3,24 @@
 Open **Board editor** from Home/the sidebar to resume the last setup draft, or
 **More → Board editor** on an analysis board to start from its current position.
 
-- Choose a palette piece and tap squares to place it. Placing a king relocates
-  that colour's existing king. **Move** supports drag or tap/tap; **Erase** removes
-  pieces. **Undo** reverses up to 30 setup actions in the current editor session.
+- Choose a palette piece and tap squares to place it. Tapping an identical piece
+  (same colour and type) removes it; a different piece is replaced. Placing a king
+  elsewhere relocates that colour's existing king. Tap the selected palette piece
+  again to deselect it and enter **Erase**.
+- Dragging always moves the piece under your finger, in every tool mode. It never
+  paints the selected palette piece. **Move** also supports tap/tap; **Erase**
+  removes pieces on tap. Empty-space drags and cancelled/multitouch gestures do
+  nothing. **Undo** reverses up to 30 setup actions in the current editor session.
 - **Clear** empties the board; **Reset** restores the standard starting position.
-  Both can be undone. Flip changes only the viewing orientation.
+  Both can be undone. The tools use compact icons with short labels.
+- Coordinates are shown in both orientations. **Flip** (in the header) changes only
+  the viewing orientation; it does not edit the position or its FEN.
+- **Reverse** (beside Reset) corrects a setup entered from the wrong side by rotating
+  the actual piece placement 180°: a1 ↔ h8, e1 ↔ d8, etc. Piece colours, side to move
+  and move counters stay unchanged. This is not Flip and does change the FEN.
+  Only already-present castling rights compatible with the corrected king/rooks
+  survive; en-passant is rotated and retained only if consistent. Check these in
+  **State** afterward. Undo restores the entire prior FEN, including those fields.
 - **State** selects White/Black to move, the four castling rights, an en-passant
   square and the halfmove/fullmove counters. Castling rights disappear when their
   home king/rook is removed; placing a rook does not silently grant castling.

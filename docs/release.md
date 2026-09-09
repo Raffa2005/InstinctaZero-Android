@@ -1,7 +1,9 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.8.2). This adds a separate board editor/position workspace and the narrow
+(version 0.8.3). The focused editor update adds tool-independent dragging, tap
+toggles, readable coordinates and undoable Reverse coordinates. It needs no server
+change. Version 0.8.2 adds a separate board editor/position workspace and the narrow
 custom-root PC API handoff. The v0.8.1 update cancels obsolete game/repertoire reads, avoids old-board
 activation during game loading, batches history/edited ancestry checks, and imports
 games in short UI slices. The grouped menus, comment editing and automatic extension
@@ -43,9 +45,12 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 30 / 0.8.2 release values;
+- versionCode/versionName are the intended 31 / 0.8.3 release values;
 - run `node web/test/position-editor-ui.mjs` against the signed APK's extracted
-  assets. Check placement, actual touch drag, erase, Undo/reset, turn, castling,
+  assets. Check placement, actual touch drag in every tool mode (also with an
+  existing board selection), quick/occupied drops, empty drags and touch cancel/
+  multitouch. Check same-piece tap removal, palette deselection to Erase, coordinates
+  in both orientations, Reverse versus view-only Flip, exact Undo, turn, castling,
   en-passant, clipboard import/export, keyboard layout, custom-root analysis and
   explorer payloads, source-board preservation, Return to saved board and restart;
 - run `StudyWorkspaceStoreTest` and the position-editor controller tests, plus
