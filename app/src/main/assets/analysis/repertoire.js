@@ -179,13 +179,16 @@
     }
     function commentForm() {
       const e = commentEditor;
+      const privacy=window.InstinctaZeroPrivacy;
+      if(privacy?.enabled && privacy.text(e.text)!==e.text && !e.revealed) return '<div class="rep-comment-editor"><h3>Private comment</h3><p>Editing shows original text containing hidden names or links. Your saved comment is unchanged.</p>'+button('reveal-comment','Show original text (reveals identity)')+button('cancel-comment','Cancel')+'</div>';
       return '<div class="rep-comment-editor"><div class="rep-adjust-header"><h3>Comment<small>' + escape(e.name) + '</small></h3><div class="rep-comment-toolbar">' + button('cancel-comment','Cancel') + button('save-comment','Save','aria-label="Save comment"' + (editing ? ' disabled' : '')) + '</div></div>' +
         '<textarea data-rep-comment-input aria-label="Repertoire comment" placeholder="Write a comment…" maxlength="65536" spellcheck="true">' + escape(e.text) + '</textarea>' +
         (e.edited ? '<div class="rep-comment-actions">' + button('restore-comment','Restore source text',editing ? 'disabled' : '') + '</div>' : '') +
         '<p class="rep-hint">Saved on this phone. Follows this position through transpositions; original PGN text stays intact.</p></div>';
     }
     function notices(showUndo = true) {
-      return (error ? '<p class="rep-error" role="alert">' + escape(error) + '</p>' : '') + (busy ? '<p class="rep-hint" role="status">Getting the PC copy… Saved moves stay available.</p>' : '') + (editing ? '<p class="rep-hint" role="status">Saving repertoire change…</p>' : addedMessage ? '<div class="rep-change-notice" role="status"><span>' + escape(addedMessage) + '</span>' + (addedTo ? button('added-comment','Comment','aria-label="Comment on added line"' + (results.some(rep => rep.id === addedTo) ? '' : ' disabled')) : '') + (showUndo && lastChange ? button('undo','Undo','aria-label="Undo last repertoire change" data-rep-undo-token="' + escape(lastChange.token) + '"') : '') + '</div>' : '');
+      const message=window.InstinctaZeroPrivacy?.error(error,'Repertoire operation failed. Your saved copy is unchanged.') ?? error;
+      return (error ? '<p class="rep-error" role="alert">' + escape(message) + '</p>' : '') + (busy ? '<p class="rep-hint" role="status">Getting the PC copy… Saved moves stay available.</p>' : '') + (editing ? '<p class="rep-hint" role="status">Saving repertoire change…</p>' : addedMessage ? '<div class="rep-change-notice" role="status"><span>' + escape(addedMessage) + '</span>' + (addedTo ? button('added-comment','Comment','aria-label="Comment on added line"' + (results.some(rep => rep.id === addedTo) ? '' : ' disabled')) : '') + (showUndo && lastChange ? button('undo','Undo','aria-label="Undo last repertoire change" data-rep-undo-token="' + escape(lastChange.token) + '"') : '') + '</div>' : '');
     }
     function adjustment() {
       const {rep, move} = adjusting;
@@ -291,6 +294,7 @@
         }
         if (action === 'move-comment') { editComment(adjusting.rep,adjusting.move.position || adjusting.move); return; }
         if (action === 'cancel-comment') { commentEditor = null; api.closeSettings(); return; }
+        if (action === 'reveal-comment') { if(commentEditor)commentEditor.revealed=true;api.render();return; }
         if (action === 'save-comment' || action === 'restore-comment') {
           const e = commentEditor; if(!e || editing) return;
           input?.blur();
@@ -321,6 +325,7 @@
     function summary() { if (!results.length) return ''; if (results.length === 1) return status(results[0]); const count = results.filter(r => r.theory).length; return count ? count + '/' + results.length + ' repertoires' : 'Outside repertoires'; }
     setTimeout(() => loadCatalog(), 0);
     return {html, settingsHtml, bind, refresh, summary, updateMarker,
+      privacyChanged:() => { if(commentEditor){commentEditor.revealed=false;document.activeElement?.blur?.();} },
       setActive:(active,refreshNow = true) => { suspended = !active; if(suspended) stopLookup(); else if(refreshNow) refresh(); },
       beginGame:() => { suspended = true; stopLookup(); results = []; error = ''; expanded = ''; adjusting = commentEditor = null; addedMessage = ''; addedTo = ''; updateMarker(); },
       hasEditorFocus:() => !!commentEditor && !!document.activeElement?.matches?.('[data-rep-comment-input]'),

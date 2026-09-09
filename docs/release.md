@@ -1,7 +1,9 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.8.3). The focused editor update adds tool-independent dragging, tap
+(version 0.8.4). The display-only privacy mode uses persistent neutral aliases,
+conceals mobile identity-bearing metadata and errors, and retains original account
+and game data. It needs no PC update. The focused editor update adds tool-independent dragging, tap
 toggles, readable coordinates and undoable Reverse coordinates. It needs no server
 change. Version 0.8.2 adds a separate board editor/position workspace and the narrow
 custom-root PC API handoff. The v0.8.1 update cancels obsolete game/repertoire reads, avoids old-board
@@ -45,7 +47,14 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 31 / 0.8.3 release values;
+- versionCode/versionName are the intended 32 / 0.8.4 release values;
+- run `AccountPrivacyTest` and `node web/test/privacy-ui.mjs` (also against extracted
+  signed APK assets). Check Home, sidebar, Account / PC, both player colours,
+  recycled game rows, raw account selection IDs, orientation/results, errors,
+  aliases during chunked loading, saved-game reopen, reconnect, policy failure,
+  on-screen PGN tags and comment/name reveal warnings. Turning privacy off restores
+  original presentation without rewriting saved metadata; enabling it also covers
+  an already-focused original-text editor. See [privacy audit](account-privacy.md);
 - run `node web/test/position-editor-ui.mjs` against the signed APK's extracted
   assets. Check placement, actual touch drag in every tool mode (also with an
   existing board selection), quick/occupied drops, empty drags and touch cancel/

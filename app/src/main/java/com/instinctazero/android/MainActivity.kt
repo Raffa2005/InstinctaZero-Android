@@ -69,6 +69,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var nativeLayer: FrameLayout
     private lateinit var webView: WebView
     private lateinit var nativeBridge: NativeAnalysisBridge
+    internal val privacy by lazy { AccountPrivacy(getSharedPreferences("display_privacy",Context.MODE_PRIVATE)) }
+    private var privacyRefreshPending = false
+    private var privacyRefreshGeneration = 0
+    private var renderedPrivacy = ""
     private val navigation = ShellNavigation()
     private val pairingCode = PairingCodeBuffer()
     private var webPageLoaded = false
@@ -237,6 +241,8 @@ class MainActivity : ComponentActivity() {
     }
 
     internal fun onBridgeConnectionState(payload: JSONObject) {
+        rememberPrivateAccounts(payload)
+        refreshPrivacyDisplay()
         connectionMessage = payload.optString("error").ifBlank { null }
         pairingCode.finishPair()
         if (payload.optBoolean("paired")) {
@@ -306,7 +312,7 @@ class MainActivity : ComponentActivity() {
         navigation.showAnalysis()
         archiveLoading = false
         nativeLayer.visibility = View.GONE
-        webView.visibility = View.VISIBLE
+        webView.visibility = if(privacyRefreshPending) View.INVISIBLE else View.VISIBLE
         if (webPageLoaded && pendingArchivedGame == null && !pendingBoardEditor) setAnalysisActive(true)
     }
 
@@ -383,6 +389,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         payload.optString("account").takeIf(String::isNotBlank)?.let { archiveAccount = it }
+        privacy.remember(archiveAccount)
         archiveTotal = payload.optInt("total", archiveTotal.coerceAtLeast(archiveGames.size))
         archiveSyncing = payload.optBoolean("sync_running", archiveSyncing)
         archiveCursor = archiveCursorFrom(
@@ -459,6 +466,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun renderNativeScreen() {
+        rememberPrivateAccounts(JSONObject(nativeBridge.getConnectionState()))
         if (navigation.screen != ShellScreen.GAMES) archiveAdapter = null
         nativeLayer.removeAllViews()
         val page = LinearLayout(this).apply {
@@ -477,7 +485,7 @@ class MainActivity : ComponentActivity() {
                     else { repertoireLibrary.catalog=data; repertoireLibrary.editing=false }
                     if(navigation.screen==ShellScreen.REPERTOIRES)renderNativeScreen()
                 }
-            },::showRepertoires),weighted())
+            },::showRepertoires,privacy),weighted())
             else -> page.addView(homeContent(), weighted())
         }
         nativeLayer.addView(page, matchFrame())
@@ -517,7 +525,7 @@ class MainActivity : ComponentActivity() {
         addView(TextView(this@MainActivity).apply {
             text = when (navigation.screen) {
                 ShellScreen.PROFILE -> "Account / PC"
-                ShellScreen.GAMES -> archiveAccount.ifBlank { "Games" }
+                ShellScreen.GAMES -> privacy.account(archiveAccount).ifBlank { "Games" }
                 ShellScreen.REPERTOIRES -> "Repertoires"
                 else -> "InstinctaZero"
             }
@@ -542,7 +550,7 @@ class MainActivity : ComponentActivity() {
         val paired = nativeBridge.isPaired()
         val menu = WorkspaceMenu(this)
         return menu.home(paired,connectionSummary(),::showAnalysisScreen,
-            { if(paired)showGamesScreen() else showProfileScreen() },::showRepertoireLibrary,{showRepertoires()},::showProfileScreen,::showBoardEditor)
+            { if(paired)showGamesScreen() else showProfileScreen() },::showRepertoireLibrary,{showRepertoires()},::showProfileScreen,::showBoardEditor,privacyControl())
     }
 
     private fun gamesContent(): View {
@@ -579,7 +587,7 @@ class MainActivity : ComponentActivity() {
             }, LinearLayout.LayoutParams(48.dp, 46.dp))
         })
         archiveMessage?.let { message ->
-            page.addView(nativeText(message, 13f, ERROR_TEXT).apply { setPadding(10.dp, 0, 10.dp, 6.dp) })
+            page.addView(nativeText(privacy.message(message,"Unable to load games. Try refreshing or check the PC connection."), 13f, ERROR_TEXT).apply { setPadding(10.dp, 0, 10.dp, 6.dp) })
         }
 
         val list = ListView(this).apply {
@@ -685,16 +693,17 @@ class MainActivity : ComponentActivity() {
             ).filter(String::isNotBlank).joinToString(" · ")
             dateView.text = DateFormat.getDateInstance(DateFormat.MEDIUM)
                 .format(Date(game.optLong("last_move_at_ms")))
-            matchupView.text = "$white  ⚔  $black"
+            matchupView.text = "${privacy.player(white,archiveAccount)}  ⚔  ${privacy.player(black,archiveAccount)}"
             ratingsView.text = listOf(
                 playerRating(game.optJSONObject("white")).takeIf { it > 0 }?.toString() ?: "—",
                 playerRating(game.optJSONObject("black")).takeIf { it > 0 }?.toString() ?: "—",
             ).joinToString("    ⚔    ")
+            if(privacy.enabled)ratingsView.text="Ratings hidden"
             val result = gameResultPresentation(game, white, black)
             resultView.text = result.text
             resultView.setTextColor(result.color)
             analysisView.text = if (game.optBoolean("analyzable")) "▥  Computer analysis available"
-                else "⚠  ${game.optString("analysis_block_reason").ifBlank { "Analysis unavailable" }}"
+                else "⚠  ${privacy.message(game.optString("analysis_block_reason").ifBlank { "Analysis unavailable" },"Analysis unavailable for this game") }"
             analysisView.setTextColor(if (game.optBoolean("analyzable")) 0xff858585.toInt() else 0xff9a6a64.toInt())
             setBackgroundColor(if (position % 2 == 0) 0xff292824.toInt() else 0xff302f2a.toInt())
             isClickable = game.optBoolean("analyzable")
@@ -740,14 +749,16 @@ class MainActivity : ComponentActivity() {
             val base = if (seconds == 0) minutes.toString() else "%d:%02d".format(minutes, seconds)
             return "$base+$increment"
         }
-        return game.optString("speed").replaceFirstChar { it.uppercase() }
+        val speed=game.optString("speed")
+        return if(privacy.enabled && speed.lowercase(Locale.ROOT) !in setOf("ultrabullet","bullet","blitz","rapid","classical","correspondence"))"Game"
+            else speed.replaceFirstChar { it.uppercase() }
     }
 
     private fun gameVariantLabel(value: String): String = when (value.lowercase(Locale.ROOT)) {
         "", "standard" -> "Standard"
         "fromposition", "from_position" -> "From Position"
         "chess960" -> "Chess960"
-        else -> value.replaceFirstChar { it.uppercase() }
+        else -> if(privacy.enabled)"Variant" else value.replaceFirstChar { it.uppercase() }
     }
 
     private data class GameResultPresentation(val text: String, val color: Int)
@@ -759,7 +770,7 @@ class MainActivity : ComponentActivity() {
             (accountIsBlack && game.optString("result") == "0-1")
         val accountLost = (accountIsWhite && game.optString("result") == "0-1") ||
             (accountIsBlack && game.optString("result") == "1-0")
-        val opponent = if (accountIsWhite) black else white
+        val opponent = privacy.player(if (accountIsWhite) black else white,archiveAccount)
         val status = game.optString("status").lowercase(Locale.ROOT)
         if (accountWon) {
             val text = when (status) {
@@ -789,6 +800,7 @@ class MainActivity : ComponentActivity() {
             setPadding(10.dp, 4.dp, 10.dp, 2.dp)
             if (navigation.keypadOpen && !state.optBoolean("paired")) addView(pairingKeypad())
             else {
+                addView(privacyControl())
                 addView(TextView(this@MainActivity).apply {
                     text = if (state.optBoolean("paired")) "Analysis PC connected" else "Connect your analysis PC"
                     setTextColor(Color.WHITE)
@@ -796,11 +808,11 @@ class MainActivity : ComponentActivity() {
                     typeface = Typeface.DEFAULT_BOLD
                 })
                 addView(TextView(this@MainActivity).apply {
-                    text = connectionMessage ?: if (state.optBoolean("paired"))
+                    text = connectionMessage?.let { privacy.message(it,"Account connection could not be updated. Refresh or check the PC.") } ?: if (state.optBoolean("paired"))
                         listOf(
                             archiveAccount.ifBlank { state.optString("accountUsername") }.takeIf(String::isNotBlank)
-                                ?.let { "Lichess account: $it" },
-                            state.optString("deviceName").ifBlank { "InstinctaZero Android" },
+                                ?.let { "Lichess account: ${privacy.account(it)}" },
+                            if(privacy.enabled)"Paired analysis PC" else state.optString("deviceName").ifBlank { "InstinctaZero Android" },
                             "Leela: ${nativeBridge.engineBackendLabel()}",
                         ).filterNotNull().joinToString("\n")
                     else "Generate a pairing code on the InstinctaZero PC already signed into your Lichess account."
@@ -818,7 +830,8 @@ class MainActivity : ComponentActivity() {
                         val username = account.optString("username")
                         if (username.isBlank()) continue
                         val selected = username.equals(state.optString("accountUsername"), ignoreCase = true)
-                        addView(actionButton(if (selected) "✓  $username" else username) {
+                        val label=if(privacy.enabled)"Account ${index+1}" else username
+                        addView(actionButton(if (selected) "✓  $label" else label) {
                             if (selected) return@actionButton
                             connectionMessage = "Switching to $username…"
                             renderNativeScreen()
@@ -860,7 +873,7 @@ class MainActivity : ComponentActivity() {
                     })
                 }
             }
-        }
+        }.let { if(navigation.keypadOpen)it else android.widget.ScrollView(this).apply { isFillViewport=true;addView(it) } }
     }
 
     private fun pairingKeypad(): View = LinearLayout(this).apply {
@@ -872,7 +885,7 @@ class MainActivity : ComponentActivity() {
             typeface = Typeface.DEFAULT_BOLD
         })
         addView(TextView(this@MainActivity).apply {
-            text = connectionMessage ?: "Enter the 8-character code"
+            text = connectionMessage?.let { privacy.message(it,"Pairing could not be completed. Check the code and PC connection.") } ?: "Enter the 8-character code"
             setTextColor(if (connectionMessage == null || pairingCode.busy) TEXT_MUTED else ERROR_TEXT)
             textSize = 14f
             setPadding(0, 4.dp, 0, 10.dp)
@@ -949,6 +962,7 @@ class MainActivity : ComponentActivity() {
             addView(menu.row("\uf279","Repertoire board") { showRepertoires() })
             addView(menu.section("Connection"))
             addView(menu.row("\uf108","Account / PC") { showProfileScreen() })
+            addView(privacyControl())
         }.let { content -> android.widget.ScrollView(this@MainActivity).apply {
             setBackgroundColor(0xff252525.toInt()); isFillViewport=true; addView(content)
         } }, FrameLayout.LayoutParams(292.dp, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START))
@@ -1005,8 +1019,31 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun connectionSummary(): String = JSONObject(nativeBridge.getConnectionState()).let { state ->
-        if (state.optBoolean("paired")) "Paired as ${state.optString("deviceName").ifBlank { "InstinctaZero Android" }}"
+        if (state.optBoolean("paired")) if(privacy.enabled)"Paired PC · identity hidden" else "Paired as ${state.optString("deviceName").ifBlank { "InstinctaZero Android" }}"
         else "Not paired · tap to connect"
+    }
+
+    private fun rememberPrivateAccounts(state: JSONObject) {
+        val accounts=state.optJSONArray("availableAccounts") ?: JSONArray()
+        privacy.remember(state.optString("accountUsername"),archiveAccount,
+            *(0 until accounts.length()).map { accounts.optJSONObject(it)?.optString("username").orEmpty() }.toTypedArray())
+    }
+    private fun privacyControl() = PrivacyModeView.build(this,privacy) { enabled ->
+        // Keep the warm WebView covered until its presentation policy has updated.
+        privacyRefreshPending=true;webView.visibility=View.INVISIBLE
+        if(!privacy.setEnabled(enabled))connectionMessage="Privacy setting could not be saved."
+        repertoireLibrary.revealPrivateText=false
+        refreshPrivacyDisplay();renderNativeScreen()
+    }
+    private fun refreshPrivacyDisplay() {
+        val config=privacy.config().toString()
+        if(config==renderedPrivacy && !privacyRefreshPending)return
+        val generation=++privacyRefreshGeneration
+        if(!::webView.isInitialized || !webPageLoaded)return
+        privacyRefreshPending=true;webView.visibility=View.INVISIBLE
+        webView.evaluateJavascript("window.InstinctaZero&&window.InstinctaZero.refreshDisplayPrivacy&&window.InstinctaZero.refreshDisplayPrivacy();void 0;") {
+            if(!isDestroyed && generation==privacyRefreshGeneration){renderedPrivacy=config;privacyRefreshPending=false;webView.visibility=View.VISIBLE}
+        }
     }
 
     private fun nativeDeviceName(): String {
@@ -1037,6 +1074,8 @@ class MainActivity : ComponentActivity() {
         override fun onPageFinished(view: WebView, url: String) {
             if (AnalysisWebPolicy.isAllowedMainFrameUrl(url)) {
                 webPageLoaded = true
+                renderedPrivacy = ""
+                refreshPrivacyDisplay()
                 setAnalysisActive(navigation.screen == ShellScreen.ANALYSIS && pendingArchivedGame == null && !pendingBoardEditor)
                 deliverPendingArchivedGame()
                 if (pendingRepertoires) openRepertoirePage()
@@ -1269,6 +1308,9 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     }.getOrNull()
 
     /** Typed UI preferences only; this is not a generic WebView key-value store. */
+    @JavascriptInterface
+    fun getDisplayPrivacy(): String = activity.privacy.config().toString()
+
     @JavascriptInterface
     fun getUiSettings(): String = uiSettings().toString()
 

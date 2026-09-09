@@ -16,17 +16,25 @@ internal class RepertoireLibraryState {
     var side = "white"
     var busy = false
     var error = ""
+    var revealPrivateText = false
 }
 
 /** Native library and naming form. The form never changes the analysis tree or PGNs. */
 internal object RepertoireLibraryView {
     fun build(context: Context, state: RepertoireLibraryState, render: () -> Unit,
-        save: (JSONObject) -> Unit, open: (String?) -> Unit): android.view.View {
+        save: (JSONObject) -> Unit, open: (String?) -> Unit, privacy: AccountPrivacy? = null): android.view.View {
         val ui=WorkspaceMenu(context)
         val dp=context.resources.displayMetrics.density
         val page=ui.column().apply { setPadding((16*dp).toInt(),0,(16*dp).toInt(),(16*dp).toInt()) }
-        if(state.error.isNotBlank())page.addView(ui.text(state.error,14f))
+        if(state.error.isNotBlank())page.addView(ui.text(privacy?.message(state.error,"Repertoire operation failed. Your saved copy is unchanged.") ?: state.error,14f))
         if(state.editing) {
+            if(privacy?.enabled==true && privacy.text(state.name)!=state.name && !state.revealPrivateText) {
+                page.addView(ui.section("Private name"))
+                page.addView(ui.text("Renaming displays the original name, which contains hidden identity information.",14f,true))
+                page.addView(ui.row("\uf06e","Show original name (reveals identity)") { state.revealPrivateText=true;render() })
+                page.addView(ui.row("\uf00d","Cancel") { state.editing=false;render() })
+                return ui.scroll(page)
+            }
             page.addView(ui.section(if(state.id.isEmpty()) "New repertoire" else "Repertoire name"))
             page.addView(EditText(context).apply {
                 hint="Repertoire name"; contentDescription="Repertoire name"; textSize=18f
@@ -53,7 +61,7 @@ internal object RepertoireLibraryView {
         } else {
             page.addView(ui.section("Your collection"))
             page.addView(ui.row("\uf067","New repertoire","Build an opening repertoire for White or Black") {
-                state.editing=true; state.id=""; state.name=""; state.side="white"; state.error=""; render()
+                state.editing=true; state.id=""; state.name=""; state.side="white"; state.error=""; state.revealPrivateText=false; render()
             })
             val rows=state.catalog.optJSONArray("repertoires")
             for(local in listOf(true,false)) {
@@ -61,9 +69,10 @@ internal object RepertoireLibraryView {
                 if(reps.isEmpty())continue
                 page.addView(ui.section(if(local)"On this phone" else "From your PC"))
                 for(rep in reps) {
-                    page.addView(ui.row("\uf02d",rep.getString("name"),rep.getString("side").replaceFirstChar(Char::uppercase)+" · Open on the analysis board") { open(rep.getString("id")) })
-                    if(local)page.addView(ui.row("\uf040","Rename ${rep.getString("name")}") {
-                        state.editing=true; state.id=rep.getString("id"); state.name=rep.getString("name"); state.side=rep.getString("side"); render()
+                    val label=privacy?.text(rep.getString("name")) ?: rep.getString("name")
+                    page.addView(ui.row("\uf02d",label,rep.getString("side").replaceFirstChar(Char::uppercase)+" · Open on the analysis board") { open(rep.getString("id")) })
+                    if(local)page.addView(ui.row("\uf040","Rename $label") {
+                        state.editing=true; state.id=rep.getString("id"); state.name=rep.getString("name"); state.side=rep.getString("side"); state.revealPrivateText=false;render()
                     })
                 }
             }

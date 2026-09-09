@@ -1,5 +1,13 @@
 # InstinctaZero Android
 
+Version **0.8.4** adds **Privacy mode** on Home, in the sidebar and in **Account / PC**.
+Switch it on to display your account as **Player**, hide other player names and
+ratings, and conceal account-bearing text in the mobile UI. It remembers your
+choice, including offline and after restarting. Actual accounts, synchronization,
+saved games and original PGNs are unchanged. This protects the screen, not the
+anonymity of public Lichess games or shared PGNs. See [Privacy mode](docs/account-privacy.md).
+No PC restart, re-pairing or repertoire redownload is needed.
+
 Version **0.8.3** improves **Board editor**: drag pieces in any tool mode, tap a
 matching piece to remove it, and deselect the palette to erase. Compact labelled
 icons and readable coordinates keep setup simple. **Reverse** rotates the actual
