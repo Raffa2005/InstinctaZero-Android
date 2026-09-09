@@ -74,6 +74,11 @@ try{for(const [width,height] of [[360,640],[390,780],[412,844]]){
  const origin=await square('a1'),other=await square('b1');
  await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...origin,id:1}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...origin,id:1},{...other,id:2}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
  assert.equal(await draft(),beforeEmptyDrag,'multitouch cancels instead of editing');
+ const outsideBox=await page.getByRole('button',{name:'White knight',exact:true}).boundingBox(),outside={x:outsideBox.x+outsideBox.width/2,y:outsideBox.y+outsideBox.height/2,id:2};
+ for(const releasedFirst of [outside,{...origin,id:1}]){
+  await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...origin,id:1}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...origin,id:1},outside]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[releasedFirst]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  assert.equal(await draft(),beforeEmptyDrag,'a second finger outside the board must also cancel, regardless of release order');
+ }
  await choose('White rook');await tap('a1');assert.equal((await pieces()).a1,undefined);
  await page.getByRole('button',{name:'Undo',exact:true}).tap();
  assert.equal((await pieces()).a1,'R');

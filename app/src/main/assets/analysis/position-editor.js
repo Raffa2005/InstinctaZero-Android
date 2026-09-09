@@ -98,6 +98,9 @@
     }
     // Let the existing Chessground own every drag. Intercept only completed taps;
     // a palette choice (or a previously tapped board piece) must not move on touchstart.
+    el.addEventListener('touchstart',e=>{
+      if(e.touches.length>1){gesture=null;ground.cancelMove();e.stopPropagation();e.preventDefault();}
+    },{capture:true,passive:false});
     board.addEventListener('touchstart',e=>{
       if(e.touches.length!==1){gesture=null;ground.cancelMove();e.stopPropagation();e.preventDefault();return;}
       const touch=e.touches[0];acceptGroundChanges();
@@ -105,9 +108,11 @@
       ground.cancelMove();
     },{capture:true,passive:false});
     board.addEventListener('touchmove',e=>{
+      if(e.touches.length!==1){gesture=null;ground.cancelMove();return;}
       if(gesture && e.touches.length===1)gesture.moved ||= Math.hypot(e.touches[0].clientX-gesture.x,e.touches[0].clientY-gesture.y)>=8;
     },{capture:true,passive:true});
     board.addEventListener('touchend',e=>{
+      if(e.touches.length){gesture=null;ground.cancelMove();e.stopPropagation();e.preventDefault();return;}
       const last=gesture;gesture=null;
       if(!last)return;
       const touch=e.changedTouches[0];
