@@ -10,6 +10,9 @@ regular source branches use the same controls and the same normal saved move
 rows, recommendations and book markers. No preparatory save or PC annotation
 change is needed. Earlier imported source labels remain intact; deliberate local
 deletions and exclusions still require an explicit restore.
+When multiple repertoires are selected, automatic targeting uses the actual
+extension point for either kind of source branch, keeping training/deviation
+context separate. Equally close choices still ask rather than choosing arbitrarily.
 
 Original PGNs, games, existing edits, comments, selections, private PC backups and
 Undo are retained. No repertoire redownload, re-pairing or server update is needed.

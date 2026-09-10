@@ -65,6 +65,17 @@ test('extension chooses the nearest covered repertoire, never arbitrary catalog 
   assert.equal(h.last.action,'edit');assert.equal(h.last.id,'english');assert.equal(h.last.kind,'add');
 });
 
+test('extension selection treats informational anchors like theory without changing deviation context',()=>{
+  const h=harness();
+  h.reply(h.last,{results:[result({id:'regular',theory:false,can_add:true,add_count:6,deviation:12,add_from:12}),
+    result({id:'information',theory:false,can_add:true,add_count:2,deviation:3,add_from:18})]});
+  h.click({repAction:'quick-add'});assert.equal(h.last.id,'information');assert.equal(h.last.kind,'add');
+  const tie=harness();tie.reply(tie.last,{results:[result({id:'regular',theory:false,can_add:true,add_count:2,deviation:18,add_from:18}),
+    result({id:'information',theory:false,can_add:true,add_count:2,deviation:3,add_from:18})]});
+  const count=tie.requests.length;tie.click({repAction:'quick-add'});assert.equal(tie.requests.length,count);
+  assert.match(tie.panel.html(),/data-rep-action="add"/);
+});
+
 test('loading another game clears old display and cancels even when the next position is cached',()=>{
   const h=harness();h.reply(h.last,{results:[result({moves:[move('e2e4')]})]});
   h.go(['e2e4']);const old=h.last;const cancellations=h.cancellations.length;

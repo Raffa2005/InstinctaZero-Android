@@ -186,10 +186,12 @@
     }
     function extensionTarget(candidates = visible().filter(rep => rep.can_add)) {
       if (candidates.length === 1) return candidates[0];
-      // Closest covered prefix, not catalog order or the last arbitrary choice. A tie
+      // Closest extension point, equally for information and theory. Keep deviation
+      // separately: it describes training context, not the user's editing intent. A tie
       // is genuinely ambiguous (e.g. two Sicilian repertoires) and keeps the chooser.
-      const nearest = Math.max(0,...candidates.map(rep => Number(rep.deviation) || 0));
-      const best = candidates.filter(rep => (Number(rep.deviation) || 0) === nearest);
+      const point = rep => Number(rep.add_from ?? rep.deviation) || 0;
+      const nearest = Math.max(0,...candidates.map(point));
+      const best = candidates.filter(rep => point(rep) === nearest);
       return best.length === 1 ? best[0] : null;
     }
     function editComment(rep, position = rep) {

@@ -72,6 +72,8 @@ class RepertoireEditingRegressionTest {
         // Compare with extending an already regular parent. Same resulting entries,
         // recommendations, comments and markers; no informational-only presentation.
         add(parent);val regularInitial=states();add(continuation);val regularAdded=states()
+        assertEquals(18,initial.getJSONObject(5).getInt("add_from"))
+        assertEquals(initial.getJSONObject(5).getInt("add_from"),regularInitial.getJSONObject(5).getInt("add_from"))
         for(i in 1..5)for(key in listOf("theory","kind","alternative","moves","comments","end_of_line"))
             assertEquals(added.getJSONObject(i).get(key).toString(),regularAdded.getJSONObject(i).get(key).toString())
         store.restoreBackup(backup);assertEquals(added.toString(),states().toString())

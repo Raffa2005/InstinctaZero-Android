@@ -22,7 +22,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
     data class Edge(val uci: String, val san: String, val fen: String, val before: String,
         val active: Boolean, val optional: Boolean, val kind: String, val reason: String,
         val nodes: List<Node>, val edited: Boolean)
-    data class Addition(val before: String, val fen: String, val uci: String, val san: String, val anchored: Boolean = false)
+    data class Addition(val before: String, val fen: String, val uci: String, val san: String, val anchored: Boolean = false, val ply: Int = 0)
     private val nodesById = mutableMapOf<Long,Node>()
     private val positions = mutableMapOf<String,List<Node>>()
     private val children = mutableMapOf<String,List<Node>>()
@@ -350,7 +350,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
             if (state==Transition.BLOCKED) return null
             if (state==Transition.MISSING || state==Transition.INFORMATIONAL) {
                 val entry = entries.getJSONObject(ply)
-                additions[edgeKey(positions[ply],moves[ply])] = Addition(positions[ply],positions[ply+1],moves[ply],entry.getString("san").take(16),ply==start && !active(positions[start]))
+                additions[edgeKey(positions[ply],moves[ply])] = Addition(positions[ply],positions[ply+1],moves[ply],entry.getString("san").take(16),ply==start && !active(positions[start]),ply)
             }
         }
         return additions.values.toList()

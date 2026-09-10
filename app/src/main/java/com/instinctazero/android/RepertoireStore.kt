@@ -298,7 +298,8 @@ internal class RepertoireStore(context: Context) {
                     current.put("deviation",if(anchor>=0)anchor+1 else 1)
                 }
                 if(request.optBoolean("intersections"))current.put("intersection",book.intersection(history,moves))
-                results.put(current.put("can_add",!additions.isNullOrEmpty()).put("add_count",additions?.size ?: 0))
+                results.put(current.put("can_add",!additions.isNullOrEmpty()).put("add_count",additions?.size ?: 0)
+                    .put("add_from",additions?.firstOrNull()?.let { it.ply+1 } ?: 0))
             }
         }
         cancellation?.throwIfCanceled()
