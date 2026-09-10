@@ -22,7 +22,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
     data class Edge(val uci: String, val san: String, val fen: String, val before: String,
         val active: Boolean, val optional: Boolean, val kind: String, val reason: String,
         val nodes: List<Node>, val edited: Boolean)
-    data class Addition(val before: String, val fen: String, val uci: String, val san: String)
+    data class Addition(val before: String, val fen: String, val uci: String, val san: String, val anchored: Boolean = false)
     private val nodesById = mutableMapOf<Long,Node>()
     private val positions = mutableMapOf<String,List<Node>>()
     private val children = mutableMapOf<String,List<Node>>()
@@ -115,6 +115,13 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         }
         return Flags(n.theory && state.active,n.optional || state.optional)
     }
+    /** Imported information is not a user exclusion. Check the local ancestry mask
+     * independently of source theory, including legacy path-scoped exclusions. */
+    private fun sourceAllowed(n: Node): Boolean {
+        if(!hasLabels)return true
+        flags(n)
+        return inherited[n.id]?.active == true
+    }
     private val localNodes: List<Node> by lazy {
         local.keys().asSequence().mapNotNull { key ->
             val edit = local.getJSONObject(key)
@@ -164,9 +171,9 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
             val source=factsAt(before);prepareFlags(source)
             val active = source.map(::flags).filter { it.active }
             if (active.isNotEmpty()) reach(before,active.all { it.optional })
-            // A deliberate response added at a known informational position is independent
-            // of that incoming source label. It does not relabel the earlier source move.
-            if(edges[before].orEmpty().any { local.getJSONObject(it.path).let { e -> e.optBoolean("anchored") && !e.optBoolean("deleted") && e.optString("kind")!="analysis" } })reach(before,false)
+            // An ordinary extension may start at a recorded informational position.
+            // The anchor must still respect deliberate local ancestry exclusions.
+            if(source.any(::sourceAllowed) && edges[before].orEmpty().any { local.getJSONObject(it.path).let { e -> e.optBoolean("anchored") && !e.optBoolean("deleted") && e.optString("kind")!="analysis" } })reach(before,false)
         }
         while (queue.isNotEmpty()) {
             val before = queue.removeFirst()
@@ -228,13 +235,6 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         if(candidates.none { !it.optional })return "unassigned"
         return if(edge.optional)"alternative" else "main"
     }
-    fun known(fen: String): Boolean = localRoot==fen || localNodes.any { it.fen==fen } || db?.rawQuery("SELECT 1 FROM nodes WHERE repertoire_id=? AND fen=? LIMIT 1",arrayOf(rep,fen),cancellation)?.use { it.moveToFirst() }==true
-    fun canAddMove(before: String,uci: String): Boolean {
-        if(!known(before) || localNodes.any { it.before==before && it.uci==uci })return false
-        if(db==null)return true
-        if("fen_before" !in columns)return edge(before,uci)==null
-        return db.rawQuery("SELECT 1 FROM nodes WHERE repertoire_id=? AND fen_before=? AND uci=? LIMIT 1",arrayOf(rep,before,uci),cancellation).use { !it.moveToFirst() }
-    }
     /** Cheap first-stage UI facts; comments and full move details arrive separately. */
     fun marker(fen: String): JSONObject {
         val active=active(fen)
@@ -272,6 +272,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
             edge==null -> Transition.MISSING
             deleted(edge) -> Transition.BLOCKED
             edge.active -> Transition.ACTIVE
+            edge.nodes.any { !it.added && sourceAllowed(it) } -> Transition.INFORMATIONAL
             edge.nodes.all { it.added && it.kind!="analysis" } -> Transition.RECONNECTABLE
             else -> Transition.BLOCKED
         }.also { sharedActivity?.putTransition(rep,fen,uci,it) }
@@ -287,7 +288,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
             // Only edge existence/activity is needed to validate an extension. Do not
             // read every source occurrence's SAN/comment for each past game move.
             db?.rawQuery("SELECT fen_before,uci,MAX(theory) FROM nodes WHERE repertoire_id=? AND fen_before IN (${chunk.joinToString(",") { "?" }}) GROUP BY fen_before,uci",arrayOf(rep,*chunk.toTypedArray()),cancellation)?.use {
-                while(it.moveToNext()) { cancellation?.throwIfCanceled();states[it.getString(0) to it.getString(1)]=if(it.getInt(2)==1)Transition.ACTIVE else Transition.BLOCKED }
+                while(it.moveToNext()) { cancellation?.throwIfCanceled();states[it.getString(0) to it.getString(1)]=if(it.getInt(2)==1)Transition.ACTIVE else Transition.INFORMATIONAL }
             }
             for(pair in missing.filter { it.first in chunk }) {
                 val state=states[pair] ?: Transition.MISSING
@@ -322,21 +323,34 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
             .put("comments",positionComments(edge.fen,comments(edge.nodes))).put("starting_comments",comments(edge.nodes,true))
             .put("position",target).put("end_of_line",target.getBoolean("end_of_line"))
     }
-    /** Extend from the most recent covered position, not from an unrelated earlier move order. */
+    /** One ordinary save extends the most recent recorded position, whether its
+     * imported route is theory or information. Both produce normal local edges.
+     * Explicit exclusions/deletions must instead be restored deliberately. */
     fun additions(positions: List<String>, moves: List<String>, entries: JSONArray, anchor: Int = positions.indexOfLast(::active)): List<Addition>? {
         if (positions.size != moves.size+1 || entries.length()!=moves.size) return null
-        if (anchor < 0) return null
-        prepareTransitions(positions,moves,anchor)
+        val validationStart = if(anchor>=0)anchor else positions.indexOfFirst { fen ->
+            factsAt(fen).let { prepareFlags(it);it.any(::sourceAllowed) }
+        }
+        if (validationStart < 0) return null
+        prepareTransitions(positions,moves,validationStart)
+        var start=validationStart
+        for(ply in validationStart until moves.size) {
+            val state=transition(positions[ply],moves[ply])
+            if(state==Transition.BLOCKED)return null
+            // Extend the recorded informational tail without changing earlier source
+            // labels. If the final played move itself is informational, Add includes it.
+            if(state==Transition.INFORMATIONAL)start=minOf(ply+1,moves.lastIndex)
+        }
         val additions = linkedMapOf<String,Addition>()
-        for (ply in anchor until moves.size) {
+        for (ply in start until moves.size) {
             cancellation?.throwIfCanceled()
             val state = transition(positions[ply],moves[ply])
-            // Re-adding a missing local prefix may reconnect its saved descendants. This
-            // does not authorize an explicit exclusion or an informational source edge.
+            // Imported classification does not veto an intentional local extension.
+            // A local exclusion/deletion still does, including its dependent source path.
             if (state==Transition.BLOCKED) return null
-            if (state==Transition.MISSING) {
+            if (state==Transition.MISSING || state==Transition.INFORMATIONAL) {
                 val entry = entries.getJSONObject(ply)
-                additions[edgeKey(positions[ply],moves[ply])] = Addition(positions[ply],positions[ply+1],moves[ply],entry.getString("san").take(16))
+                additions[edgeKey(positions[ply],moves[ply])] = Addition(positions[ply],positions[ply+1],moves[ply],entry.getString("san").take(16),ply==start && !active(positions[start]))
             }
         }
         return additions.values.toList()

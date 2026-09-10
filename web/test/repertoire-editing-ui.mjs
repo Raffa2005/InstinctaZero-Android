@@ -5,7 +5,7 @@ import {readFile,mkdir,writeFile} from 'node:fs/promises';
 import {pathToFileURL} from 'node:url';
 import {resolve} from 'node:path';
 import {chromium} from 'playwright';
-const fixture=JSON.parse(await readFile(process.env.REPERTOIRE_EDIT_PREVIEW || '/tmp/instinctazero-v085-picture.json','utf8'));
+const fixture=JSON.parse(await readFile(process.env.REPERTOIRE_EDIT_PREVIEW || '/tmp/instinctazero-v086-picture.json','utf8'));
 const assets=process.env.PHONE_PREVIEW_ASSETS?pathToFileURL(resolve(process.env.PHONE_PREVIEW_ASSETS)+'/'):new URL('../../app/src/main/assets/analysis/',import.meta.url);
 const output=process.env.PHONE_PREVIEW_OUTPUT || '/tmp/instinctazero-v085-ui';await mkdir(output,{recursive:true});
 const server=createServer(async(req,res)=>{try{const file=req.url==='/'?'index.html':req.url.slice(1);if(file.includes('..'))throw Error();const body=await readFile(new URL(file,assets));res.writeHead(200,{'Content-Type':{js:'text/javascript',css:'text/css',html:'text/html',svg:'image/svg+xml',ttf:'font/ttf'}[file.split('.').at(-1)]||'application/octet-stream'}).end(body)}catch{res.writeHead(404).end()}});
@@ -24,16 +24,17 @@ try{for(const [width,height]of [[360,640],[390,780],[412,844]]){
    requestRepertoire:raw=>{
     const r=JSON.parse(raw),id='rep'+ ++sequence;window.__test.requests.push(r);
     if(r.action==='catalog'){send(id,{installed:true,repertoires:[{id:'taimanov',name:'Taimanov',side:'black'}],undo});return id;}
-    if(r.action==='edit'){undo={token:String(sequence),name:'Taimanov',label:'Repertoire edit',before:mode};mode=r.kind==='delete'?'deleted':r.kind==='restore_move'?'added':r.kind==='add_move'?'added':mode;send(id,{saved:true,undo});return id;}
+    if(r.action==='edit'){undo={token:String(sequence),name:'Taimanov',label:'Repertoire edit',before:mode};mode=r.kind==='delete'?'deleted':r.kind==='restore_move'?'added':r.kind==='add'?'added':mode;send(id,{saved:true,undo});return id;}
     if(r.action==='undo'){mode=undo.before;undo=null;send(id,{saved:true,undo});return id;}
     let rep;
-    if(r.fen===f.request.fen)rep=structuredClone(mode==='initial'?f.initial:mode==='deleted'?f.deleted_current:f.added);
+    if(r.fen===f.extension.fen)rep=structuredClone(mode==='initial'?f.unified.initial.at(-1):f.continuation);
+    else if(r.fen===f.request.fen)rep=structuredClone(mode==='initial'?f.initial:mode==='deleted'?f.deleted_current:f.added);
     else if(r.fen===f.parent.fen)rep=structuredClone(mode==='deleted'?f.deleted_parent:f.parent);
     else rep={id:'taimanov',name:'Taimanov',side:'black',fen:r.fen,theory:true,known:true,moves:[],comments:[],intersection:-1};
     setTimeout(()=>{window.__test.markers.push(performance.now());window.InstinctaZero.onNativeRepertoireMarker(id,{results:[{id:rep.id,fen:rep.fen,theory:rep.theory,end_of_line:rep.end_of_line}]})},8);
     setTimeout(()=>{window.__test.full.push(performance.now());window.InstinctaZero.onNativeRepertoire(id,{results:[rep]})},window.__test.delay);return id;
    }};
-  window.__load=()=>window.InstinctaZero.loadArchivedGame({id:'Picture1',moves:f.request.history.map(uci=>({uci})),white:{name:'Opponent'},black:{name:'HiddenOwner'},mobile_orientation:'black'});
+  window.__load=()=>window.InstinctaZero.loadArchivedGame({id:'Picture1',moves:f.extension.history.map(uci=>({uci})),white:{name:'Opponent'},black:{name:'HiddenOwner'},mobile_orientation:'black'});
   window.__finish=(id,wrong=false)=>{
    const request=window.__test.engines.find(r=>r.id===id),chess=new window.InstinctaZeroChessRules.Chess();for(const uci of request.history)chess.move({from:uci.slice(0,2),to:uci.slice(2,4),promotion:uci[4]});
    const m=chess.moves({verbose:true})[0],uci=m.from+m.to+(m.promotion || '');
@@ -42,11 +43,13 @@ try{for(const [width,height]of [[360,640],[390,780],[412,844]]){
  },fixture);
  await page.goto(`http://127.0.0.1:${server.address().port}`);await page.waitForFunction(()=>!document.documentElement.classList.contains('board-assets-loading'));
  await page.evaluate(()=>window.__load());await page.evaluate(()=>window.InstinctaZero.openRepertoires());
- await page.locator('[data-rep-action=add-played]').waitFor();assert.match(await page.locator('#panel').innerText(),/Add just-played b4/);
+ await page.locator('[data-rep-action=quick-add]').waitFor();assert.match(await page.locator('#panel').innerText(),/Add line to repertoire/);
  assert.equal(await page.locator('.orientation-black').count(),1);assert.doesNotMatch(await page.locator('body').innerText(),/HiddenOwner/);
- assert.equal(await page.locator('[data-rep-action=quick-add]').count(),0);await page.waitForTimeout(180);await page.screenshot({path:`${output}/pictured-add-${width}.png`});
- await page.locator('[data-rep-action=add-played]').tap();await page.locator('[data-rep-play=c3e2]').waitFor();
- assert.equal(await page.evaluate(()=>window.__test.requests.filter(r=>r.action==='edit').at(-1).kind),'add_move');
+ assert.doesNotMatch(await page.locator('#panel').innerText(),/just.played/i);await page.waitForTimeout(180);await page.screenshot({path:`${output}/pictured-add-${width}.png`});
+ await page.locator('[data-rep-action=quick-add]').tap();await page.waitForTimeout(100);
+ assert.equal(await page.evaluate(()=>window.__test.requests.filter(r=>r.action==='edit').at(-1).kind),'add');
+ assert.deepEqual(await page.evaluate(()=>window.__test.requests.filter(r=>r.action==='edit').at(-1).history),fixture.extension.history);
+ for(let i=0;i<4;i++)await page.locator('[data-action=prev]').tap();await page.locator('[data-rep-play=c3e2]').waitFor();
  await page.locator('[data-action=prev]').tap();await page.locator('[data-rep-edit=b5b4]').waitFor();await page.locator('[data-rep-edit=b5b4]').tap();
  await page.locator('[data-rep-action=delete-move]').tap();assert.match(await page.locator('#panel').innerText(),/Dependent lines lose this route/);
  await page.screenshot({path:`${output}/delete-${width}.png`});await page.locator('[data-rep-action=confirm-delete]').tap();

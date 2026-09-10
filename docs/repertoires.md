@@ -85,12 +85,15 @@ label; add the current board line; remove a local addition. New adjustments iden
 the position and outgoing move, so they apply across move orders in that repertoire.
 Existing path-scoped edits are still respected within their source subtrees; another
 independently active occurrence can supply book coverage. Extensions anchor at the
-most recent covered position and add only the missing moves, not the incoming order.
+most recent recorded position and add the continuation, not the incoming order.
 These changes do not
 rewrite source PGNs, PC annotations or archived Lichess games. Excluded branches
-remain viewable and can be restored. Adding a line cannot silently cross an
-informational source move. To activate source information, review its PC annotation
-rules and rebuild their index, then update the phone copy.
+remain viewable and can be restored. Play onward and use the ordinary Add move /
+Add line action, including through an imported informational route. The saved
+continuation has the same normal repertoire representation in either case. Earlier
+source labels stay intact; a final informational move can itself be deliberately
+added as an ordinary local move. Explicit local deletions/exclusions are different:
+restore them before extending that route. No PC annotation change is required.
 
 ## Storage and limits
 

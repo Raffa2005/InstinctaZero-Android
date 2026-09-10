@@ -297,9 +297,6 @@ internal class RepertoireStore(context: Context) {
                 if (!current.getBoolean("theory") && moves.isNotEmpty()) {
                     current.put("deviation",if(anchor>=0)anchor+1 else 1)
                 }
-                val before=history.getOrNull(moves.size-1)
-                val canAddMove=before!=null && moves.isNotEmpty() && book.canAddMove(before,moves.last())
-                current.put("can_add_move",canAddMove).put("add_move_independent",canAddMove && !book.active(before!!))
                 if(request.optBoolean("intersections"))current.put("intersection",book.intersection(history,moves))
                 results.put(current.put("can_add",!additions.isNullOrEmpty()).put("add_count",additions?.size ?: 0))
             }
@@ -317,7 +314,7 @@ internal class RepertoireStore(context: Context) {
     @Synchronized fun edit(request: JSONObject) {
         val rep = request.getString("id"); val moves = checkedMoves(request)
         val kind = request.getString("kind")
-        require(kind in listOf("analysis", "alternative", "main", "delete", "restore_move", "reset", "add", "add_move", "comment", "reset_comment"))
+        require(kind in listOf("analysis", "alternative", "main", "delete", "restore_move", "reset", "add", "comment", "reset_comment"))
         require(moves.isNotEmpty() || kind in listOf("comment","reset_comment")) { "Choose a move first" }
         val before = edits.toString()
         val previousLocal = JSONObject(overrides(rep).toString())
@@ -338,23 +335,15 @@ internal class RepertoireStore(context: Context) {
                         require(text.length<=64*1024) { "This comment is too long." }
                         local.put(key,JSONObject().put("scope","comment").put("fen",fen).put("comment",text))
                     }
-                } else if (kind == "add_move") {
-                    val history=positionHistory(request,moves)
-                    require(history.size==moves.size+1 && moves.isNotEmpty()) { "The played move is unavailable." }
-                    val parent=history[moves.size-1];val uci=moves.last()
-                    require(book.canAddMove(parent,uci)) { "This response already exists, or its parent is not in this repertoire." }
-                    val san=request.getJSONArray("entries").getJSONObject(moves.size-1).getString("san").take(16)
-                    local.put(RepertoirePositionBook.edgeKey(parent,uci),JSONObject().put("added",true).put("scope","position")
-                        .put("kind","repertoire").put("anchored",!book.active(parent)).put("before",parent).put("fen",history.last()).put("uci",uci).put("san",san))
                 } else if (kind == "add") {
                     val entries = request.getJSONArray("entries")
                     require(entries.length() == moves.size)
                     val additions = book.additions(positionHistory(request,moves),moves,entries)
-                    require(additions!=null) { "This extension crosses an informational or excluded move. Restore the excluded move or review its PC annotations first." }
+                    require(additions!=null) { "Restore any deliberately deleted or excluded move on this route before extending it, or start from a recorded repertoire position." }
                     require(additions.isNotEmpty()) { "This line is already in the repertoire." }
                     for (addition in additions) {
                         local.put(RepertoirePositionBook.edgeKey(addition.before,addition.uci),JSONObject().put("added",true).put("scope","position")
-                            .put("kind","repertoire").put("before",addition.before).put("fen",addition.fen).put("uci",addition.uci).put("san",addition.san))
+                            .put("kind","repertoire").put("anchored",addition.anchored).put("before",addition.before).put("fen",addition.fen).put("uci",addition.uci).put("san",addition.san))
                     }
                 } else {
                     // The adjustment menu describes an outgoing move from request.fen, even
@@ -397,7 +386,7 @@ internal class RepertoireStore(context: Context) {
             if (changes.length() == 0) { restoreEdits(before); return } // A no-op must not consume the previous undo.
             require(changes.length() <= 512) { "This edit affects too many saved entries to undo safely." }
             val label = when (kind) {
-                "add", "add_move" -> if (changes.length() == 1) "Added move" else "Added ${changes.length()} moves"
+                "add" -> if (changes.length() == 1) "Added move" else "Added ${changes.length()} moves"
                 "main" -> "Chose main recommendation"
                 "delete" -> "Deleted repertoire move"
                 "restore_move" -> "Restored repertoire move"

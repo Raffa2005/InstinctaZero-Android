@@ -2,7 +2,7 @@ package com.instinctazero.android
 
 /** Position facts, never departure/extension state. Cleared with the store's edit revision. */
 internal class RepertoireActivityCache(private val maxBytes: Int = 512 * 1024, private val maxEntries: Int = 2048) {
-    enum class Transition { MISSING, ACTIVE, RECONNECTABLE, BLOCKED }
+    enum class Transition { MISSING, ACTIVE, RECONNECTABLE, INFORMATIONAL, BLOCKED }
     private val entries = LinkedHashMap<String,Int>(16,.75f,true)
     private var bytes = 0
     private fun key(rep: String, fen: String) = "p\n$rep\n$fen"

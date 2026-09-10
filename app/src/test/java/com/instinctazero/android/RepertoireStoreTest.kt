@@ -202,6 +202,7 @@ class RepertoireStoreTest {
         edit(moves.take(2),"analysis"); assertFalse(result(moves).getBoolean("theory"))
         edit(moves.take(2),"reset"); assertFalse(result(moves).getBoolean("theory"))
         val excluded = listOf("e2e4","f7f6","g1f3")
+        edit(excluded.take(2),"analysis")
         assertThrows(IllegalArgumentException::class.java) { store.edit(request(excluded).put("id","white").put("kind","add").put("entries",entries)) }
         assertArrayEquals(bytes,File(context.filesDir,"mobile_repertoire.sqlite").readBytes())
     }
@@ -378,16 +379,46 @@ class RepertoireStoreTest {
         assertArrayEquals(bytes,File(context.filesDir,"mobile_repertoire.sqlite").readBytes())
     }
 
-    @Test fun addEligibilityAndWritesBothRejectExcludedLeavesAndSourceInformation() {
+    @Test fun addEligibilityAndWritesRejectLocalExclusionsButAllowSourceInformation() {
         edit(listOf("e2e4"),"analysis")
         for (moves in listOf(listOf("e2e4"),listOf("e2e4","c7c5"),listOf("e2e4","f7f6","g1f3"))) {
             assertFalse(result(moves).getBoolean("can_add"))
             assertThrows(IllegalArgumentException::class.java) { store.edit(request(moves).put("id","white").put("kind","add")) }
         }
         edit(listOf("e2e4"),"reset")
-        assertFalse(result(listOf("e2e4","f7f6")).getBoolean("can_add"))
+        assertTrue(result(listOf("e2e4","f7f6")).getBoolean("can_add"))
         assertTrue(result(listOf("e2e4","c7c5")).getBoolean("can_add"))
         assertEquals(1,result(listOf("e2e4","c7c5")).getInt("add_count"))
+    }
+
+    @Test fun sourceRefutationAndInformationalContinuationBecomeOrdinaryLocalMovesInOneSave() {
+        val line=listOf("e2e4","f7f6","d2d4")
+        val original=result(line).getJSONArray("comments").toString()
+        assertEquals(1,result(line).getInt("add_count"));addLine(line)
+        store=RepertoireStore(context)
+        assertFalse(result(line.take(2)).getBoolean("theory")) // Original refutation is not relabelled.
+        for(ply in 3..3) {
+            val r=result(line.take(ply));assertTrue(r.getBoolean("theory"));assertEquals("repertoire",r.getString("kind"))
+            assertFalse(r.getBoolean("alternative"));assertFalse(r.getBoolean("can_add"))
+        }
+        assertEquals(original,result(line).getJSONArray("comments").toString())
+        store.undo(undoToken());assertFalse(result(line).getBoolean("theory"));assertEquals(1,result(line).getInt("add_count"))
+        edit(line.take(2),"analysis")
+        assertFalse(result(line).getBoolean("can_add"));assertThrows(IllegalArgumentException::class.java){addLine(line)}
+        edit(line.take(2),"reset");addLine(line);edit(line.take(2),"delete")
+        assertFalse(result(line).getBoolean("can_add"));assertThrows(IllegalArgumentException::class.java){addLine(line)}
+        assertArrayEquals(bytes,File(context.filesDir,"mobile_repertoire.sqlite").readBytes())
+    }
+
+    @Test fun aBoardRootedInsideSourceInformationCanExtendButNotInsideAnExcludedSourcePath() {
+        val line=listOf("e2e4","f7f6","d2d4")
+        val request=request(line).put("root",fen(line.take(2))).put("history",JSONArray().put("d2d4"))
+            .put("entries",JSONArray().put(entries(line).getJSONObject(2))).put("id","white").put("kind","add")
+        assertTrue(store.lookup(request).getJSONArray("results").getJSONObject(0).getBoolean("can_add"))
+        store.edit(request);store=RepertoireStore(context);assertTrue(result(line).getBoolean("theory"))
+        store.undo(undoToken());edit(line.take(2),"analysis")
+        assertFalse(store.lookup(request).getJSONArray("results").getJSONObject(0).getBoolean("can_add"))
+        assertThrows(IllegalArgumentException::class.java){store.edit(request)}
     }
 
     @Test fun failedMultiMoveAdditionRollsBackAllNewMoves() {

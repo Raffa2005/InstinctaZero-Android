@@ -48,11 +48,13 @@ test('opening repertoire requests intersections even for a position cached outsi
   h.go(['e2e4']);assert.equal(h.panel.intersection(),-1,'old branch target cannot follow a new cursor');
 });
 
-test('just-played response is a distinct single write at a known informational parent',()=>{
-  const h=harness();h.go(['e2e4']);h.reply(h.last,{results:[result({theory:false,can_add:false,can_add_move:true,add_move_independent:true})]});
-  assert.match(h.panel.html(),/Add just-played/);assert.doesNotMatch(h.panel.html(),/data-rep-action="quick-add"/);
-  h.click({repAction:'add-played'});assert.equal(h.last.kind,'add_move');assert.equal(h.last.id,'r');
-  const count=h.requests.length;h.click({repAction:'add-played'});assert.equal(h.requests.length,count);
+test('all extensions use the ordinary add action with no extra response mode or duplicate writes',()=>{
+  for(const count of [1,5]){
+    const h=harness();h.go(['e2e4']);h.reply(h.last,{results:[result({theory:false,can_add:true,add_count:count})]});
+    assert.match(h.panel.html(),count===1?/Add move to repertoire/:/Add line to repertoire/);assert.doesNotMatch(h.panel.html(),/just.played|add-played/i);
+    h.click({repAction:'quick-add'});assert.equal(h.last.kind,'add');assert.equal(h.last.id,'r');
+    const requests=h.requests.length;h.click({repAction:'quick-add'});assert.equal(h.requests.length,requests);
+  }
 });
 
 test('extension chooses the nearest covered repertoire, never arbitrary catalog order',()=>{

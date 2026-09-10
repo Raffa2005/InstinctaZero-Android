@@ -1,7 +1,9 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.8.5). The repertoire editing, private PC backups, marker staging and
+(version 0.8.6). The unified repertoire-add correction is described in
+[v0.8.6](release-v0.8.6.md). It requires no server update or repertoire redownload.
+The repertoire editing, private PC backups, marker staging and
 analysis recovery update is described in [v0.8.5](release-v0.8.5.md). It requires
 the authenticated PC backup routes but no pairing reset or corpus redownload.
 The display-only privacy mode uses persistent neutral aliases,
@@ -50,10 +52,13 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 33 / 0.8.5 release values;
+- versionCode/versionName are the intended 34 / 0.8.6 release values;
 - run the editing, backup and stream regressions and `repertoire-editing-ui.mjs`
   against extracted APK assets, with `REPERTOIRE_EDIT_PREVIEW` pointing to the
   private response fixture produced by `RepertoireEditingRegressionTest`;
+- run `repertoire-unified-add-ui.mjs` with that same fixture and APK assets; both
+  informational and regular parents must have identical normal add controls and
+  saved move presentation, with no preparatory save;
 - run `AccountPrivacyTest` and `node web/test/privacy-ui.mjs` (also against extracted
   signed APK assets). Check Home, sidebar, Account / PC, both player colours,
   recycled game rows, raw account selection IDs, orientation/results, errors,
@@ -118,7 +123,8 @@ Before publishing, at minimum verify:
   cached positions do not need another bridge request. Edits and corpus updates
   invalidate cached flags. End-of-line labels distinguish active terminal theory
   from positions with no active source occurrence; direct single/multi-move additions persist in
-  the chosen repertoire, cannot cross excluded/informational source lines, and
+  the chosen repertoire, extend informational source lines normally but cannot
+  override deliberate local exclusions/deletions, and
   leave source PGNs and archived games unchanged;
 - undo is available beside edit confirmations and in repertoire settings after
   recreation. Verify whole-line rollback, previous-prefix/other-repertoire
