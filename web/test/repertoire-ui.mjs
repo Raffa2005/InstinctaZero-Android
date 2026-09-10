@@ -81,6 +81,13 @@ try {
                 can_add:!theory,add_count:missing,deviation:theory?0:4,comments:['Keep an eye on the d5 break.'],
                 moves:(length<3?[next[0]]:continuations).map(uci=>({uci,san:uci==='b8c6'?'Nc6':uci,theory:true,deviation:0,comments:['Keep an eye on the d5 break.'],end_of_line:!stored.some(p=>p.startsWith(path+' '+uci+' '))}))};
             })};
+            // The native position-book ABI includes normalized FENs on current and
+            // projected child facts. Markers now intentionally use those position keys.
+            result.results=result.results.map(rep=>({...rep,fen:request.fen,moves:rep.moves.map(move=>{
+              const chess=new window.InstinctaZeroChessRules.Chess(request.fen+' 0 1');let played=null;
+              try{played=chess.move({from:move.uci.slice(0,2),to:move.uci.slice(2,4),promotion:move.uci[4]})}catch{}
+              return {...move,...(played?{position:{fen:played.after.split(' ').slice(0,4).join(' '),theory:move.theory,end_of_line:!!move.end_of_line,comments:move.comments,starting_comments:move.starting_comments}}:{})};
+            })}));
           }
           setTimeout(()=>window.InstinctaZero.onNativeRepertoire(id,result),window.__test.delay);return id;
         },
