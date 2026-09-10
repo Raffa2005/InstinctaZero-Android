@@ -192,6 +192,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (::nativeBridge.isInitialized) nativeBridge.resumeRepertoireBackup()
         if (::webView.isInitialized) {
             webView.onResume()
             if (navigation.screen == ShellScreen.ANALYSIS) setAnalysisActive(true)
@@ -351,6 +352,18 @@ class MainActivity : ComponentActivity() {
             if(navigation.screen==ShellScreen.REPERTOIRES)renderNativeScreen()
         }
     }
+    internal fun showRepertoireBackups() {
+        repertoireLibrary.backupsOpen=true;repertoireLibrary.restoreVersion=""
+        showRepertoireLibrary();nativeBridge.repertoireBackupAction("list","")
+    }
+    internal fun onRepertoireBackup(state: JSONObject) {
+        state.keys().forEach { repertoireLibrary.backup.put(it,state.get(it)) }
+        if(state.optBoolean("restored")) {
+            repertoireLibrary.restoreVersion=""
+            state.optJSONObject("catalog")?.let { repertoireLibrary.catalog=it }
+        }
+        if(navigation.screen==ShellScreen.REPERTOIRES && repertoireLibrary.backupsOpen)renderNativeScreen()
+    }
 
     private fun refreshArchive() {
         if (archiveLoading || navigation.screen != ShellScreen.GAMES || !nativeBridge.isPaired()) return
@@ -445,6 +458,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleShellBack() {
+        if(navigation.screen==ShellScreen.REPERTOIRES && repertoireLibrary.backupsOpen) {
+            if(repertoireLibrary.restoreVersion.isNotEmpty())repertoireLibrary.restoreVersion="" else repertoireLibrary.backupsOpen=false
+            renderNativeScreen();return
+        }
         if(navigation.screen==ShellScreen.REPERTOIRES && repertoireLibrary.editing && !repertoireLibrary.busy) {
             repertoireLibrary.editing=false; repertoireLibrary.error=""; renderNativeScreen(); return
         }
@@ -485,7 +502,7 @@ class MainActivity : ComponentActivity() {
                     else { repertoireLibrary.catalog=data; repertoireLibrary.editing=false }
                     if(navigation.screen==ShellScreen.REPERTOIRES)renderNativeScreen()
                 }
-            },::showRepertoires,privacy),weighted())
+            },::showRepertoires,privacy,nativeBridge::repertoireBackupAction),weighted())
             else -> page.addView(homeContent(), weighted())
         }
         nativeLayer.addView(page, matchFrame())
@@ -501,7 +518,7 @@ class MainActivity : ComponentActivity() {
         val leading = shellButton(if (childScreen) "‹" else "☰", 25f).apply {
             contentDescription = if (childScreen) "Back to home" else "Open menu"
             setOnClickListener {
-                if (navigation.screen==ShellScreen.REPERTOIRES && repertoireLibrary.editing) handleShellBack()
+                if (navigation.screen==ShellScreen.REPERTOIRES && (repertoireLibrary.editing || repertoireLibrary.backupsOpen)) handleShellBack()
                 else if (childScreen) showHomeScreen()
                 else { navigation.openDrawer(); renderNativeScreen() }
             }
@@ -1140,10 +1157,12 @@ internal object AnalysisWebPolicy {
             (uri.rawQuery == null || Regex("limit=20(?:&cursor=[A-Za-z0-9_-]{1,256})?").matches(uri.rawQuery))
         val gameDetail = Regex("/api/mobile/v1/games/[A-Za-z0-9]{8,16}").matches(uri.rawPath) &&
             uri.rawQuery == null
+        val backup = uri.rawPath=="/api/mobile/v1/repertoire-backups" &&
+            (uri.rawQuery==null || Regex("snapshot=[a-f0-9]{64}").matches(uri.rawQuery))
         uri.scheme.equals("https", ignoreCase = true) &&
             uri.host.equals(gatewayOrigin.host, ignoreCase = true) &&
             uri.port == gatewayOrigin.port && uri.userInfo == null &&
-            uri.rawFragment == null && (fixedRoute || gamesList || gameDetail)
+            uri.rawFragment == null && (fixedRoute || gamesList || gameDetail || backup)
     } catch (_: Exception) {
         false
     }
@@ -1187,6 +1206,8 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     }
 
     private val executor = Executors.newCachedThreadPool()
+    private val analysisExecutor = Executors.newSingleThreadExecutor()
+    private val newestAnalysis = java.util.concurrent.atomic.AtomicReference<PendingCall?>()
     private val calls = ConcurrentHashMap<String, PendingCall>()
     @Volatile private var webView: WebView? = null
     private val restHttp = GatewayHttpPolicy.restClient()
@@ -1198,16 +1219,46 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     private val repertoireExecutor = Executors.newSingleThreadExecutor()
     private val repertoireDownloading = java.util.concurrent.atomic.AtomicBoolean(false)
     private val repertoireReads = LatestRepertoireRead()
+    private val backupCall=java.util.concurrent.atomic.AtomicReference<Call?>()
+    @Volatile private var bridgeClosed=false
+    private val repertoireBackups by lazy { RepertoireBackups(repertoireStore,
+        activity.getSharedPreferences("repertoire_backups",Context.MODE_PRIVATE),::backupTransport) { state ->
+            activity.runOnUiThread { if(!activity.isDestroyed)activity.onRepertoireBackup(state) }
+            if(state.optBoolean("restored"))emit("onNativeRepertoireRestored","restore","{}")
+        } }
     private val archivedGameRequest = java.util.concurrent.atomic.AtomicReference<PendingCall?>()
 
     @JavascriptInterface fun getRepertoireSettings(): String = repertoireStore.settings()
-    @JavascriptInterface fun saveRepertoireSettings(raw: String) { runCatching { repertoireStore.saveSettings(raw) } }
+    @JavascriptInterface fun saveRepertoireSettings(raw: String) { runCatching { repertoireStore.saveSettings(raw);repertoireBackups.edited() } }
     @JavascriptInterface fun cancelRepertoireLookup() { repertoireReads.cancel() }
     @JavascriptInterface fun openRepertoireLibrary() { activity.runOnUiThread { activity.showRepertoireLibrary() } }
+    @JavascriptInterface fun openRepertoireBackups() { activity.runOnUiThread { activity.showRepertoireBackups() } }
+    fun resumeRepertoireBackup() { repertoireBackups.resume() }
+    fun repertoireBackupAction(action: String,version: String) { repertoireBackups.action(action,version) }
+    private fun backupTransport(version: String,payload: JSONObject?): JSONObject {
+        val token=encryptedPreferences.getString(TOKEN_KEY,null) ?: throw IOException("Pair your PC first.")
+        val base=apiUrl("repertoire-backups")
+        val url=if(version.isEmpty())base else base.newBuilder().addQueryParameter("snapshot",version).build()
+        check(AnalysisWebPolicy.isAllowedNativeGatewayUrl(url.toString()))
+        val builder=Request.Builder().url(url).header("Authorization","Bearer $token")
+        if(payload==null)builder.get() else builder.post(GatewayHttpPolicy.nonReplayable(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())))
+        val call=restHttp.newBuilder().callTimeout(45,java.util.concurrent.TimeUnit.SECONDS).build().newCall(builder.build())
+        // Backup work survives switching native menus; it is separate from analysis cancellation.
+        backupCall.set(call)
+        if(bridgeClosed)call.cancel()
+        try { return call.execute().use { response ->
+            if(!response.isSuccessful)throw IOException("PC backup unavailable.")
+            val body=response.body ?: throw IOException("Empty backup response.")
+            val limit=12L*1024*1024+1024
+            require(body.contentLength()<=limit)
+            val source=body.source();source.request(limit+1);require(source.buffer.size<=limit)
+            JSONObject(source.readUtf8())
+        } } finally { backupCall.compareAndSet(call,null) }
+    }
     fun manageRepertoires(request: JSONObject, done: (JSONObject) -> Unit) {
         repertoireExecutor.execute {
             val result = try {
-                if(request.optString("action")=="save_repertoire") repertoireStore.saveRepertoire(request) else repertoireStore.catalog()
+                if(request.optString("action")=="save_repertoire") repertoireStore.saveRepertoire(request).also { repertoireBackups.edited() } else repertoireStore.catalog()
             } catch(error: Exception) { JSONObject(errorPayload(error.safeMessage())) }
             activity.runOnUiThread { done(result) }
         }
@@ -1222,9 +1273,12 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
                 val request = JSONObject(requestJson)
                 val result = when (request.optString("action")) {
                     "catalog" -> repertoireStore.catalog()
-                    "edit" -> { repertoireStore.edit(request); JSONObject().put("saved", true).put("undo", repertoireStore.undoInfo() ?: JSONObject.NULL) }
-                    "undo" -> { repertoireStore.undo(request.getString("token")); JSONObject().put("saved", true).put("undo", JSONObject.NULL) }
-                    "lookup" -> repertoireStore.lookup(request,read)
+                    "edit" -> { repertoireStore.edit(request); repertoireBackups.edited();JSONObject().put("saved", true).put("undo", repertoireStore.undoInfo() ?: JSONObject.NULL) }
+                    "undo" -> { repertoireStore.undo(request.getString("token")); repertoireBackups.edited();JSONObject().put("saved", true).put("undo", JSONObject.NULL) }
+                    "lookup" -> {
+                        emit("onNativeRepertoireMarker",id,repertoireStore.markers(request,read).toString()) { read!=null && repertoireReads.isCurrent(read) }
+                        repertoireStore.lookup(request,read)
+                    }
                     else -> throw IllegalArgumentException("Unknown repertoire action")
                 }
                 read?.throwIfCanceled()
@@ -1453,8 +1507,10 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     @JavascriptInterface
     fun startAnalysis(requestJson: String?): String = newRequestId().also { id ->
         val pending = PendingCall()
+        newestAnalysis.getAndSet(pending)?.cancel()
         calls[id] = pending
-        executor.execute {
+        analysisExecutor.execute {
+            if(pending.isCanceled() || newestAnalysis.get()!==pending){calls.remove(id,pending);return@execute}
             val request = parseStudyRequest(requestJson, id, "analysis")
             if (request == null) calls.remove(id, pending) else streamAnalysis(id, pending, request)
         }
@@ -1484,6 +1540,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
 
     /** Forget locally first; remote self-revocation is deliberately best-effort. */
     fun disconnectLocalFirst() {
+        backupCall.getAndSet(null)?.cancel()
         val token = encryptedPreferences.getString(TOKEN_KEY, null)
         cancelAll("disconnected")
         encryptedPreferences.edit().remove(TOKEN_KEY).remove(DEVICE_NAME_KEY)
@@ -1515,9 +1572,12 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     }
 
     fun close() {
+        bridgeClosed=true;backupCall.getAndSet(null)?.cancel()
         cancelAll("destroyed")
+        repertoireBackups.close()
         executor.shutdownNow()
         repertoireExecutor.shutdownNow()
+        analysisExecutor.shutdownNow()
         restHttp.dispatcher.executorService.shutdown()
         restHttp.connectionPool.evictAll()
     }
@@ -1774,31 +1834,14 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
                     throw GatewayException(response.code, responseError(response, response.body?.string().orEmpty()))
                 }
                 val source = response.body?.source() ?: throw IOException("Analysis gateway returned no stream.")
-                var event = "message"
-                val data = StringBuilder()
-                fun dispatchFrame() {
-                    if (data.isEmpty()) return
-                    // Each gateway data block is JSON. The event is retained in a wrapper so the
-                    // page does not need to parse raw SSE framing.
-                    val wrapped = JSONObject()
-                        .put("event", event)
-                        .put("data", JSONObject(data.toString().trim()))
-                    emit("onNativeAnalysis", id, wrapped.toString())
-                    event = "message"
-                    data.setLength(0)
+                val terminal=AnalysisStreamReader.read(source,{ !pending.isCanceled() && newestAnalysis.get()===pending }) { wrapped ->
+                    emit("onNativeAnalysis",id,wrapped.toString()) { !pending.isCanceled() && newestAnalysis.get()===pending }
                 }
-                while (true) {
-                    val line = source.readUtf8Line() ?: break
-                    when {
-                        line.startsWith("event:") -> event = line.substringAfter(':').trim()
-                        line.startsWith("data:") -> data.append(line.substringAfter(':').trimStart()).append('\n')
-                        line.isEmpty() -> dispatchFrame()
-                    }
-                }
-                dispatchFrame()
+                if(!terminal && !pending.isCanceled())emit("onNativeAnalysis",id,JSONObject().put("event","stream-ended").put("data",JSONObject()).toString()) { !pending.isCanceled() && newestAnalysis.get()===pending }
             }
         } catch (error: Exception) {
-            if (!call.isCanceled()) emit("onNativeAnalysis", id, errorPayload(error.safeMessage(), error.gatewayCode()))
+            if (!call.isCanceled()) emit("onNativeAnalysis", id, JSONObject(errorPayload(error.safeMessage(), error.gatewayCode()))
+                .put("retryable",error.gatewayCode()==null || error.gatewayCode() in listOf(429,502,504)).toString()) { !pending.isCanceled() && newestAnalysis.get()===pending }
         } finally {
             calls.remove(id, pending)
         }

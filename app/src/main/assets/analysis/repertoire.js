@@ -9,6 +9,7 @@
     let catalog = [], catalogReady = false, installed = false, settings = {}, results = [], error = '', busy = false;
     let help = false, adjusting = null, expanded = '', generation = 0, lookupId = null, commentEditor = null, addedTo = '';
     const cache = new Map();
+    const markerCache = new Map();
     let cacheBytes = 0, editing = false, addedMessage = '', lastChange = null;
     let suspended = api.isActive ? !api.isActive() : false;
     const native = () => window.InstinctaZeroNative;
@@ -24,9 +25,17 @@
     const markerEnabled = () => settings._bookMarker !== false;
     function save() { native()?.saveRepertoireSettings?.(JSON.stringify(settings)); }
     function updateMarker() {
-      const kind = results.some(rep => rep.theory) ? 'theory' : '';
-      const active = results.filter(rep => rep.theory);
-      api.marker?.(markerEnabled() && api.hasMoves() ? kind : '', active.length > 0 && active.every(rep => rep.end_of_line));
+      const fen=api.context().fen,ids=selected();
+      const facts=ids.map(id=>markerCache.get(id+'\n'+fen)).filter(Boolean);
+      const active = facts.filter(rep => rep.theory);
+      if(suspended){api.marker?.('',false);return;}
+      api.marker?.(markerEnabled() && api.hasMoves() && active.length ? 'theory' : '', facts.length===ids.length && active.length>0 && active.every(rep=>rep.end_of_line));
+    }
+    function rememberMarkers(data) {
+      for(const rep of data)if(rep.fen && typeof rep.theory==='boolean'){
+        const key=rep.id+'\n'+rep.fen;markerCache.delete(key);markerCache.set(key,{theory:rep.theory,end_of_line:!!rep.end_of_line});
+      }
+      while(markerCache.size>1024)markerCache.delete(markerCache.keys().next().value);
     }
     const cacheKey = (context, ids) => JSON.stringify([context.root.split(' ').slice(0,4).join(' '), [...ids].sort(), context.history]);
     function remember(key, data, complete) {
@@ -47,9 +56,10 @@
       native()?.cancelRepertoireLookup?.();
     }
     function invalidate() {
-      cache.clear(); cacheBytes = 0; stopLookup();
+      cache.clear(); markerCache.clear(); cacheBytes = 0; stopLookup();
     }
     function cacheResult(context, ids, data) {
+      rememberMarkers(data);
       // Child-position coverage/comments already merge every source move order. Project
       // those facts immediately for board moves and navigation without rewriting the tree.
       const moves = new Set(data.flatMap(rep => (rep.moves || []).map(move => move.uci)));
@@ -57,7 +67,7 @@
         const next = {...context, history:[...context.history,uci]};
         const projected = data.map(rep => {
           const child = (rep.moves || []).find(move => move.uci === uci);
-          if (child?.position) return {...child.position,id:rep.id,name:rep.name,side:rep.side,moves:[],pending:true};
+          if (child?.position) { rememberMarkers([{...child.position,id:rep.id}]);return {...child.position,id:rep.id,name:rep.name,side:rep.side,moves:[],pending:true}; }
           return {id:rep.id, name:rep.name, side:rep.side, theory:!!child?.theory,
             alternative:!!child?.alternative, kind:child?.kind || 'unknown',
             deviation:child?.deviation ?? (rep.deviation || next.history.length),
@@ -75,6 +85,14 @@
       catch (_) { error = 'Repertoire request could not start.'; busy = false; editing = false; api.render(); }
     }
     window.InstinctaZero = window.InstinctaZero || {};
+    window.InstinctaZero.onNativeRepertoireRestored=()=>{
+      try { settings=JSON.parse(native()?.getRepertoireSettings?.() || '{}') || {}; } catch (_) { settings={}; }
+      invalidate();results=[];adjusting=null;expanded='';addedMessage='Repertoire backup restored.';loadCatalog();
+    };
+    window.InstinctaZero.onNativeRepertoireMarker=(id,raw)=>{
+      if(id!==lookupId || suspended)return;
+      try{const data=typeof raw==='string'?JSON.parse(raw):raw;rememberMarkers(data.results || []);updateMarker();}catch(_){}
+    };
     window.InstinctaZero.onNativeRepertoire = (id, raw) => {
       const done = pending.get(id); if (!done) return; pending.delete(id);
       try { done(typeof raw === 'string' ? JSON.parse(raw) : raw); }
@@ -100,11 +118,12 @@
       const context = api.context(), ids = selected(), key = cacheKey(context,ids), cached = cache.get(key);
       results = cached?.data || []; adjusting = null; expanded = ''; addedMessage = ''; updateMarker();
       api.render(); // Clear old play/edit targets; known markers appear before the native call.
-      if (suspended || !ids.length || cached?.complete) {
+      const needIntersection=api.repertoireVisible?.() && !results.every(rep=>Number.isInteger(rep.intersection));
+      if (suspended || !ids.length || (cached?.complete && !needIntersection)) {
         if (cached) { cache.delete(key); cache.set(key,cached); }
         return;
       }
-      lookupId = request({...context, selected:ids, action:'lookup'}, data => {
+      lookupId = request({...context, selected:ids, action:'lookup',intersections:!!api.repertoireVisible?.()}, data => {
         if (current !== generation) return;
         if (data.event === 'error') error = data.message;
         else { error = ''; results = data.results || []; cacheResult(context,ids,results); }
@@ -113,6 +132,8 @@
     }
     const button = (action, text, extra = '') => '<button class="rep-button" data-rep-action="' + action + '" ' + extra + '>' + text + '</button>';
     function badge(move) {
+      if(move.recommendation==='main' || move.recommendation==='unassigned' || move.recommendation==='reply')return '';
+      if(move.recommendation==='alternative')return '<span class="rep-badge optional">Alternative</span>';
       const text = move.theory ? move.kind === 'alternative' ? 'Alternative' : move.alternative ? 'Optional line' : '' : labels[move.kind] || 'Informational';
       return text ? '<span class="rep-badge ' + (move.theory ? 'optional' : 'info') + '">' + escape(text) + '</span>' : '';
     }
@@ -132,7 +153,7 @@
       }).join('') + '<p class="rep-hint">Saved for this board or game. New games start with your latest selection.</p>';
     }
     function helpHtml() {
-      return '<div class="rep-guide"><h3>Comments as you go</h3><p>The position’s note appears above the continuations. Tap it to read the full comment, or tap a comment bubble beside a move to read ahead without playing it. Distinct source comments are kept, including notes reached through other move orders.</p><h3>Theory and alternatives</h3><p>The book follows the board position, not your move order. Transpositions automatically show all recorded continuations and position comments; your played game stays unchanged. Main repertoire moves have no extra label. Alternatives are valid choices by your repertoire colour. Opponent replies keep regular labels. Purely informational analysis, refutations and model-game tails remain readable but do not count as theory. A move covered elsewhere at the same position is still a book move.</p><h3>Book markers</h3><p>A book marks a covered position in a selected repertoire, including transpositions. A small finish flag means there are no further active book moves from that position, even if informational moves remain. Known positions show their marker immediately; visited positions are cached. Turn markers off here if you prefer a plain board.</p><h3>Separate or combined</h3><p>Choose one or several repertoires. Combined shows each move once; comments and adjustments retain their source. The focused view only filters the move list; board markers check all selected repertoires.</p><h3>Adjust safely</h3><p>Use the sliders beside a move to make an active own-side choice optional, exclude it, or restore its original label. New adjustments apply to that position and move in the chosen repertoire, regardless of move order. A later transposition can rejoin an independently covered position. To extend a line, play a new move or sequence on the board, then tap <b>Add move</b> or <b>Add line</b> below the continuations. The closest covered repertoire is chosen automatically; a tie still asks. The destination is shown before adding. Only the missing continuation is added. Create and rename your own repertoires in Home → Repertoire library. Use Write / edit comment beside an adjusted move or in position settings. Comments follow the position through transpositions; Restore source text brings back the unchanged PGN notes. Edits save on this phone, not to the PC. Tap <b>Undo</b> after a change, or <b>Undo last repertoire change</b> in settings later—even after restarting. It reverses the whole last edit without moving the analysis board. One step, no redo; changes made before v0.7.3 have no undo record. Source PGNs and archived Lichess games are never rewritten. Purely informational source lines must be reviewed in the PC annotations before becoming active.</p></div>';
+      return '<div class="rep-guide"><h3>Comments as you go</h3><p>The position’s note appears above the continuations. Tap it to read the full comment, or tap a comment bubble beside a move to read ahead without playing it. Distinct source comments are kept, including notes reached through other move orders.</p><h3>Theory and alternatives</h3><p>The book follows the board position, not your move order. Transpositions automatically show all recorded continuations and position comments; your played game stays unchanged. Main repertoire moves have no extra label. Alternatives are valid choices by your repertoire colour. Opponent replies keep regular labels. Purely informational analysis, refutations and model-game tails remain readable but do not count as theory. A move covered elsewhere at the same position is still a book move.</p><h3>Book markers</h3><p>A book marks a covered position in a selected repertoire, including transpositions. A small finish flag means there are no further active book moves from that position, even if informational moves remain. Known positions show their marker immediately; visited positions are cached. Turn markers off here if you prefer a plain board.</p><h3>Separate or combined</h3><p>Choose one or several repertoires. Combined shows each move once; comments and adjustments retain their source. The focused view only filters the move list; board markers check all selected repertoires.</p><h3>Adjust safely</h3><p>Use the sliders beside a move to choose the main recommendation, make another choice optional, delete it, or restore its original label. If imported choices are all alternatives, they are left unranked until you choose a main recommendation. Deleted moves disappear from this repertoire at every transposition. Their dependent data stays recoverable: Undo or Deleted moves in settings restores the route; independent routes stay available. New adjustments apply to that position and move in the chosen repertoire, regardless of move order. A later transposition can rejoin an independently covered position. To extend a line, play a new move or sequence on the board, then tap <b>Add move</b> or <b>Add line</b> below the continuations. The closest covered repertoire is chosen automatically; a tie still asks. The destination is shown before adding. Only the missing continuation is added. Create and rename your own repertoires in Home → Repertoire library. Use Write / edit comment beside an adjusted move or in position settings. Comments follow the position through transpositions; Restore source text brings back the unchanged PGN notes. Edits save on this phone immediately and back up privately to your paired PC when reachable. Home → Repertoire library → Backups and restore lists up to 100 versions. A restore first backs up current edits. On a replacement phone, pair the same PC, download its library, then restore a version. Tap <b>Undo</b> after a change, or <b>Undo last repertoire change</b> in settings later—even after restarting. It reverses the whole last edit without moving the analysis board. One step, no redo; changes made before v0.7.3 have no undo record. Source PGNs and archived Lichess games are never rewritten. To add only the last response from a known informational position, tap Add just-played move. Earlier informational labels stay intact. In the Repertoire tab, the return button also jumps to your nearest earlier repertoire choice or departure position, including transpositions. Other tabs retain notation-only Return to mainline.</p></div>';
     }
     function commentList(entries) {
       const unique = new Map();
@@ -159,9 +180,9 @@
         grouped.get(move.uci).push({rep,move});
       }
       return [...grouped].map(([uci, entries]) => {
-        const best = entries.find(e => e.move.theory && !e.move.alternative) || entries.find(e => e.move.theory) || entries[0];
+        const best = entries.find(e=>e.move.recommendation==='main') || entries.find(e => e.move.theory && !e.move.alternative) || entries.find(e => e.move.theory) || entries[0];
         return {uci, entries, best, comments:commentList(entries)};
-      }).sort((a,b) => Number(b.best.move.theory) - Number(a.best.move.theory) || Number(a.best.move.alternative) - Number(b.best.move.alternative));
+      }).sort((a,b) => Number(b.best.move.theory) - Number(a.best.move.theory) || Number(b.best.move.recommendation==='main')-Number(a.best.move.recommendation==='main') || Number(a.best.move.alternative) - Number(b.best.move.alternative));
     }
     function extensionTarget(candidates = visible().filter(rep => rep.can_add)) {
       if (candidates.length === 1) return candidates[0];
@@ -192,9 +213,12 @@
     }
     function adjustment() {
       const {rep, move} = adjusting;
+      if(adjusting.confirmDelete)return '<h3>Delete '+escape(move.san)+'?</h3><p>Removes this repertoire’s move at this position, including transpositions. Dependent lines lose this route, but their data and other routes stay intact. Original PGNs are unchanged.</p><p>Use Undo or Deleted moves in settings to restore it.</p>'+button('confirm-delete','Delete move')+button('cancel','Cancel');
       return '<div class="rep-adjust-header"><h3>' + escape(move.san) + '<small>' + escape(rep.name) + '</small></h3>' + button('cancel','Done') + '</div><div class="rep-button-stack">' +
         button('move-comment','<span class="fa" aria-hidden="true">&#xf040;</span> &nbsp; Write / edit comment') +
-        (move.theory && move.own ? button('alternative','☆ &nbsp; Make optional alternative') : '') + button('analysis','⊖ &nbsp; Exclude branch on this phone') +
+        (move.theory && move.own && move.recommendation!=='main' ? button('main','★ &nbsp; Make main recommendation') : '') +
+        (move.theory && move.own && (rep.moves || []).some(other=>other.uci!==move.uci && other.recommendation==='main') ? button('alternative','☆ &nbsp; Make optional alternative') : '') + button('analysis','⊖ &nbsp; Exclude branch on this phone') +
+        button('delete-move','<span class="fa" aria-hidden="true">&#xf1f8;</span> &nbsp; Delete repertoire move') +
         (move.edited ? button('reset','↶ &nbsp; Restore original / remove local addition') : '') + '</div><p class="rep-hint">' + escape(move.reason) + '</p>';
     }
     function settingsHtml() {
@@ -205,6 +229,8 @@
       if (lastChange) content += '<button class="rep-undo-setting" data-rep-action="undo" data-rep-undo-token="' + escape(lastChange.token) + '" aria-label="Undo last repertoire change"' + (editing ? ' disabled' : '') + '><span class="fa" aria-hidden="true">&#xf0e2;</span><span>Undo last repertoire change<small>' + escape(lastChange.label + ' · ' + lastChange.name) + '</small></span></button>';
       if (installed) {
         content += selection();
+        const deleted=visible().flatMap(rep=>(rep.deleted_moves || []).map(move=>({rep,move})));
+        if(deleted.length)content+='<div class="rep-section-label">Deleted moves here</div>'+deleted.map(({rep,move})=>button('restore-move','↶ Restore '+escape(move.san)+' · '+escape(rep.name),'data-rep-id="'+escape(rep.id)+'" data-rep-uci="'+escape(move.uci)+'"')).join('');
         const commentable = visible().filter(rep => rep.known || rep.theory);
         if (commentable.length) content += '<div class="rep-section-label">Position comments</div><div class="rep-button-stack">' + commentable.map(rep => button('position-comment','<span class="fa" aria-hidden="true">&#xf040;</span> &nbsp; ' + escape(rep.name),'data-rep-id="' + escape(rep.id) + '"')).join('') + '</div>';
         if (selected().length > 1) content += '<div class="rep-section-label">Move list</div><div class="rep-filters"><button data-rep-focus="" class="' + (!focus() ? 'selected' : '') + '">Combined</button>' + catalog.filter(rep => selected().includes(rep.id)).map(rep => '<button data-rep-focus="' + escape(rep.id) + '" class="' + (focus() === rep.id ? 'selected' : '') + '">' + escape(rep.name) + '</button>').join('') + '</div>';
@@ -212,6 +238,7 @@
         if (extendable.length) content += '<div class="rep-section-label">Extend a repertoire</div><div class="rep-button-stack">' + extendable.map(rep => button('add','+ Add current line · ' + escape(rep.name),'data-rep-id="' + escape(rep.id) + '"' + (editing ? ' disabled' : ''))).join('') + '</div>';
       }
       if(native()?.openRepertoireLibrary) content += '<div class="rep-footer">' + button('manage-library','<span class="fa" aria-hidden="true">&#xf02d;</span> &nbsp; Create / manage repertoires') + '</div>';
+      if(native()?.openRepertoireBackups)content+='<div class="rep-footer">'+button('backups','<span class="fa" aria-hidden="true">&#xf0ee;</span> &nbsp; Backups and restore')+'</div>';
       content += '<div class="rep-footer">' + button('download',busy ? 'Downloading…' : installed ? '↻ Update from PC' : 'Download from PC',busy ? 'disabled' : '') + button('help',help ? 'Hide guide' : 'How to use') + '</div>';
       if (help) content += helpHtml();
       return '<div class="repertoire-panel rep-settings">' + content + '</div>';
@@ -225,6 +252,7 @@
       const currentComments = commentList(visible().map(rep => ({rep,move:rep})));
       if (currentComments.length) content += '<button class="rep-current-note" data-rep-comment="current" aria-expanded="' + (expanded === 'current') + '" aria-label="' + (api.hasMoves() ? 'Comment on played move' : 'Comment on position') + '"><span class="fa" aria-hidden="true">&#xf075;</span><span>' + escape(currentComments[0].text) + '</span><span aria-hidden="true">' + (expanded === 'current' ? '−' : '+') + '</span></button>' + (expanded === 'current' ? '<div class="rep-comments">' + commentsHtml(currentComments) + commentActions(visible().filter(rep => rep.known || rep.theory).map(rep => ({rep,move:rep}))) + '</div>' : '');
       const moves = rows();
+      if(visible().some(rep=>(rep.moves || []).some(move=>move.recommendation==='unassigned')))content+='<p class="rep-hint">Choose a main recommendation using the sliders beside a move. No move has been ranked automatically.</p>';
       for (const row of moves) {
         content += '<div class="rep-move"><button data-rep-play="' + escape(row.uci) + '"><b>' + escape(row.best.move.san) + '</b>' + badge(row.best.move) + '</button>' +
           (row.comments.length ? '<button class="rep-comment-toggle fa" data-rep-comment="' + escape(row.uci) + '" aria-label="Comments on ' + escape(row.best.move.san) + '" aria-expanded="' + (expanded === row.uci) + '">&#xf075;</button>' : '') +
@@ -235,7 +263,9 @@
       const extendable = visible().filter(rep => rep.can_add);
       const automatic = extensionTarget(extendable);
       if (extendable.length) content += '<div class="rep-extend">' + button('quick-add',(automatic ? automatic.add_count === 1 : extendable.every(rep => rep.add_count === 1)) ? '+ Add move to repertoire' : '+ Add line to repertoire',editing ? 'disabled' : '') + (automatic ? '<small class="rep-add-target">' + escape(automatic.name) + '</small>' : '') + (expanded === 'add' ? '<div class="rep-edit-sources">' + extendable.map(rep => button('add',escape(rep.name),'data-rep-id="' + escape(rep.id) + '"' + (editing ? ' disabled' : ''))).join('') + '</div>' : '') + '</div>';
-      if (!moves.length && !extendable.length) content += '<p class="rep-hint">' + (ended.length ? 'Play on the board to extend this line.' : !results.length || visible().some(rep => rep.pending) ? 'Checking the position…' : 'No recorded continuation.') + '</p>';
+      const played=visible().filter(rep=>rep.can_add_move && (!rep.can_add || rep.add_count>1));
+      if(played.length)content+='<div class="rep-extend">'+button('add-played','+ Add just-played '+escape(api.context().entries.at(-1)?.san || 'move'),editing?'disabled':'')+(played.length===1?'<small class="rep-add-target">'+escape(played[0].name)+'</small>':'')+(played.some(rep=>rep.add_move_independent)?'<p class="rep-hint">Adds this response only; earlier informational or excluded moves keep their labels.</p>':'')+(expanded==='played'?played.map(rep=>button('save-played',escape(rep.name),'data-rep-id="'+escape(rep.id)+'"')).join(''):'')+'</div>';
+      if (!moves.length && !extendable.length && !played.length) content += '<p class="rep-hint">' + (ended.length ? 'Play on the board to extend this line.' : !results.length || visible().some(rep => rep.pending) ? 'Checking the position…' : 'No recorded continuation.') + '</p>';
       return '<div class="repertoire-panel rep-lines">' + content + '</div>';
     }
     function saveEdit(id, kind, history, extra = {}) {
@@ -247,7 +277,7 @@
         editing = false; invalidate();
         if ('undo' in data) lastChange = data.undo;
         if (data.event === 'error') { error = data.message; api.render(); }
-        else { error = ''; commentEditor = null; refresh(); if (kind === 'comment' || kind === 'reset_comment') api.closeSettings(); if (isCurrent()) { addedMessage = kind === 'add' ? 'Added to ' + name : (lastChange?.label || 'Updated repertoire') + ' · ' + name; addedTo = kind === 'add' ? id : ''; api.render(); } }
+        else { error = ''; commentEditor = null; refresh(); if (kind === 'comment' || kind === 'reset_comment') api.closeSettings(); if (isCurrent()) { addedMessage = kind === 'add' || kind==='add_move' ? 'Added to ' + name : (lastChange?.label || 'Updated repertoire') + ' · ' + name; addedTo = kind === 'add' || kind==='add_move' ? id : ''; api.render(); } }
       });
     }
     function undoLastChange(token) {
@@ -287,6 +317,13 @@
       panel.querySelectorAll('[data-rep-source]').forEach(el => el.onclick = () => { const [id,uci] = el.dataset.repSource.split(':'); const rep = results.find(r => r.id === id); if (rep) editMove(rep,rep.moves.find(move => move.uci === uci)); });
       panel.querySelectorAll('[data-rep-action]').forEach(el => el.onclick = () => {
         const action = el.dataset.repAction;
+        if(action==='delete-move'){adjusting.confirmDelete=true;api.render();return;}
+        if(action==='confirm-delete'){saveEdit(adjusting.rep.id,'delete',[...api.context().history,adjusting.move.uci]);return;}
+        if(action==='restore-move'){saveEdit(el.dataset.repId,'restore_move',[...api.context().history,el.dataset.repUci]);return;}
+        if(action==='add-played' || action==='save-played'){
+          const candidates=visible().filter(rep=>rep.can_add_move),target=action==='save-played'?candidates.find(rep=>rep.id===el.dataset.repId):candidates.length===1?candidates[0]:null;
+          if(target)saveEdit(target.id,'add_move',api.context().history);else{expanded=expanded==='played'?'':'played';api.render();}return;
+        }
         if(action === 'manage-library') { native()?.openRepertoireLibrary?.(); return; }
         if (action === 'position-comment' || action === 'added-comment') {
           const rep = results.find(rep => rep.id === (action === 'added-comment' ? addedTo : el.dataset.repId));
@@ -302,6 +339,7 @@
           saveEdit(e.id,action === 'save-comment' ? 'comment' : 'reset_comment',[],{fen:e.fen,comment:e.text,entries:[]}); return;
         }
         if (action === 'choose') { api.settings(); return; }
+        if (action === 'backups') { native()?.openRepertoireBackups?.();return; }
         if (action === 'undo') { undoLastChange(el.dataset.repUndoToken); return; }
         if (action === 'marker') { settings._bookMarker = !markerEnabled(); save(); updateMarker(); }
         else if (action === 'help') help = !help;
@@ -325,6 +363,7 @@
     function summary() { if (!results.length) return ''; if (results.length === 1) return status(results[0]); const count = results.filter(r => r.theory).length; return count ? count + '/' + results.length + ' repertoires' : 'Outside repertoires'; }
     setTimeout(() => loadCatalog(), 0);
     return {html, settingsHtml, bind, refresh, summary, updateMarker,
+      intersection:() => Math.max(-1,...visible().map(rep=>Number.isInteger(rep.intersection)?rep.intersection:-1)),
       privacyChanged:() => { if(commentEditor){commentEditor.revealed=false;document.activeElement?.blur?.();} },
       setActive:(active,refreshNow = true) => { suspended = !active; if(suspended) stopLookup(); else if(refreshNow) refresh(); },
       beginGame:() => { suspended = true; stopLookup(); results = []; error = ''; expanded = ''; adjusting = commentEditor = null; addedMessage = ''; addedTo = ''; updateMarker(); },

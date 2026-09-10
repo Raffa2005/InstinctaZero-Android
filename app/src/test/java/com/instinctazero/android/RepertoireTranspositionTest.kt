@@ -131,6 +131,20 @@ class RepertoireTranspositionTest {
         assertFalse(other.getBoolean("known")); assertTrue(active(other).isEmpty())
         assertArrayEquals(original,File(RuntimeEnvironment.getApplication().filesDir,"mobile_repertoire.sqlite").readBytes())
     }
+    @Test fun deletingAnAssociationKeepsIndependentTranspositionRoutesAndRestoresDependentMoves() {
+        val before=request("reported",4);before.getJSONArray("history").put("g1f3")
+        store.edit(before.put("id","qga").put("kind","delete"))
+        assertFalse(lookup("reported",5).getBoolean("theory"))
+        assertTrue(lookup("reported").getBoolean("theory"));assertEquals(setOf("f1d1","e3e4"),active(lookup("canonical")))
+        store.undo(store.undoInfo()!!.getString("token"))
+        adjust("reported","f1d1","delete")
+        assertEquals(setOf("e3e4"),active(lookup("canonical")));assertFalse(lookup("rd1",17).getBoolean("theory"))
+        assertEquals("f1d1",lookup("reported").getJSONArray("deleted_moves").getJSONObject(0).getString("uci"))
+        val backup=store.backupSnapshot();adjust("reported","f1d1","restore_move");assertTrue(lookup("rd1",17).getBoolean("theory"))
+        store.restoreBackup(backup);assertFalse(lookup("rd1",17).getBoolean("theory"))
+        store.undo(store.undoInfo()!!.getString("token"));assertTrue(lookup("rd1",17).getBoolean("theory"))
+        assertArrayEquals(original,File(RuntimeEnvironment.getApplication().filesDir,"mobile_repertoire.sqlite").readBytes())
+    }
     @Test fun extendingATranspositionAddsOnlyTheNewEdgesAndUndoRemovesThemEverywhere() {
         val line = request("addition",18)
         assertEquals(2,store.lookup(line).getJSONArray("results").getJSONObject(0).getInt("add_count"))

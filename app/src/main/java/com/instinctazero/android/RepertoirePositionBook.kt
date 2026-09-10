@@ -32,7 +32,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
     private val activeCache = mutableMapOf<String,Boolean>()
     private val positionEdits = mutableMapOf<String,JSONObject?>()
     private val transitions = mutableMapOf<Pair<String,String>,Transition>()
-    private val hasLabels = local.keys().asSequence().any { local.getJSONObject(it).optString("kind") in listOf("analysis","alternative") }
+    private val hasLabels = local.keys().asSequence().any { local.getJSONObject(it).let { e -> e.optBoolean("deleted") || e.optString("kind") in listOf("analysis","alternative","main") } }
     private val columns = db?.rawQuery("PRAGMA table_info(nodes)",null,cancellation)?.use { rows ->
         buildSet { while (rows.moveToNext()) add(rows.getString(1)) }
     } ?: emptySet()
@@ -41,6 +41,12 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
     private val select = "SELECT n.id,n.parent_id,n.path_id,n.uci,n.san,n.fen,p.fen,n.theory,n.line_alternative,n.kind,n.reason,n.comment,$intro,$sourceOrder " +
         "FROM nodes n LEFT JOIN nodes p ON p.id=n.parent_id WHERE n.repertoire_id=? AND "
     private fun read(where: String, args: Array<String>): List<Node> = readQuery(select+where,arrayOf(rep,*args))
+    private fun facts(where: String,args: Array<String>): List<Node> = readQuery((select+where).replace("n.comment,$intro","'', ''"),arrayOf(rep,*args))
+    private fun factsAt(fen: String) = facts("n.fen=?",arrayOf(fen)) + if(localRoot==fen) listOf(Node(0,0,"","","",fen,"",true,false,"repertoire","","","")) else emptyList()
+    private fun factsChildren(fen: String): List<Node> {
+        val (sql,args)=childQuery(fen)
+        return readQuery(sql.replace("n.comment,$intro","'', ''"),args)+localNodes.filter { it.before==fen }
+    }
     private fun readQuery(sql: String, args: Array<String>): List<Node> = db?.rawQuery(sql,args,cancellation)?.use { rows ->
         buildList { while (rows.moveToNext()) {
             cancellation?.throwIfCanceled()
@@ -85,7 +91,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
             cancellation?.throwIfCanceled()
             val parents=frontier.map { it.parent }.filter { it!=0L && it !in inherited && visited.add(it) }
             parents.filter { it !in nodesById }.chunked(400).forEach { chunk ->
-                read("n.id IN (${chunk.joinToString(",") { "?" }})",chunk.map(Long::toString).toTypedArray())
+                facts("n.id IN (${chunk.joinToString(",") { "?" }})",chunk.map(Long::toString).toTypedArray())
             }
             frontier=parents.mapNotNull { nodesById[it] }
         }
@@ -103,7 +109,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         var state = current?.let { inherited[it.id] } ?: Flags(true)
         for (entry in chain.asReversed()) {
             val edits = listOfNotNull(local.optJSONObject(entry.path),positionEdit(entry))
-            state = Flags(state.active && edits.none { it.optString("kind")=="analysis" },
+            state = Flags(state.active && edits.none { it.optString("kind")=="analysis" || it.optBoolean("deleted") },
                 state.optional || edits.any { it.optString("kind")=="alternative" })
             inherited[entry.id] = state
         }
@@ -126,12 +132,12 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         repeat(513) {
             if (!seen.add(key)) return Flags(false)
             val edit = local.optJSONObject(key)
-            if (edit?.optString("kind")=="analysis") return Flags(false)
+            if (edit?.optString("kind")=="analysis" || edit?.optBoolean("deleted")==true) return Flags(false)
             optional = optional || edit?.optString("kind")=="alternative"
             if (edit?.optBoolean("added")==true && edit.optString("scope")!="position") {
                 val entry = localNodes.firstOrNull { it.path==key } ?: return Flags(false)
                 val global = positionEdit(entry)
-                if (global?.optString("kind")=="analysis") return Flags(false)
+                if (global?.optString("kind")=="analysis" || global?.optBoolean("deleted")==true) return Flags(false)
                 optional = optional || global?.optString("kind")=="alternative"
                 key = edit.optString("parent")
             } else {
@@ -155,13 +161,16 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         }
         val edges = localNodes.filter { local.getJSONObject(it.path).optString("scope")=="position" }.groupBy { it.before }
         for (before in edges.keys) {
-            val source=at(before);prepareFlags(source)
+            val source=factsAt(before);prepareFlags(source)
             val active = source.map(::flags).filter { it.active }
             if (active.isNotEmpty()) reach(before,active.all { it.optional })
+            // A deliberate response added at a known informational position is independent
+            // of that incoming source label. It does not relabel the earlier source move.
+            if(edges[before].orEmpty().any { local.getJSONObject(it.path).let { e -> e.optBoolean("anchored") && !e.optBoolean("deleted") && e.optString("kind")!="analysis" } })reach(before,false)
         }
         while (queue.isNotEmpty()) {
             val before = queue.removeFirst()
-            for (n in edges[before].orEmpty()) if(n.kind!="analysis") {
+            for (n in edges[before].orEmpty()) if(n.kind!="analysis" && !local.getJSONObject(n.path).optBoolean("deleted")) {
                 val optional = reachable.getValue(before) || n.kind=="alternative"
                 result[n.path] = Flags(true,optional); reach(n.fen,optional)
             }
@@ -177,7 +186,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         // Departure/extension checks only need existence. Do not load hundreds of
         // duplicate occurrence comments at every historical position in an unedited book.
         if(!hasLabels && localNodes.isEmpty()) localRoot==fen || db?.rawQuery("SELECT 1 FROM nodes WHERE repertoire_id=? AND fen=? AND theory=1 LIMIT 1",arrayOf(rep,fen),cancellation)?.use { it.moveToFirst() } == true
-        else { val nodes=allAt(fen);prepareFlags(nodes);nodes.any { effective(it).active } }
+        else { val nodes=factsAt(fen)+localNodes.filter { it.fen==fen };prepareFlags(nodes);nodes.any { effective(it).active } }
         }.also { sharedActivity?.put(rep,fen,it) }
     }
     /** A new game can have hundreds of past positions. Resolve unedited membership
@@ -208,6 +217,48 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
     fun edges(fen: String): List<Edge> = edgeCache.getOrPut(fen) {
         mergeEdges(fen,sourceChildren(fen) + localNodes.filter { it.before==fen })
     }
+    fun deleted(edge: Edge) = local.optJSONObject(edgeKey(edge.before,edge.uci))?.optBoolean("deleted")==true
+    fun recommendation(edge: Edge,side: String): String {
+        if(!edge.active || deleted(edge))return "informational"
+        if(edge.before.split(' ')[1] != if(side=="white")"w" else "b")return "reply"
+        val candidates=edges(edge.before).filter { it.active && !deleted(it) }
+        val chosen=candidates.firstOrNull { local.optJSONObject(edgeKey(it.before,it.uci))?.optString("kind")=="main" }
+        if(chosen!=null)return if(chosen.uci==edge.uci)"main" else "alternative"
+        if(candidates.size==1)return "main"
+        if(candidates.none { !it.optional })return "unassigned"
+        return if(edge.optional)"alternative" else "main"
+    }
+    fun known(fen: String): Boolean = localRoot==fen || localNodes.any { it.fen==fen } || db?.rawQuery("SELECT 1 FROM nodes WHERE repertoire_id=? AND fen=? LIMIT 1",arrayOf(rep,fen),cancellation)?.use { it.moveToFirst() }==true
+    fun canAddMove(before: String,uci: String): Boolean {
+        if(!known(before) || localNodes.any { it.before==before && it.uci==uci })return false
+        if(db==null)return true
+        if("fen_before" !in columns)return edge(before,uci)==null
+        return db.rawQuery("SELECT 1 FROM nodes WHERE repertoire_id=? AND fen_before=? AND uci=? LIMIT 1",arrayOf(rep,before,uci),cancellation).use { !it.moveToFirst() }
+    }
+    /** Cheap first-stage UI facts; comments and full move details arrive separately. */
+    fun marker(fen: String): JSONObject {
+        val active=active(fen)
+        val continuation=if(!active)false else if(!hasLabels && localNodes.isEmpty() && "fen_before" in columns)
+            db?.rawQuery("SELECT 1 FROM nodes WHERE repertoire_id=? AND fen_before=? AND theory=1 LIMIT 1",arrayOf(rep,fen),cancellation)?.use { it.moveToFirst() }==true
+        else factsChildren(fen).let { prepareFlags(it);it.any { n -> effective(n).active } }
+        return JSONObject().put("fen",fen).put("theory",active).put("end_of_line",active && !continuation)
+    }
+    /** Nearest earlier position with another active book continuation, not a path ID. */
+    fun intersection(history: List<String>,moves: List<String>): Int {
+        if(history.size!=moves.size+1)return -1
+        val possible=mutableSetOf<String>()
+        if("fen_before" in columns)for(chunk in history.dropLast(1).distinct().chunked(400)) {
+            db?.rawQuery("SELECT DISTINCT fen_before FROM nodes WHERE repertoire_id=? AND fen_before IN (${chunk.joinToString(",") { "?" }}) AND theory=1",arrayOf(rep,*chunk.toTypedArray()),cancellation)?.use { while(it.moveToNext())possible.add(it.getString(0)) }
+        } else possible.addAll(history)
+        possible.addAll(localNodes.map { it.before })
+        for(ply in moves.indices.reversed()) {
+            cancellation?.throwIfCanceled()
+            if(history[ply] !in possible)continue
+            val candidates=factsChildren(history[ply]);prepareFlags(candidates)
+            if(candidates.any { it.uci!=moves[ply] && effective(it).active })return ply
+        }
+        return -1
+    }
     private fun edge(fen: String, uci: String): Edge? {
         edgeCache[fen]?.let { return it.find { e -> e.uci==uci } }
         // Extension validation needs just the played edge, not all alternative source
@@ -219,6 +270,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         val edge=edge(fen,uci)
         when {
             edge==null -> Transition.MISSING
+            deleted(edge) -> Transition.BLOCKED
             edge.active -> Transition.ACTIVE
             edge.nodes.all { it.added && it.kind!="analysis" } -> Transition.RECONNECTABLE
             else -> Transition.BLOCKED
@@ -264,6 +316,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         val own = edge.before.split(' ').getOrNull(1) == if(side=="white")"w" else "b"
         val target = status(edge.fen)
         return JSONObject().put("uci",edge.uci).put("san",edge.san).put("fen",edge.fen).put("theory",edge.active)
+            .put("recommendation",recommendation(edge,side)).put("deleted",deleted(edge))
             .put("alternative",edge.optional).put("own",own).put("kind",if(edge.active && edge.optional && own)"alternative" else edge.kind)
             .put("reason",edge.reason).put("edited",edge.edited).put("deviation",0)
             .put("comments",positionComments(edge.fen,comments(edge.nodes))).put("starting_comments",comments(edge.nodes,true))

@@ -1,7 +1,10 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.8.4). The display-only privacy mode uses persistent neutral aliases,
+(version 0.8.5). The repertoire editing, private PC backups, marker staging and
+analysis recovery update is described in [v0.8.5](release-v0.8.5.md). It requires
+the authenticated PC backup routes but no pairing reset or corpus redownload.
+The display-only privacy mode uses persistent neutral aliases,
 conceals mobile identity-bearing metadata and errors, and retains original account
 and game data. It needs no PC update. The focused editor update adds tool-independent dragging, tap
 toggles, readable coordinates and undoable Reverse coordinates. It needs no server
@@ -47,7 +50,10 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 32 / 0.8.4 release values;
+- versionCode/versionName are the intended 33 / 0.8.5 release values;
+- run the editing, backup and stream regressions and `repertoire-editing-ui.mjs`
+  against extracted APK assets, with `REPERTOIRE_EDIT_PREVIEW` pointing to the
+  private response fixture produced by `RepertoireEditingRegressionTest`;
 - run `AccountPrivacyTest` and `node web/test/privacy-ui.mjs` (also against extracted
   signed APK assets). Check Home, sidebar, Account / PC, both player colours,
   recycled game rows, raw account selection IDs, orientation/results, errors,
@@ -159,8 +165,10 @@ Before publishing, at minimum verify:
   and White-perspective value before the replacement search arrives;
 - forward navigation always chooses the first child at an intersection,
   regardless of which variation was created, visited, or restored;
-- Return to mainline replaces the size/minimize control, is disabled on the
-  mainline, and jumps from a variation to its nearest divergence intersection;
+- Return to mainline replaces the size/minimize control. Outside the repertoire
+  tab it is disabled on the mainline and jumps to the nearest notation divergence.
+  In the repertoire tab it also considers the selected/focused repertoire's
+  position-based intersections, without changing canonical forward navigation;
 - MainActivity is locked to portrait and its existing pause/resume persistence
   remains intact;
 - Home performs no archive sync or list construction. The separate Games screen

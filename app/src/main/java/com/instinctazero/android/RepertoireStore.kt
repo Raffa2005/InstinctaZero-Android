@@ -17,8 +17,9 @@ internal class RepertoireStore(context: Context) {
     private val prefs = context.getSharedPreferences("mobile_repertoire_preferences", Context.MODE_PRIVATE)
     private val editsFile = AtomicFile(File(context.filesDir, "mobile_repertoire_edits.json"))
     private val positionCache = RepertoireLookupCache()
+    private val markerCache = RepertoireLookupCache(512*1024,1024)
     private val activityCache = RepertoireActivityCache()
-    private fun clearCaches() { positionCache.clear();activityCache.clear() }
+    private fun clearCaches() { positionCache.clear();markerCache.clear();activityCache.clear() }
     private var undoRecord: JSONObject? = null
     private val edits: JSONObject by lazy {
         val saved = runCatching { JSONObject(String(editsFile.readFully(), Charsets.UTF_8)) }.getOrDefault(JSONObject())
@@ -157,10 +158,72 @@ internal class RepertoireStore(context: Context) {
         } catch (error: Exception) { restoreEdits(before); throw error }
         finally { clearCaches() }
     }
-    @Synchronized fun settings(): String = prefs.getString("settings", "{}") ?: "{}"
+    @Synchronized fun settings(): String = edits.optJSONObject("_settings")?.toString() ?: prefs.getString("settings", "{}") ?: "{}"
     @Synchronized fun saveSettings(raw: String) {
         require(raw.length <= 32 * 1024)
-        prefs.edit().putString("settings", JSONObject(raw).toString()).apply()
+        val before=edits.toString();val oldUndo=undoRecord?.toString()
+        try {
+            edits.put("_settings",JSONObject(raw));undoRecord?.put("after_hash",fingerprint(edits));persistEdits(undoRecord)
+            prefs.edit().putString("settings", JSONObject(raw).toString()).apply()
+        } catch(error: Exception) { restoreEdits(before);undoRecord=oldUndo?.let(::JSONObject);throw error }
+    }
+    /** Only repertoire edits, their last Undo and selection settings. Never credentials or games. */
+    @Synchronized fun backupSnapshot(): JSONObject {
+        val saved=JSONObject(edits.toString())
+        undoRecord?.let { saved.put("_undo",JSONObject(it.toString())) }
+        return JSONObject().put("v",1).put("edits",saved).put("settings",JSONObject(settings()))
+            .put("corpus",prefs.getString("fingerprint",""))
+    }
+    @Synchronized fun restoreBackup(snapshot: JSONObject) {
+        require(snapshot.optInt("v")==1 && snapshot.toString().toByteArray().size<=12*1024*1024) { "Unsupported repertoire backup." }
+        val replacement=JSONObject(snapshot.getJSONObject("edits").toString())
+        val settings=snapshot.getJSONObject("settings")
+        require(settings.toString().length<=32*1024)
+        val savedUndo=replacement.remove("_undo") as? JSONObject
+        val originalHash=fingerprint(replacement)
+        // Validate our own bounded format before replacing the atomic file. Preserve every
+        // supported legacy edge field and comment; the corpus itself is never overwritten.
+        for(rep in replacement.keys()) {
+            require(rep.length<=128 && replacement.optJSONObject(rep)!=null)
+            val data=replacement.getJSONObject(rep)
+            if(rep=="_settings")continue
+            if(rep=="_local_repertoires") {
+                require(data.length()<=64)
+                for(id in data.keys()) {
+                    val item=data.getJSONObject(id)
+                    require(id.matches(Regex("local_[a-f0-9]{32}")) && item.getString("name").length in 1..80)
+                    require(item.getString("side") in listOf("white","black") && item.getString("root").length<=100)
+                }
+            } else {
+                require(!rep.startsWith("_"))
+                for(key in data.keys()) {
+                    require(key.matches(Regex("[a-f0-9]{32}")))
+                    val edge=data.getJSONObject(key)
+                    require(edge.optString("kind") in listOf("","repertoire","analysis","alternative","main"))
+                    require(edge.optString("comment").length<=64*1024)
+                    if(edge.optBoolean("added")) {
+                        require(edge.getString("uci").matches(Regex("[a-h][1-8][a-h][1-8][qrbn]?")))
+                        require(edge.getString("fen").length<=100 && edge.getString("san").length<=32)
+                    }
+                }
+            }
+        }
+        val restoredUndo=savedUndo?.takeIf { runCatching {
+            it.getInt("v")==1 && it.getString("after_hash")==originalHash &&
+                listOf("token","repertoire","name","label").all { key -> it.getString(key).isNotBlank() } &&
+                it.getJSONArray("changes").let { changes -> changes.length() in 1..512 && (0 until changes.length()).all { i ->
+                    val change=changes.getJSONObject(i)
+                    change.getString("path").matches(Regex("[a-f0-9]{32}")) && change.has("before") && (change.isNull("before") || change.optJSONObject("before")!=null)
+                } }
+        }.getOrDefault(false) }
+        replacement.put("_settings",JSONObject(settings.toString()))
+        val before=edits.toString();val oldUndo=undoRecord?.toString()
+        try {
+            restoreEdits(replacement.toString());undoRecord=restoredUndo
+            undoRecord?.put("after_hash",fingerprint(edits));persistEdits(undoRecord)
+            prefs.edit().putString("settings",settings.toString()).apply()
+        } catch(error: Exception) { restoreEdits(before);undoRecord=oldUndo?.let(::JSONObject);throw error }
+        finally { clearCaches() }
     }
     @Synchronized fun catalog(): JSONObject {
         val library = localLibrary()
@@ -192,6 +255,19 @@ internal class RepertoireStore(context: Context) {
             position(entries.getJSONObject(it).getString("fen").also { fen -> require(fen.length<=100) })
         }
     }
+    @Synchronized fun markers(request: JSONObject,cancellation: CancellationSignal?=null): JSONObject {
+        val fen=position(request.getString("fen"));val selected=request.getJSONArray("selected");require(selected.length()<=16)
+        val results=JSONArray()
+        source().use { db ->
+            for(i in 0 until selected.length()) {
+                cancellation?.throwIfCanceled();val rep=selected.getString(i)
+                val result=markerCache.get(rep,fen) ?: RepertoirePositionBook(db,rep,overrides(rep),localRoot(rep),cancellation,activityCache).marker(fen)
+                    .put("id",rep).also { markerCache.put(rep,fen,it) }
+                results.put(result)
+            }
+        }
+        return JSONObject().put("results",results)
+    }
     @Synchronized fun lookup(request: JSONObject, cancellation: CancellationSignal? = null): JSONObject {
         cancellation?.throwIfCanceled()
         val moves = checkedMoves(request); val fen = position(request.getString("fen"))
@@ -208,7 +284,8 @@ internal class RepertoireStore(context: Context) {
                 val current = positionCache.get(rep,fen) ?: run {
                     val identity = identity(db,rep)
                     book.status(fen).put("id",rep).put("name",identity.first).put("side",identity.second)
-                        .put("moves",JSONArray(book.edges(fen).map { book.moveJson(it,identity.second) }))
+                        .put("moves",JSONArray(book.edges(fen).filterNot(book::deleted).map { book.moveJson(it,identity.second) }))
+                        .put("deleted_moves",JSONArray(book.edges(fen).filter(book::deleted).map { book.moveJson(it,identity.second) }))
                         .also { positionCache.put(rep,fen,it) }
                 }
                 // Identical positions may have different departure points and missing local
@@ -220,6 +297,10 @@ internal class RepertoireStore(context: Context) {
                 if (!current.getBoolean("theory") && moves.isNotEmpty()) {
                     current.put("deviation",if(anchor>=0)anchor+1 else 1)
                 }
+                val before=history.getOrNull(moves.size-1)
+                val canAddMove=before!=null && moves.isNotEmpty() && book.canAddMove(before,moves.last())
+                current.put("can_add_move",canAddMove).put("add_move_independent",canAddMove && !book.active(before!!))
+                if(request.optBoolean("intersections"))current.put("intersection",book.intersection(history,moves))
                 results.put(current.put("can_add",!additions.isNullOrEmpty()).put("add_count",additions?.size ?: 0))
             }
         }
@@ -236,7 +317,7 @@ internal class RepertoireStore(context: Context) {
     @Synchronized fun edit(request: JSONObject) {
         val rep = request.getString("id"); val moves = checkedMoves(request)
         val kind = request.getString("kind")
-        require(kind in listOf("analysis", "alternative", "reset", "add", "comment", "reset_comment"))
+        require(kind in listOf("analysis", "alternative", "main", "delete", "restore_move", "reset", "add", "add_move", "comment", "reset_comment"))
         require(moves.isNotEmpty() || kind in listOf("comment","reset_comment")) { "Choose a move first" }
         val before = edits.toString()
         val previousLocal = JSONObject(overrides(rep).toString())
@@ -257,6 +338,14 @@ internal class RepertoireStore(context: Context) {
                         require(text.length<=64*1024) { "This comment is too long." }
                         local.put(key,JSONObject().put("scope","comment").put("fen",fen).put("comment",text))
                     }
+                } else if (kind == "add_move") {
+                    val history=positionHistory(request,moves)
+                    require(history.size==moves.size+1 && moves.isNotEmpty()) { "The played move is unavailable." }
+                    val parent=history[moves.size-1];val uci=moves.last()
+                    require(book.canAddMove(parent,uci)) { "This response already exists, or its parent is not in this repertoire." }
+                    val san=request.getJSONArray("entries").getJSONObject(moves.size-1).getString("san").take(16)
+                    local.put(RepertoirePositionBook.edgeKey(parent,uci),JSONObject().put("added",true).put("scope","position")
+                        .put("kind","repertoire").put("anchored",!book.active(parent)).put("before",parent).put("fen",history.last()).put("uci",uci).put("san",san))
                 } else if (kind == "add") {
                     val entries = request.getJSONArray("entries")
                     require(entries.length() == moves.size)
@@ -273,15 +362,26 @@ internal class RepertoireStore(context: Context) {
                     val beforeFen = position(request.getString("fen")); val uci = moves.last()
                     val key = RepertoirePositionBook.edgeKey(beforeFen,uci)
                     val edge = book.edges(beforeFen).find { it.uci==uci }
-                    if (kind=="reset") {
+                    if(kind=="delete" || kind=="restore_move") {
+                        require(edge!=null) { "Choose a recorded repertoire move." }
+                        val value=local.optJSONObject(key) ?: JSONObject().put("scope","position").put("kind","repertoire")
+                            .put("before",beforeFen).put("fen",edge.fen).put("uci",uci).put("san",edge.san)
+                        if(kind=="delete")value.put("deleted",true) else value.remove("deleted")
+                        local.put(key,value)
+                    } else if (kind=="reset") {
                         removedAddition = local.optJSONObject(key)?.optBoolean("added") == true || edge?.nodes?.any { it.added } == true
                         local.remove(key)
                         edge?.nodes?.forEach { if(local.optJSONObject(it.path)?.optString("scope")!="position")local.remove(it.path) }
                     } else {
                         require(edge!=null) { "Add this move before adjusting it" }
-                        if (kind == "alternative") {
+                        if (kind == "alternative" || kind=="main") {
                             require(beforeFen.split(' ')[1] == if(identity.second=="white")"w" else "b") { "Only your repertoire colour introduces alternatives" }
                             require(edge.active) { "Only active theory can be an alternative" }
+                            require(!book.deleted(edge)) { "Restore the deleted move first." }
+                            if(kind=="alternative")require(book.edges(beforeFen).any { it.uci!=uci && book.recommendation(it,identity.second)=="main" }) { "Choose another main recommendation first." }
+                            if(kind=="main")book.edges(beforeFen).filter { it.uci!=uci }.forEach {
+                                local.optJSONObject(RepertoirePositionBook.edgeKey(beforeFen,it.uci))?.takeIf { it.optString("kind")=="main" }?.put("kind","alternative")
+                            }
                         }
                         local.put(key,(local.optJSONObject(key) ?: JSONObject()).put("scope","position").put("kind",kind)
                             .put("before",beforeFen).put("fen",edge.fen).put("uci",uci).put("san",edge.san))
@@ -297,7 +397,10 @@ internal class RepertoireStore(context: Context) {
             if (changes.length() == 0) { restoreEdits(before); return } // A no-op must not consume the previous undo.
             require(changes.length() <= 512) { "This edit affects too many saved entries to undo safely." }
             val label = when (kind) {
-                "add" -> if (changes.length() == 1) "Added move" else "Added ${changes.length()} moves"
+                "add", "add_move" -> if (changes.length() == 1) "Added move" else "Added ${changes.length()} moves"
+                "main" -> "Chose main recommendation"
+                "delete" -> "Deleted repertoire move"
+                "restore_move" -> "Restored repertoire move"
                 "analysis" -> "Excluded branch"
                 "alternative" -> "Made optional alternative"
                 "comment" -> "Edited comment"

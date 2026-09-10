@@ -109,6 +109,60 @@ class RepertoireStoreTest {
     private fun result(moves: List<String>) = store.lookup(request(moves)).getJSONArray("results").getJSONObject(0)
     private fun edit(moves: List<String>, kind: String, rep: String = "white") = store.edit(request(moves).put("id",rep).put("kind",kind).put("fen",fen(moves.dropLast(1))))
 
+    @Test fun mainRecommendationsArePositionScopedRecoverableAndNeverAllAlternatives() {
+        addLine(listOf("d2d4"))
+        fun recs()=result(emptyList()).getJSONArray("moves").let { a -> (0 until a.length()).associate { a.getJSONObject(it).let { m -> m.getString("uci") to m.getString("recommendation") } } }
+        edit(listOf("d2d4"),"main")
+        assertEquals("main",recs()["d2d4"]);assertEquals("alternative",recs()["e2e4"])
+        edit(listOf("e2e4"),"main")
+        assertEquals("main",recs()["e2e4"]);assertEquals("alternative",recs()["d2d4"])
+        assertThrows(IllegalArgumentException::class.java) { edit(listOf("e2e4"),"alternative") }
+        edit(listOf("e2e4"),"delete")
+        assertEquals("main",recs()["d2d4"]);assertFalse(recs().containsKey("e2e4"))
+        store.undo(store.undoInfo()!!.getString("token"));assertEquals("main",recs()["e2e4"])
+        // Imported/legacy all-alternative labels are ambiguous, not an invented ranking.
+        val backup=store.backupSnapshot();val local=backup.getJSONObject("edits").getJSONObject("white")
+        local.getJSONObject(RepertoirePositionBook.edgeKey(fen(emptyList()),"e2e4")).put("kind","alternative")
+        store.restoreBackup(backup)
+        assertEquals(setOf("unassigned"),recs().values.toSet())
+        edit(listOf("d2d4"),"main");assertEquals("main",recs()["d2d4"])
+        assertArrayEquals(bytes,File(context.filesDir,"mobile_repertoire.sqlite").readBytes())
+    }
+    @Test fun repertoireIntersectionFindsLastPositionEvenThroughADifferentMoveOrder() {
+        addLine(listOf("e2e4","c7c5","g1f3","b8c6"))
+        val route=listOf("g1f3","c7c5","e2e4")
+        // At the transposed position a recorded ...Nc6 is a choice even when absent from notation.
+        val req=request(route).put("history",JSONArray(route+"g8f6"))
+        req.getJSONArray("entries").put(JSONObject().put("san","Nf6").put("fen","rnbqkb1r/pp1ppppp/5n2/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq -"))
+        req.put("fen",req.getJSONArray("entries").getJSONObject(3).getString("fen")).put("intersections",true)
+        assertEquals(3,store.lookup(req).getJSONArray("results").getJSONObject(0).getInt("intersection"))
+        edit(listOf("e2e4","c7c5","g1f3","b8c6"),"delete")
+        assertTrue(store.lookup(req).getJSONArray("results").getJSONObject(0).getInt("intersection")<3)
+        store.undo(store.undoInfo()!!.getString("token"))
+        assertEquals(3,store.lookup(req).getJSONArray("results").getJSONObject(0).getInt("intersection"))
+        req.put("selected",JSONArray().put("black"))
+        assertTrue(store.lookup(req).getJSONArray("results").getJSONObject(0).getInt("intersection")<3)
+    }
+    @Test fun backupRestoresAllEditsSettingsAndUndoWithoutTouchingGamesOrPgNs() {
+        val id=store.saveRepertoire(JSONObject().put("name","Private local book").put("side","black")).getString("created_id")
+        addLine(listOf("d2d4"));edit(listOf("d2d4"),"main");edit(listOf("e2e4"),"delete")
+        val longComment="Full commentary. ".repeat(2500)
+        store.edit(request(listOf("d2d4")).put("id","white").put("kind","comment").put("comment",longComment))
+        store.saveSettings(JSONObject().put("_selected",JSONArray().put(id).put("white")).put("_bookMarker",false).toString())
+        val backup=store.backupSnapshot();val token=store.undoInfo()!!.getString("token")
+        val pgn=File(context.filesDir,"original.pgn").apply { writeText("[White \"Private name\"]\n1. e4 *") }
+        val untouched=pgn.readBytes();val raw=store.lookup(request(emptyList())).toString()
+        edit(listOf("e2e4"),"restore_move");store.saveSettings("{}")
+        store.restoreBackup(JSONObject(backup.toString()));store=RepertoireStore(context)
+        assertEquals(raw,store.lookup(request(emptyList())).toString());assertFalse(JSONObject(store.settings()).getBoolean("_bookMarker"))
+        assertEquals(longComment,result(listOf("d2d4")).getJSONArray("comments").getString(0))
+        store.undo(token);assertEquals(0,result(listOf("d2d4")).getJSONArray("comments").length())
+        assertArrayEquals(untouched,pgn.readBytes());assertArrayEquals(bytes,File(context.filesDir,"mobile_repertoire.sqlite").readBytes())
+        val before=store.backupSnapshot().toString()
+        assertThrows(IllegalArgumentException::class.java) { store.restoreBackup(JSONObject(backup.toString()).put("v",9)) }
+        assertEquals(before,store.backupSnapshot().toString())
+    }
+
     @Test fun activeAndInformationalOccurrencesCoexistAndTerminalTheoryIsValid() {
         assertTrue(result(listOf("e2e4")).getBoolean("theory"))
         val terminal = result(listOf("e2e4","e7e5","g1f3","b8c6"))
@@ -131,10 +185,13 @@ class RepertoireStoreTest {
         edit(listOf("e2e4"),"reset"); assertTrue(result(listOf("e2e4")).getBoolean("theory"))
     }
     @Test fun onlyOwnSideCanIntroduceAlternatives() {
+        assertThrows(IllegalArgumentException::class.java) { edit(listOf("e2e4"),"alternative") }
+        addLine(listOf("d2d4"))
         edit(listOf("e2e4"),"alternative")
         assertTrue(result(listOf("e2e4","e7e5")).getBoolean("alternative"))
         assertEquals("repertoire",result(listOf("e2e4","e7e5")).getString("kind"))
         assertThrows(IllegalArgumentException::class.java) { edit(listOf("e2e4","e7e5"),"alternative") }
+        store.edit(request(listOf("e2e4","c7c5"),listOf("black")).put("id","black").put("kind","add"))
         edit(listOf("e2e4","e7e5"),"alternative","black")
     }
     @Test fun addingAndRemovingLocalLinesDoesNotChangeSourceOrCrossExcludedBridges() {
@@ -346,7 +403,7 @@ class RepertoireStoreTest {
     private fun addLine(moves: List<String>, rep: String = "white") = store.edit(request(moves).put("id",rep).put("kind","add")
         .put("entries",entries(moves)))
     private fun editsWithoutUndo(): Map<String, Map<String, String>> {
-        val saved = JSONObject(File(context.filesDir,"mobile_repertoire_edits.json").readText()).also { it.remove("_undo") }
+        val saved = JSONObject(File(context.filesDir,"mobile_repertoire_edits.json").readText()).also { it.remove("_undo");it.remove("_settings") }
         return saved.keys().asSequence().associateWith { rep ->
             val paths = saved.getJSONObject(rep)
             paths.keys().asSequence().associateWith { paths.getJSONObject(it).toString() }
@@ -355,6 +412,7 @@ class RepertoireStoreTest {
     private fun undoToken() = store.undoInfo()!!.getString("token")
 
     @Test fun undoAddedLineSurvivesRestartAndCorpusUpdateAndPreservesExistingPrefixes() {
+        addLine(listOf("d2d4"))
         addLine(listOf("e2e4","c7c5"))
         edit(listOf("e2e4"),"alternative")
         edit(listOf("e2e4"),"analysis","black")
@@ -377,6 +435,7 @@ class RepertoireStoreTest {
     }
 
     @Test fun undoExclusionRestoresTheExactPriorAlternativeLabel() {
+        addLine(listOf("d2d4"))
         edit(listOf("e2e4"),"alternative")
         val before = editsWithoutUndo()
         edit(listOf("e2e4"),"analysis")
@@ -401,6 +460,7 @@ class RepertoireStoreTest {
     @Test fun undoOptionalAndRestoredLabelsDoesNotTouchSourceData() {
         assertNull(store.undoInfo())
         assertThrows(IllegalStateException::class.java) { store.undo("none") }
+        addLine(listOf("d2d4"))
         edit(listOf("e2e4"),"alternative"); store.undo(undoToken())
         assertFalse(result(listOf("e2e4")).getBoolean("alternative"))
         edit(listOf("e2e4"),"analysis"); edit(listOf("e2e4"),"reset")

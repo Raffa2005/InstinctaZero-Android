@@ -63,4 +63,19 @@ class WorkspaceMenuTest {
         views(page!!).first { it.contentDescription?.startsWith("Symmetrical English")==true }.performClick()
         assertEquals("english",opened)
     }
+    @Test fun backupHistoryHasClearPrivateScopeAndRequiresAnExplicitRestoreConfirmation() {
+        val context=RuntimeEnvironment.getApplication();val state=RepertoireLibraryState();val actions=mutableListOf<String>()
+        state.backupsOpen=true;state.backup=JSONObject().put("saved_ms",1700000000000L).put("versions",JSONArray().put(JSONObject().put("id","a".repeat(64)).put("saved_ms",1700000000000L)))
+        fun page()=RepertoireLibraryView.build(context,state,{},{},{},backupAction={ action,id -> actions.add("$action:$id") })
+        val initial=page();snapshot(initial,"backups",390,724)
+        val texts=views(initial).filterIsInstance<TextView>().joinToString(" ") { it.text }
+        assertTrue(texts.contains("original PGNs are not changed"));assertFalse(texts.contains("a".repeat(64)))
+        views(initial).first { it.contentDescription?.endsWith("From another paired phone")==true }.performClick()
+        assertTrue(actions.isEmpty());assertEquals("a".repeat(64),state.restoreVersion)
+        val confirmation=page();snapshot(confirmation,"restore-backup",360,584)
+        views(confirmation).first { it.contentDescription=="Restore repertoire edits" }.performClick()
+        assertEquals(listOf("restore:"+"a".repeat(64)),actions)
+        state.backup.put("busy",true)
+        assertFalse(views(page()).first { it.contentDescription=="Restore repertoire edits" }.isEnabled)
+    }
 }

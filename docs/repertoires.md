@@ -127,7 +127,9 @@ Uninstalling/clearing app data removes this phone-only work, just as with prior 
   sizes are for the September 7 package; the 128 MiB cap is not an allocation.
 - Local overrides have a 4 MiB cap, are keyed by repertoire and stable position/move
   identity, and survive corpus updates. Legacy history keys remain readable without
-  migrating or dropping saved edits/Undo. Edits are phone-local, not cloud-synced.
+  migrating or dropping saved edits/Undo. Edits save locally first. From v0.8.5,
+  private PC snapshot backups support recovery without rewriting source PGNs.
+  See [editing and backup behavior](release-v0.8.5.md).
 - One inverse edit journal is stored alongside the overrides in the same atomic
   file. It adds only the prior values of the paths touched by that action; the
   existing 4 MiB override limit excludes this journal. No-op or failed edits keep

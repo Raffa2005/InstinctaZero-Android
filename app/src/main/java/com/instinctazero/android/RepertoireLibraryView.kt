@@ -17,17 +17,48 @@ internal class RepertoireLibraryState {
     var busy = false
     var error = ""
     var revealPrivateText = false
+    var backupsOpen = false
+    var backup = JSONObject()
+    var restoreVersion = ""
 }
 
 /** Native library and naming form. The form never changes the analysis tree or PGNs. */
 internal object RepertoireLibraryView {
     fun build(context: Context, state: RepertoireLibraryState, render: () -> Unit,
-        save: (JSONObject) -> Unit, open: (String?) -> Unit, privacy: AccountPrivacy? = null): android.view.View {
+        save: (JSONObject) -> Unit, open: (String?) -> Unit, privacy: AccountPrivacy? = null,
+        backupAction: (String,String) -> Unit = { _,_ -> }): android.view.View {
         val ui=WorkspaceMenu(context)
         val dp=context.resources.displayMetrics.density
         val page=ui.column().apply { setPadding((16*dp).toInt(),0,(16*dp).toInt(),(16*dp).toInt()) }
         if(state.error.isNotBlank())page.addView(ui.text(privacy?.message(state.error,"Repertoire operation failed. Your saved copy is unchanged.") ?: state.error,14f))
-        if(state.editing) {
+        if(state.backupsOpen) {
+            val busy=state.backup.optBoolean("busy")
+            page.addView(ui.section("Private PC backups"))
+            val saved=state.backup.optLong("saved_ms")
+            val date={ ms: Long -> java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM,java.text.DateFormat.SHORT).format(java.util.Date(ms)) }
+            page.addView(ui.text(when { busy -> "Connecting to your PC…";state.backup.optBoolean("pending") -> "Changes saved on this phone · PC backup pending";saved>0 -> "Last saved: ${date(saved)}";else -> "No confirmed backup from this phone yet" },15f))
+            if(state.backup.optString("message").isNotBlank())page.addView(ui.text(state.backup.getString("message"),14f,true))
+            page.addView(ui.text("Additions, deleted moves, recommendations, comments, phone-created repertoires, selection settings and the last Undo are saved privately on your paired PC. Up to 100 versions (64 MiB compressed). Games, pairing and original PGNs are not changed.",14f,true).apply { setPadding(0,(12*dp).toInt(),0,0) })
+            if(state.restoreVersion.isNotEmpty()) {
+                page.addView(ui.section("Restore this version?"))
+                page.addView(ui.text("Your current repertoire edits are backed up first. This replaces only phone repertoire edits and selections. On a replacement phone, pair with the same PC and download its repertoire library, then restore here.",15f))
+                page.addView(ui.row("\uf0e2","Restore repertoire edits") { if(!busy)backupAction("restore",state.restoreVersion) }.apply { isEnabled=!busy })
+                page.addView(ui.row("\uf00d","Cancel") { state.restoreVersion="";render() }.apply { isEnabled=!busy })
+            } else {
+                page.addView(ui.row("\uf0ee","Back up now") { if(!busy)backupAction("save","") }.apply { isEnabled=!busy })
+                page.addView(ui.row("\uf021","Refresh history") { if(!busy)backupAction("list","") }.apply { isEnabled=!busy })
+                page.addView(ui.section("Saved versions"))
+                val versions=state.backup.optJSONArray("versions")
+                if(versions==null || versions.length()==0)page.addView(ui.text("Connect to your PC and refresh to see saved versions.",14f,true))
+                if(versions!=null)for(i in 0 until versions.length()) {
+                    val item=versions.getJSONObject(i)
+                    page.addView(ui.row("\uf017",date(item.getLong("saved_ms")),if(item.optBoolean("this_device"))"From this phone" else "From another paired phone") {
+                        state.restoreVersion=item.getString("id");render()
+                    }.apply { isEnabled=!busy })
+                }
+            }
+            return ui.scroll(page)
+        } else if(state.editing) {
             if(privacy?.enabled==true && privacy.text(state.name)!=state.name && !state.revealPrivateText) {
                 page.addView(ui.section("Private name"))
                 page.addView(ui.text("Renaming displays the original name, which contains hidden identity information.",14f,true))
@@ -77,8 +108,11 @@ internal object RepertoireLibraryView {
                 }
             }
             page.addView(ui.section("Explore"))
+            page.addView(ui.row("\uf0ee","Backups and restore","Private history on your paired PC") {
+                state.backupsOpen=true;state.restoreVersion="";render();backupAction("list","")
+            })
             page.addView(ui.row("\uf279","Repertoire board","Compare your selected repertoires") { open(null) })
-            page.addView(ui.text("PC copies can be updated from repertoire settings on the board. Phone-created repertoires and your edits stay here.",13f,true))
+            page.addView(ui.text("PC copies can be updated from repertoire settings on the board. Local edits are backed up when your paired PC is reachable.",13f,true))
         }
         return ui.scroll(page)
     }

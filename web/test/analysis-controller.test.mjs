@@ -17,7 +17,7 @@ test('book position keys retain legal en passant and remove ghost or pinned capt
   const {Chess}=await import('chess.js');
   const source=await readFile(controllerUrl,'utf8');
   const start=source.indexOf('const normalized = fen =>');
-  const end=source.indexOf('\n      const nodes',start);
+  const end=source.indexOf('\n    const nodes',start);
   const normalized=new Function('Chess',source.slice(start,end)+';return normalized;')(Chess);
   assert.equal(normalized('rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1')[3],'-');
   assert.equal(normalized('4r1k1/8/8/3pP3/8/8/8/4K3 w - d6 0 1')[3],'-');
@@ -134,7 +134,7 @@ test('forward navigation is canonical and Return to mainline finds the nearest b
   let restored = null;
   const actions = new Function(
     'mainlineChild', 'initialCursor', 'restore',
-    `let cursor = initialCursor; ${actionSource}; return { mainlineIntersection, returnToMainline };`,
+    `let cursor = initialCursor, tab='moves'; ${actionSource}; return { mainlineIntersection, returnToMainline };`,
   )(mainlineChild, continuation, node => { restored = node; });
   assert.equal(actions.mainlineIntersection(continuation), branchPoint);
   actions.returnToMainline();
@@ -175,6 +175,52 @@ test('real LC0 callback fixture uses White-POV score, SAN, search stats, and ela
   assert.match(controller, /class="leela-stat-bar"/);
   assert.match(controller, /safe\(visits\) \+ '\/' \+ safe\(progress\.target \|\| settings\.nodes\)/);
   assert.doesNotMatch(controller, /score_cp|score_mate|pv_san|time_ms/);
+});
+
+test('repertoire return chooses the nearest notation or repertoire intersection without changing forward semantics',async()=>{
+  const controller=await readFile(controllerUrl,'utf8');
+  const source=functionSource(controller,'mainlineIntersection','restore');
+  const root={children:[]},a={parent:root,children:[]},b={parent:a,children:[]},c={parent:b,children:[]},d={parent:c,children:[]};
+  root.children=[a];a.children=[b];b.children=[c];c.children=[d];
+  let restored;
+  const run=(tab,ply)=>new Function('cursor','tab','repertoirePanel','history','mainlineChild','restore',source+';returnToMainline();')(d,tab,{intersection:()=>ply},()=>[1,2,3,4],n=>n.children[0],n=>{restored=n});
+  restored=null;run('moves',3);assert.equal(restored,null,'notation-only mainline has no return target');
+  run('repertoire',2);assert.equal(restored,b,'book intersection need not have any notation sibling');
+  b.children.unshift({parent:b,children:[]});run('repertoire',3);assert.equal(restored,c,'nearest book intersection precedes more distant notation branch');
+  run('engine',3);assert.equal(restored,b,'outside repertoire returns the original notation intersection');
+  run('repertoire',0);assert.equal(restored,b,'nearer notation branch wins');
+  b.children.shift();run('repertoire',0);assert.equal(restored,root);
+  assert.equal(root.children[0],a);assert.equal(b.children[0],c,'return never reorders canonical children');
+});
+
+test('rapid navigation and interrupted analysis settle only on the current request with visible bounded recovery',async()=>{
+  const controller=await readFile(controllerUrl,'utf8');
+  const transport=functionSource(controller,'stopEngineTransport','commitMove');
+  const recovery=functionSource(controller,'watchAnalysis','requestBook');
+  const callback=controller.slice(controller.indexOf('window.InstinctaZero.onNativeAnalysis ='),controller.indexOf('  window.InstinctaZero.onNativeExplorer ='));
+  let timerId=0,requestId=0;const timers=new Map(),requests=[],cancelled=[],state={history:['e2e4'],editing:false};
+  const engine={attempts:0,lines:[]},settings={enabled:true,nodes:1000},cursor={},document={hidden:false},window={InstinctaZero:{}};
+  const native=()=>({cancelAnalysis:id=>cancelled.push(id),startAnalysis:raw=>{const id='s'+ ++requestId;requests.push({id,...JSON.parse(raw)});return id;}});
+  const f=new Function('engine','settings','cursor','document','window','native','setTimeout','clearTimeout','studyRequest','coherentAnalysisSnapshot','applyAnalysisSnapshot','renderActivePanel','renderArrows','state',
+    `let analysisActive=true,gameLoading=false,repertoirePanel=null,studyContext={},book={};const editingPosition=()=>state.editing,cancelBookRequest=()=>{},resetStudy=()=>{};const chess={moves:()=>['legal']};${transport}${recovery}${callback};return {scheduleAnalysis,recoverAnalysis,stopEngineTransport};`
+  )(engine,settings,cursor,document,window,native,(fn,ms)=>{const id=++timerId;timers.set(id,{fn,ms});return id;},id=>timers.delete(id),()=>({history:state.history}),data=>data.valid===false?null:data,(snapshot,status)=>{engine.lines=snapshot.lines;engine.status=status;},()=>{},()=>{},state);
+  const tick=ms=>{for(const [id,timer] of [...timers])if(timer.ms===ms){timers.delete(id);timer.fn();}};
+  const emit=(id,event,data={})=>window.InstinctaZero.onNativeAnalysis(id,{event,data});
+  f.scheduleAnalysis();tick(120);const obsolete=requests.at(-1).id;
+  for(let i=0;i<30;i++){state.history=['d2d4',String(i)];f.scheduleAnalysis();}
+  tick(120);assert.equal(requests.length,2);assert.deepEqual(requests.at(-1).history,['d2d4','29']);assert.ok(cancelled.includes(obsolete));
+  const current=requests.at(-1).id;emit(obsolete,'lc0',{lines:[{pv:['stale']}]});assert.equal(engine.lines.length,0);
+  emit(current,'stream-ended');assert.equal(engine.status,'retrying');assert.match(engine.error,/Retrying this position/);assert.equal(engine.requestId,null);
+  tick(1000);const retry=requests.at(-1).id;assert.notEqual(retry,current);assert.deepEqual(requests.at(-1).history,state.history);
+  emit(current,'done',{final_snapshot:{lines:[{pv:['stale']}]}});assert.equal(engine.lines.length,0);
+  emit(retry,'done',{cancelled:true});tick(2000);emit(requests.at(-1).id,'done',{final_snapshot:{lines:[]}});tick(4000);
+  emit(requests.at(-1).id,'done',{final_snapshot:{lines:[{pv:['current']}]}});assert.equal(engine.status,'done');assert.equal(engine.lines[0].pv[0],'current');assert.equal(engine.requestId,null);
+  f.scheduleAnalysis();tick(120);emit(requests.at(-1).id,'error',{error:'Authentication required',code:401});assert.equal(engine.status,'error');assert.equal(engine.requestId,null);assert.equal(timers.size,0,'auth errors never replay');
+  f.scheduleAnalysis();tick(120);tick(45000);assert.equal(engine.status,'retrying','no-progress watchdog retries a stuck search');
+  for(const delay of [1000,2000,4000]){tick(delay);emit(requests.at(-1).id,'stream-ended');}
+  assert.equal(engine.status,'error');assert.match(engine.error,/tap Retry/);assert.equal(timers.size,0,'bounded recovery does not fight another PC search forever');
+  f.scheduleAnalysis();tick(120);settings.enabled=false;emit(requests.at(-1).id,'stream-ended');assert.equal(timers.size,0);
+  settings.enabled=true;f.scheduleAnalysis();document.hidden=true;tick(120);assert.equal(engine.requestId,null,'backgrounded app cannot start fresh analysis');
 });
 
 test('visible study controls have menu and native-home behavior without a header appearance popup', async () => {
@@ -486,7 +532,7 @@ test('active full-panel forms are not rebuilt by streamed engine updates', async
   const repertoire = new Function('panelView', 'renderPanel', 'heading', 'tab', `${source}; return renderActivePanel;`)(null, () => { renders += 1; }, () => { headings += 1; }, 'repertoire');
   repertoire();
   assert.equal(renders, 1, 'engine updates must not replace a repertoire control during a tap');
-  assert.match(controller, /onNativeAnalysis[^\n]*renderActivePanel/);
+  assert.match(controller.slice(controller.indexOf('onNativeAnalysis'),controller.indexOf('onNativeExplorer')), /renderActivePanel/);
   assert.match(controller, /settings\.showArrows = !settings\.showArrows/);
   assert.match(controller, /renderArrows\(engine\.lines\)/);
 });
@@ -584,7 +630,7 @@ test('settings are toggleable panel tabs and White POV eval remains in the tab t
   assert.match(controller, /document\.querySelector\('\[data-panel-tab\]'\)\.onclick = closePanelView/);
   assert.match(controller, /if \(panelView === target\) closePanelView\(\)/);
   assert.match(controller, /const evalText = settings\.enabled && best \? whiteEvalText\(best\)/);
-  assert.match(controller, /evalText \+ ' · Leela'/);
+  assert.match(controller, /evalText \+ \(engine.status==='retrying'\?' · retrying'/);
   assert.doesNotMatch(controller, /panel-back|‹ Back/);
 });
 
