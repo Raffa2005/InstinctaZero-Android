@@ -1,7 +1,9 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.8.6). The unified repertoire-add correction is described in
+(version 0.8.7). The web maneuver-arrow port and its checks are described in
+[v0.8.7](release-v0.8.7.md). No server or repertoire update is needed.
+The unified repertoire-add correction is described in
 [v0.8.6](release-v0.8.6.md). It requires no server update or repertoire redownload.
 The repertoire editing, private PC backups, marker staging and
 analysis recovery update is described in [v0.8.5](release-v0.8.5.md). It requires
@@ -52,7 +54,11 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 34 / 0.8.6 release values;
+- versionCode/versionName are the intended 35 / 0.8.7 release values;
+- run `ManeuverSettingsTest`, `maneuver-arrows.test.mjs` and
+  `maneuver-arrows-ui.mjs` against the signed APK assets. Check the web parity,
+  both orientations, count/mode/off controls, settings persistence, inherited PVs,
+  position changes and stale replies without additional analysis requests;
 - run the editing, backup and stream regressions and `repertoire-editing-ui.mjs`
   against extracted APK assets, with `REPERTOIRE_EDIT_PREVIEW` pointing to the
   private response fixture produced by `RepertoireEditingRegressionTest`;

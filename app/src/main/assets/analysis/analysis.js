@@ -17,7 +17,7 @@
   const NODE_OPTIONS = [100, 200, 400, 700, 1000, 2000, 4000, 7000, 10000, 20000, 40000, 70000, 100000];
   const BOOK_SPEEDS = ['bullet','blitz','rapid','classical','correspondence'];
   const BOOK_RATINGS = [1600,1800,2000,2200,2500];
-  const settings = { nodes: 1000, arrowCount: 8, enabled: true, showArrows: true, backend:'cpu', bookSource:'lichess', bookSpeeds:[], bookRatings:[] };
+  const settings = { nodes: 1000, arrowCount: 8, arrowMode:'best', enabled: true, showArrows: true, backend:'cpu', bookSource:'lichess', bookSpeeds:[], bookRatings:[] };
   let tab = 'engine', panelView = null, promotionPicker = null, nodeId = 0, restoring = false, activeNavigationStop = null, analysisActive = false, bookSettingsDirty = false, persistTimer = null, variationTarget = null;
   let studyContext = { gameId:null, initialFen:START_FEN, title:'Local analysis', subtitle:'Starting position' };
   const root = { id: 0, fen: START_FEN, san: null, move: null, number: 1, color: 'w', parent: null, children: [], selectedChild: null };
@@ -78,8 +78,8 @@
   }
   function clampInteger(value, minimum, maximum, fallback) { const parsed = Number.parseInt(String(value == null ? '' : value), 10); return Number.isFinite(parsed) ? Math.max(minimum, Math.min(maximum, parsed)) : fallback; }
   function orderedSelection(values, allowed) { const selected = new Set(Array.isArray(values) ? values.map(String) : []); return allowed.filter(value => selected.has(String(value))); }
-  function loadUiSettings() { if (!native() || !native().getUiSettings) return; try { const saved = JSON.parse(native().getUiSettings() || '{}'); settings.nodes = NODE_OPTIONS.includes(Number(saved.nodes)) ? Number(saved.nodes) : settings.nodes; settings.arrowCount = clampInteger(saved.arrowCount, 1, 8, settings.arrowCount); if (typeof saved.leelaEnabled === 'boolean') settings.enabled = saved.leelaEnabled; if (typeof saved.arrowsEnabled === 'boolean') settings.showArrows = saved.arrowsEnabled; if (saved.engineBackend === 'cpu' || saved.engineBackend === 'sycl') settings.backend = saved.engineBackend; if (saved.bookSource === 'masters' || saved.bookSource === 'lichess') settings.bookSource = saved.bookSource; settings.bookSpeeds = orderedSelection(saved.bookSpeeds, BOOK_SPEEDS); settings.bookRatings = orderedSelection(saved.bookRatings, BOOK_RATINGS); } catch (_) {} }
-  function saveUiSettings() { if (!native() || !native().saveUiSettings) return; native().saveUiSettings(JSON.stringify({ nodes: settings.nodes, arrowCount: settings.arrowCount, leelaEnabled: settings.enabled, arrowsEnabled: settings.showArrows, engineBackend:settings.backend, appearance: 'brown', bookSource:settings.bookSource, bookSpeeds:settings.bookSpeeds, bookRatings:settings.bookRatings })); }
+  function loadUiSettings() { if (!native() || !native().getUiSettings) return; try { const saved = JSON.parse(native().getUiSettings() || '{}'); settings.nodes = NODE_OPTIONS.includes(Number(saved.nodes)) ? Number(saved.nodes) : settings.nodes; settings.arrowCount = clampInteger(saved.arrowCount, 1, 8, settings.arrowCount); if (saved.arrowMode === 'best' || saved.arrowMode === 'maneuver') settings.arrowMode = saved.arrowMode; if (typeof saved.leelaEnabled === 'boolean') settings.enabled = saved.leelaEnabled; if (typeof saved.arrowsEnabled === 'boolean') settings.showArrows = saved.arrowsEnabled; if (saved.engineBackend === 'cpu' || saved.engineBackend === 'sycl') settings.backend = saved.engineBackend; if (saved.bookSource === 'masters' || saved.bookSource === 'lichess') settings.bookSource = saved.bookSource; settings.bookSpeeds = orderedSelection(saved.bookSpeeds, BOOK_SPEEDS); settings.bookRatings = orderedSelection(saved.bookRatings, BOOK_RATINGS); } catch (_) {} }
+  function saveUiSettings() { if (!native() || !native().saveUiSettings) return; native().saveUiSettings(JSON.stringify({ nodes: settings.nodes, arrowCount: settings.arrowCount, arrowMode:settings.arrowMode, leelaEnabled: settings.enabled, arrowsEnabled: settings.showArrows, engineBackend:settings.backend, appearance: 'brown', bookSource:settings.bookSource, bookSpeeds:settings.bookSpeeds, bookRatings:settings.bookRatings })); }
   function studyRequest() { const request = { history: history(), nodes: settings.nodes, backend:settings.backend }; if (studyContext.gameId) request.game_id = studyContext.gameId; else if(studyContext.editedPosition)request.initial_fen = studyContext.initialFen; return request; }
   function explorerRequest() { const request = { history: history(), source:settings.bookSource }; if (studyContext.gameId) request.game_id = studyContext.gameId; else if(studyContext.editedPosition)request.initial_fen = studyContext.initialFen; if (settings.bookSource === 'lichess') { if (settings.bookSpeeds.length) request.speeds = settings.bookSpeeds.slice(); if (settings.bookRatings.length) request.ratings = settings.bookRatings.slice(); } return request; }
   function moveUci(node) { return node && node.move ? node.move.from + node.move.to + (node.move.promotion || '') : ''; }
@@ -226,6 +226,7 @@
         '<div class="backend-row"><span>Engine</span><button data-backend="cpu" class="' + (settings.backend === 'cpu' ? 'selected' : '') + '">CPU · safe</button><button data-backend="sycl" class="' + (settings.backend === 'sycl' ? 'selected' : '') + '">iGPU · exact</button></div>' +
         '<div class="range-row"><span>Nodes</span><b data-node-readout>' + compactCount(settings.nodes) + '</b><input data-nodes type="range" min="0" max="' + (NODE_OPTIONS.length - 1) + '" step="1" value="' + nodeIndex + '" aria-label="Analysis nodes"></div>' +
         '<div class="range-row"><span>Arrows</span><b data-arrow-readout>' + settings.arrowCount + '</b><input data-arrow-count type="range" min="1" max="8" step="1" value="' + settings.arrowCount + '" aria-label="Arrow count"></div>' +
+        '<div class="arrow-mode-row" role="group" aria-label="Move arrows">' + ['best','maneuver'].map(mode => '<button data-arrow-mode="' + mode + '" aria-pressed="' + (settings.arrowMode === mode) + '">' + (mode === 'best' ? 'Best moves' : 'Best + maneuver') + '</button>').join('') + '</div>' +
         '<div class="switch-row">' + switchButton('leela', 'Leela', settings.enabled) + switchButton('arrows', 'Arrows', settings.showArrows) + '</div></div>';
     }
     if (panelView === 'bookSettings') return '<div class="panel-view book-settings">' +
@@ -248,6 +249,11 @@
       nodes.onchange = () => { const next = NODE_OPTIONS[Number(nodes.value)]; if (next === settings.nodes) return; settings.nodes = next; clearAnalysisCaches(root); saveUiSettings(); restoreCachedAnalysis(); scheduleAnalysis(); };
       arrowsControl.oninput = () => { settings.arrowCount = clampInteger(arrowsControl.value, 1, 8, settings.arrowCount); panel.querySelector('[data-arrow-readout]').textContent = settings.arrowCount; renderArrows(engine.lines); };
       arrowsControl.onchange = saveUiSettings;
+      panel.querySelectorAll('[data-arrow-mode]').forEach(button => button.onclick = () => {
+        settings.arrowMode = button.dataset.arrowMode;
+        panel.querySelectorAll('[data-arrow-mode]').forEach(item => item.setAttribute('aria-pressed',item.dataset.arrowMode === settings.arrowMode));
+        saveUiSettings(); renderArrows(engine.lines);
+      });
       panel.querySelectorAll('[data-switch]').forEach(button => button.onclick = () => { const key = button.dataset.switch; if (key === 'leela') settings.enabled = !settings.enabled; else settings.showArrows = !settings.showArrows; button.classList.toggle('on', key === 'leela' ? settings.enabled : settings.showArrows); button.setAttribute('aria-checked', key === 'leela' ? settings.enabled : settings.showArrows); saveUiSettings(); renderArrows(engine.lines); if (key === 'leela') { if (settings.enabled) { restoreCachedAnalysis(); scheduleAnalysis(); } else clearEngine('off'); } });
     } else if (panelView === 'bookSettings') {
       panel.querySelectorAll('[data-source]').forEach(button => button.onclick = () => { const source = button.dataset.source; if (source === settings.bookSource) return; settings.bookSource = source; persistBookSettings(); renderPanel(); });
@@ -276,8 +282,90 @@
   function leelaArrowWidthFromMetrics(metrics) { const bestVisits = Number(metrics.bestVisits), alternativeVisits = Number(metrics.alternativeVisits); const reference = metrics.referenceQ === null || metrics.referenceQ === undefined ? Number.NaN : Number(metrics.referenceQ); const alternative = metrics.alternativeQ === null || metrics.alternativeQ === undefined ? Number.NaN : Number(metrics.alternativeQ); let qualityStrength = 1; if (Number.isFinite(reference) && Number.isFinite(alternative)) { const winChanceDrop = Math.max(0, (reference - alternative) / 2); if (winChanceDrop >= 0.16) return null; qualityStrength = 1 - winChanceDrop / 0.16; } if (Number.isFinite(bestVisits) && bestVisits >= 0) { const visitStrength = Math.sqrt(Math.min(1, (Math.max(0, alternativeVisits || 0) + 1) / (bestVisits + 1))); return Math.max(2, Math.min(12, Math.round(2 + 10 * visitStrength * qualityStrength))); } return Math.max(2, 10 - Math.max(0, Number(metrics.fallbackIndex) || 0) * 2); }
   function rankedLeelaAlternativeLines(lines, statsByMove) { const metric = value => finiteMetric(value); return lines.map((line, index) => ({ line, index, stat: statsByMove.get(line && line.pv && line.pv[0]) })).sort((a, b) => { for (const key of ['visits','q','prior']) { const av = metric(a.stat && a.stat[key]), bv = metric(b.stat && b.stat[key]); if (av === null && bv !== null) return 1; if (av !== null && bv === null) return -1; if (av !== null && bv !== null && av !== bv) return bv - av; } const ar = metric(a.line && a.line.multipv) || a.index + 1, br = metric(b.line && b.line.multipv) || b.index + 1; return ar - br || a.index - b.index; }).map(item => item.line); }
   function alternativeArrowWidth(bestLine, line, index, moveStats, statsByMove) { const best = statsByMove.get(bestLine && bestLine.pv && bestLine.pv[0]), alternative = statsByMove.get(line && line.pv && line.pv[0]); let referenceQ = credibleLeelaReferenceQ(moveStats, best), alternativeQ = finiteMetric(alternative && alternative.q); if (referenceQ === null || alternativeQ === null) { referenceQ = lineWinningChance(bestLine); alternativeQ = lineWinningChance(line); } return leelaArrowWidthFromMetrics({ bestVisits: best && best.visits, alternativeVisits: alternative && alternative.visits, referenceQ, alternativeQ, fallbackIndex:index }); }
+  // Kept identical to the current web maneuver helpers; see the parity regression.
+  function moveArrowShape(uci, brush, modifiers) {
+    if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(uci || "")) return null;
+    return {
+      orig: uci.slice(0, 2),
+      dest: uci.slice(2, 4),
+      brush,
+      ...(modifiers ? { modifiers } : {}),
+    };
+  }
+  function maneuverArrowShapes(moves, brush) {
+    const shapes = [];
+    const occupied = new Set();
+    const maxPlies = Math.min(moves.length, 6);
+    for (let index = 0; index < maxPlies; index += 2) {
+      const move = moves[index];
+      if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(move || "")) break;
+      if (index > 0 && moves[index - 2]?.slice(2, 4) !== move.slice(0, 2)) break;
+      if (arrowPathInterferes(move.slice(0, 2), move.slice(2, 4), occupied)) break;
+      const shape = moveArrowShape(move, brush);
+      if (shape) shapes.push(shape);
+    }
+    return shapes;
+  }
+  function arrowPathInterferes(from, to, occupied) {
+    if (from === to) return true;
+    const [fromFile, fromRank] = squareCoordinates(from);
+    const [toFile, toRank] = squareCoordinates(to);
+    const fileDelta = toFile - fromFile;
+    const rankDelta = toRank - fromRank;
+    occupied.add(from);
+    if ([Math.abs(fileDelta), Math.abs(rankDelta)].sort().join("") === "12") {
+      if (occupied.has(to)) return true;
+      occupied.add(to);
+      return false;
+    }
+    if (!(fileDelta === 0 || rankDelta === 0 || Math.abs(fileDelta) === Math.abs(rankDelta))) {
+      return true;
+    }
+    const fileStep = Math.sign(fileDelta);
+    const rankStep = Math.sign(rankDelta);
+    let file = fromFile + fileStep;
+    let rank = fromRank + rankStep;
+    while (file !== toFile || rank !== toRank) {
+      const square = `${String.fromCharCode(97 + file)}${rank + 1}`;
+      if (occupied.has(square)) return true;
+      occupied.add(square);
+      file += fileStep;
+      rank += rankStep;
+    }
+    if (occupied.has(to)) return true;
+    occupied.add(to);
+    return false;
+  }
+  function squareCoordinates(square) {
+    return [square.charCodeAt(0) - 97, Number(square[1]) - 1];
+  }
   function arrowLine(move, kind, width, shortening) { if (!/^[a-h][1-8][a-h][1-8]/.test(move || '')) return ''; const a = squarePoint(move.slice(0,2)), b = squarePoint(move.slice(2,4)), dx = b[0] - a[0], dy = b[1] - a[1], length = Math.hypot(dx, dy) || 1, amount = Math.min(shortening || 10, length / 2), x2 = b[0] - dx / length * amount, y2 = b[1] - dy / length * amount; return '<line class="analysis-arrow ' + kind + '" stroke-width="' + width + '" x1="' + a[0] + '" y1="' + a[1] + '" x2="' + x2 + '" y2="' + y2 + '" marker-end="url(#arrow-' + kind + ')"/>'; }
-  function renderArrows(lines) { const defs = arrows.querySelector('defs').outerHTML; if (!settings.showArrows || !lines.length) { arrows.innerHTML = defs; return; } const best = lines[0], bestMove = best && best.pv && best.pv[0]; if (!/^[a-h][1-8][a-h][1-8]/.test(bestMove || '')) { arrows.innerHTML = defs; return; } const moveStats = Array.isArray((engine.stats || {}).move_stats) ? engine.stats.move_stats : []; const statsByMove = new Map(moveStats.map(stat => [stat.uci, stat])); const shapes = [{ move:bestMove, kind:'blue', width:15 }], seen = new Set([bestMove.slice(0,4)]); const alternatives = rankedLeelaAlternativeLines(lines.slice(1), statsByMove); for (const [index, line] of alternatives.entries()) { if (shapes.length >= settings.arrowCount) break; const move = line && line.pv && line.pv[0]; if (!move || seen.has(move.slice(0,4))) continue; const width = alternativeArrowWidth(best, line, index, moveStats, statsByMove); if (width === null) continue; if (/^[a-h][1-8][a-h][1-8]/.test(move)) { seen.add(move.slice(0,4)); shapes.push({ move, kind:'grey', width }); } } const destinationCounts = new Map(); shapes.forEach(shape => destinationCounts.set(shape.move.slice(2,4), (destinationCounts.get(shape.move.slice(2,4)) || 0) + 1)); arrows.innerHTML = defs + shapes.map(shape => arrowLine(shape.move, shape.kind, shape.width, destinationCounts.get(shape.move.slice(2,4)) > 1 ? 20 : 10)).join(''); }
+  function renderArrows(lines) {
+    const defs = arrows.querySelector('defs').outerHTML;
+    if (!settings.showArrows || !lines.length) { arrows.innerHTML = defs; return; }
+    const best = lines[0], bestMove = best && best.pv && best.pv[0];
+    if (!/^[a-h][1-8][a-h][1-8]/.test(bestMove || '')) { arrows.innerHTML = defs; return; }
+    const moveStats = Array.isArray((engine.stats || {}).move_stats) ? engine.stats.move_stats : [];
+    const statsByMove = new Map(moveStats.map(stat => [stat.uci, stat]));
+    // Same priority and total cap as the web: the best piece's maneuver first,
+    // then the existing visit/evaluation-weighted alternative root moves.
+    const shapes = (settings.arrowMode === 'maneuver'
+      ? maneuverArrowShapes(best.pv, 'paleBlue').map(shape => ({move:shape.orig + shape.dest, kind:'blue', width:15}))
+      : [{move:bestMove, kind:'blue', width:15}]).slice(0, settings.arrowCount);
+    const seen = new Set([bestMove.slice(0,4)]);
+    const alternatives = rankedLeelaAlternativeLines(lines.slice(1), statsByMove);
+    for (const [index, line] of alternatives.entries()) {
+      if (shapes.length >= settings.arrowCount) break;
+      const move = line && line.pv && line.pv[0];
+      if (!move || seen.has(move.slice(0,4))) continue;
+      const width = alternativeArrowWidth(best, line, index, moveStats, statsByMove);
+      if (width === null) continue;
+      if (/^[a-h][1-8][a-h][1-8]/.test(move)) { seen.add(move.slice(0,4)); shapes.push({move, kind:'grey', width}); }
+    }
+    const destinationCounts = new Map();
+    shapes.forEach(shape => destinationCounts.set(shape.move.slice(2,4), (destinationCounts.get(shape.move.slice(2,4)) || 0) + 1));
+    arrows.innerHTML = defs + shapes.map(shape => arrowLine(shape.move, shape.kind, shape.width, destinationCounts.get(shape.move.slice(2,4)) > 1 ? 20 : 10)).join('');
+  }
   function openPanelView(kind) { if (wrap.classList.contains('expanded')) { wrap.classList.remove('expanded'); refreshBoardBounds(); scheduleStudySave(); } panelView = kind; if (kind === 'repertoireSettings' && repertoirePanel) repertoirePanel.beginSettings(); renderPanel(); }
   function deleteCurrentBranch() { if (!cursor.parent) return; const parent = cursor.parent; parent.children = parent.children.filter(child => child !== cursor); parent.selectedChild = mainlineChild(parent); restore(parent); }
   function promoteVariation() { const target = variationTarget, parent = target && target.parent; if (!parent) return closePanelView(); const index = parent.children.indexOf(target); if (index > 0) { parent.children.splice(index, 1); parent.children.unshift(target); } parent.selectedChild = target; variationTarget = null; panelView = null; scheduleStudySave(); renderPanel(); }
