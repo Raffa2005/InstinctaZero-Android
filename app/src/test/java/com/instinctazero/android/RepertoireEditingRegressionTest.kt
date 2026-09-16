@@ -168,4 +168,69 @@ class RepertoireEditingRegressionTest {
         store.restoreBackup(before);assertEquals(before.getJSONObject("edits").toString(),store.backupSnapshot().getJSONObject("edits").toString())
         assertEquals(RepertoireStore.hash(bytes),RepertoireStore.hash(file.readBytes()))
     }
+    @Test fun actualClarifiedSourceCommentRemainsReadableBehindPersonalNoteThroughRefresh() {
+        val next=System.getenv("REPERTOIRE_REFRESH_INDEX");val casePath=System.getenv("REPERTOIRE_CLARIFIED_CASE")
+        assumeTrue(next!=null && casePath!=null)
+        corpus();val case=JSONObject(File(casePath!!).readText());val request=case.getJSONObject("request");val rep=case.getString("rep")
+        var store=RepertoireStore(RuntimeEnvironment.getApplication())
+        fun result(r: JSONObject=request)=store.lookup(r).getJSONArray("results").getJSONObject(0)
+        assertTrue(result().getJSONArray("comments").toString().contains(case.getString("source_before").take(30)))
+        assertNotEquals(case.getString("source_before"),case.getString("source_after"))
+        fun note(value: String)=store.edit(JSONObject(request.toString()).put("id",rep).put("kind","comment").put("comment",value))
+        note("My previous personal note.");note("My current personal note.")
+        val backup=store.backupSnapshot();val token=store.undoInfo()!!.getString("token")
+        val bytes=File(next!!).readBytes();store.install(bytes.inputStream(),RepertoireStore.hash(bytes))
+        store=RepertoireStore(RuntimeEnvironment.getApplication())
+        fun verify(personal: String): JSONObject {
+            val current=result();assertEquals(personal,current.getJSONArray("comments").getString(0))
+            val source=current.getJSONArray("source_comments").let { a -> (0 until a.length()).map { a.getString(it) } }
+            assertTrue("Actual appended clarification remains readable",case.getString("source_after") in source)
+            val standalone=JSONObject(request.toString()).put("root",request.getString("fen")).put("history",JSONArray()).put("entries",JSONArray())
+            assertEquals(current.getJSONArray("source_comments").toString(),result(standalone).getJSONArray("source_comments").toString())
+            assertEquals(current.getJSONArray("comments").toString(),result(standalone).getJSONArray("comments").toString())
+            return current
+        }
+        val current=verify("My current personal note.")
+        assertEquals(backup.getJSONObject("edits").toString(),store.backupSnapshot().getJSONObject("edits").toString())
+        store.undo(token);verify("My previous personal note.")
+        store.restoreBackup(backup);store=RepertoireStore(RuntimeEnvironment.getApplication());verify("My current personal note.")
+        System.getenv("REPERTOIRE_CLARIFIED_PREVIEW")?.let { File(it).writeText(JSONObject().put("positions",JSONArray().put(JSONObject().put("request",request).put("result",current))).toString()) }
+    }
+    @Test fun privateBackupOverlayKeepsEveryAffectedPositionAcrossRealSourceRefresh() {
+        val next=System.getenv("REPERTOIRE_REFRESH_INDEX");val snapshot=System.getenv("REPERTOIRE_PERSONAL_TEST_BACKUP")
+        assumeTrue(next!=null && snapshot!=null)
+        corpus();var store=RepertoireStore(RuntimeEnvironment.getApplication())
+        store.restoreBackup(JSONObject(File(snapshot!!).readText())) // Robolectric filesDir only.
+        val saved=store.backupSnapshot();val overlays=saved.getJSONObject("edits")
+        val positions=linkedSetOf<Pair<String,String>>()
+        for(rep in overlays.keys())if(!rep.startsWith('_'))for(key in overlays.getJSONObject(rep).keys()) {
+            val edit=overlays.getJSONObject(rep).getJSONObject(key)
+            for(field in listOf("before","fen"))edit.optString(field).takeIf { it.isNotBlank() }?.let { positions.add(rep to RepertoireStore.position(it)) }
+        }
+        fun canonical(value: Any?): String = when(value) {
+            null,JSONObject.NULL -> "null"
+            is JSONObject -> value.keys().asSequence().filter { it !in setOf("comments","starting_comments","source_comments") }.toList().sorted()
+                .joinToString(",","{","}") { JSONObject.quote(it)+":"+canonical(value.get(it)) }
+            is JSONArray -> (0 until value.length()).joinToString(",","[","]") { canonical(value.get(it)) }
+            is String -> JSONObject.quote(value)
+            else -> value.toString()
+        }
+        fun lookup(rep: String,fen: String): JSONObject {
+            val request=JSONObject().put("root",fen).put("fen",fen).put("history",JSONArray()).put("entries",JSONArray()).put("selected",JSONArray().put(rep))
+            return store.lookup(request).getJSONArray("results").getJSONObject(0)
+        }
+        val before=positions.map { (rep,fen) -> RepertoireStore.hash(canonical(lookup(rep,fen)).toByteArray()) }
+        val bytes=File(next!!).readBytes();store.install(bytes.inputStream(),RepertoireStore.hash(bytes));store=RepertoireStore(RuntimeEnvironment.getApplication())
+        assertTrue("All private overlay fields preserved",saved.getJSONObject("edits").toString()==store.backupSnapshot().getJSONObject("edits").toString())
+        positions.forEachIndexed { i,(rep,fen) ->
+            val current=lookup(rep,fen)
+            assertEquals("Coverage/labels/deletions at private edited position $i",before[i],RepertoireStore.hash(canonical(current).toByteArray()))
+            val comment=overlays.getJSONObject(rep).optJSONObject(RepertoirePositionBook.commentKey(fen))
+            if(comment?.has("comment")==true) {
+                val expected=comment.getString("comment");val actual=current.getJSONArray("comments")
+                assertTrue("Personal display text preserved",if(expected.isEmpty())actual.length()==0 else actual.length()==1 && actual.getString(0)==expected)
+            }
+        }
+        println("Private backup: all overlay fields and ${positions.size} affected positions preserved through real source refresh/restart.")
+    }
 }

@@ -46,11 +46,41 @@ These are complete native requests on this host, excluding WebView/transport.
 
 ## Dataset coordination
 
-The APK works with the currently installed library: **no redownload is required
-for this app fix**. Source-reference clarification is a separate coordinated
-update. At preparation time its immutable snapshot was not ready; no snapshot has
-been accepted or installed. Actual old-to-new snapshot preservation, deployment
-and source-audit conclusions remain pending and must not be represented as done.
+The APK works with the previous library: **no redownload is required for the
+app's one-ply re-entry fix**. A separate source-reference clarification update,
+`2026-09-16.v1`, was subsequently accepted, tested and installed on the PC.
+To receive its new comments in v0.8.8, open **Repertoire → Settings → Update from
+PC**. There is no additional APK for this source-only integration.
+
+That update appends 2,360 clarifications across eight of nine PGNs; Smith-Morra
+is unchanged. Move trees and classifications are unchanged. There are still 27
+explicitly unresolved source references, including the missing Taimanov destination.
+Clarifying missing coverage does not supply the missing theory.
+
+Integration checks used writable isolated copies of the frozen previous index
+and the actual accepted replacement. Personal additions, deletions, recommendations,
+comments, selection settings, restart, Undo and backup restore passed, including
+renumbered node IDs. A personal note at an actually clarified source occurrence
+remains intact, with the complete updated source comment separately readable.
+The real private backup overlay was also checked at every affected position; no
+private corpus, notes or fixtures are committed here. The release-asset touch test
+`web/test/repertoire-source-refresh-ui.mjs` verifies notes, editing and reopening at
+360×640, 390×780 and 412×844 using an external native-response fixture.
+
+Opt-in native test inputs: `REPERTOIRE_TEST_INDEX` (writable old copy),
+`REPERTOIRE_REFRESH_INDEX` (writable new copy), `REPERTOIRE_CLARIFIED_CASE` (a real
+old/new comment patch plus legal request), and `REPERTOIRE_PERSONAL_TEST_BACKUP`
+(private backup snapshot). Tests install/restore only into Robolectric's isolated
+application directory. `REPERTOIRE_CLARIFIED_PREVIEW` optionally exports the actual
+post-refresh response for the touch test; `PHONE_PREVIEW_ASSETS` should point to
+assets extracted from the signed release, not a different working-tree build.
+
+The PC corpus and state were freshly backed up before the source-only replacement.
+Snapshot and live-baseline hashes were rechecked before installation. The installed
+package was verified byte-for-byte through the existing authenticated gateway;
+existing saved records, pairings and backup history remain intact. The simple UI
+and production app/backend code did not change during integration.
 
 The app does not clear studies, pairing, games, repertoire selections, personal
-edits or backups. No backend restart or tethering-phone test is needed for this APK.
+edits or backups. The later source installation used one brief scoped PC service
+restart, with health checked afterward. The tethering phone was not used for tests.
