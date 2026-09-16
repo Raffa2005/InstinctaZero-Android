@@ -15,6 +15,20 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk=[35], manifest=Config.NONE)
 class RepertoireCorpusTest {
+    @Test fun nativeLegalMovesMatchIndependentPythonChessAcrossCorpus() {
+        val path=System.getenv("REPERTOIRE_LEGAL_CASES");assumeTrue(path!=null)
+        val cases=JSONArray(File(path!!).readText())
+        for(i in 0 until cases.length()) {
+            val row=cases.getJSONObject(i);val expected=row.getJSONArray("moves")
+            val actual=RepertoireLegalMoves.from(row.getString("fen"))
+            assertEquals("Legal move count $i",expected.length(),actual.size)
+            for(j in 0 until expected.length()) {
+                val move=expected.getJSONObject(j);val found=actual.single { it.uci==move.getString("uci") }
+                assertEquals("Legal destination $i ${found.uci}",move.getString("fen"),found.fen)
+                assertEquals("SAN $i ${found.uci}",move.getString("san"),RepertoireLegalMoves.san(row.getString("fen"),found.uci))
+            }
+        }
+    }
     @Test fun nativePositionBookMatchesIndependentPositionUnionsOnARealCorpus() {
         val index = System.getenv("REPERTOIRE_TEST_INDEX")
         val reference = System.getenv("REPERTOIRE_TEST_CASES")

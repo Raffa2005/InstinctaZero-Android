@@ -159,7 +159,7 @@
       const unique = new Map();
       for (const {rep, move} of entries) {
         const comments = Array.isArray(move.comments) ? move.comments : [move.comment];
-        for (const [role, notes] of [['Before move', move.starting_comments || []], ['', comments]]) for (const text of notes) if (typeof text === 'string' && text.trim()) {
+        for (const [role, notes] of [['Before move', move.starting_comments || []], ['', comments], ['Source note', move.source_comments || []]]) for (const text of notes) if (typeof text === 'string' && text.trim()) {
           const key = JSON.stringify([role,text]);
           if (!unique.has(key)) unique.set(key, {text, role, sources:new Set()});
           unique.get(key).sources.add(rep.name);

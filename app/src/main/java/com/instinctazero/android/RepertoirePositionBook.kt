@@ -21,7 +21,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
     data class Flags(val active: Boolean, val optional: Boolean = false)
     data class Edge(val uci: String, val san: String, val fen: String, val before: String,
         val active: Boolean, val optional: Boolean, val kind: String, val reason: String,
-        val nodes: List<Node>, val edited: Boolean)
+        val nodes: List<Node>, val edited: Boolean, val reentry: Boolean = false)
     data class Addition(val before: String, val fen: String, val uci: String, val san: String, val anchored: Boolean = false, val ply: Int = 0)
     private val nodesById = mutableMapOf<Long,Node>()
     private val positions = mutableMapOf<String,List<Node>>()
@@ -29,6 +29,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
     private val paths = mutableMapOf<String,List<Node>>()
     private val inherited = mutableMapOf<Long,Flags>()
     private val edgeCache = mutableMapOf<String,List<Edge>>()
+    private val candidateCache = mutableMapOf<String,List<Edge>>()
     private val activeCache = mutableMapOf<String,Boolean>()
     private val positionEdits = mutableMapOf<String,JSONObject?>()
     private val transitions = mutableMapOf<Pair<String,String>,Transition>()
@@ -221,8 +222,50 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
                     if(edit?.optString("kind")=="analysis")"Excluded on this phone. The original remains unchanged." else best.reason,
                     nodes,edit!=null || nodes.any { local.has(it.path) })
             }
+    /** Only absent associations may be inferred. An explicit informational source
+     * edge stays informational even if its destination also occurs in theory. */
+    private fun reentries(fen: String, recorded: List<Edge>): List<Edge> = candidateCache.getOrPut(fen) {
+        val legal=RepertoireLegalMoves.from(fen).filter { move -> recorded.none { it.uci==move.uci } }
+        if(legal.isEmpty())return@getOrPut emptyList()
+        if(hasLabels) {
+            val source=factsAt(fen);prepareFlags(source)
+            if(source.isNotEmpty() && source.none(::sourceAllowed) && localNodes.none { it.fen==fen && effective(it).active })return@getOrPut emptyList()
+        }
+        val targets=legal.map { it.fen }.distinct()
+        // Unedited source membership needs no occurrence objects, parent joins or
+        // comments. Keep a single indexed aggregate for the whole legal neighborhood.
+        val eligiblePositions=if(!hasLabels && localNodes.isEmpty()) {
+            val result=mutableMapOf<String,Boolean>()
+            db?.rawQuery("SELECT fen,MIN(line_alternative) FROM nodes WHERE repertoire_id=? AND fen IN (${targets.joinToString(",") { "?" }}) AND theory=1 GROUP BY fen",arrayOf(rep,*targets.toTypedArray()),cancellation)?.use {
+                while(it.moveToNext())result[it.getString(0)]=it.getInt(1)==1
+            };result
+        } else {
+            val found=facts("n.fen IN (${targets.joinToString(",") { "?" }})",targets.toTypedArray()) + localNodes.filter { it.fen in targets }
+            prepareFlags(found)
+            found.filter { effective(it).active }.groupBy { it.fen }.mapValues { (_,nodes) -> nodes.all { effective(it).optional } }
+        }
+        legal.mapNotNull { move ->
+            cancellation?.throwIfCanceled()
+            if(move.fen !in eligiblePositions && localRoot!=move.fen)return@mapNotNull null
+            val edit=local.optJSONObject(edgeKey(fen,move.uci))
+            val excluded=edit?.optBoolean("deleted")==true || edit?.optString("kind")=="analysis"
+            Edge(move.uci,RepertoireLegalMoves.san(fen,move.uci),move.fen,fen,!excluded,
+                edit?.optString("kind")=="alternative" || eligiblePositions[move.fen]==true,
+                if(excluded)"analysis" else "repertoire",
+                if(excluded)"Excluded on this phone. The original remains unchanged." else "Legal transposition into a covered repertoire position.",
+                emptyList(),edit!=null,true)
+        }
+    }
     fun edges(fen: String): List<Edge> = edgeCache.getOrPut(fen) {
-        mergeEdges(fen,sourceChildren(fen) + localNodes.filter { it.before==fen })
+        val recorded=mergeEdges(fen,sourceChildren(fen) + localNodes.filter { it.before==fen })
+        (recorded+reentries(fen,recorded)).also { sharedActivity?.putChoices(rep,fen,it.filter { e -> e.active && !deleted(e) }.map { e -> e.uci }) }
+    }
+    private fun hasContinuation(fen: String): Boolean {
+        sharedActivity?.choices(rep,fen)?.let { return it.isNotEmpty() }
+        if(!hasLabels && localNodes.isEmpty() && "fen_before" in columns &&
+            db?.rawQuery("SELECT 1 FROM nodes WHERE repertoire_id=? AND fen_before=? AND theory=1 LIMIT 1",arrayOf(rep,fen),cancellation)?.use { it.moveToFirst() }==true)return true
+        val recorded=mergeEdges(fen,factsChildren(fen))
+        return recorded.any { it.active && !deleted(it) } || reentries(fen,recorded).any { it.active && !deleted(it) }
     }
     fun deleted(edge: Edge) = local.optJSONObject(edgeKey(edge.before,edge.uci))?.optBoolean("deleted")==true
     fun recommendation(edge: Edge,side: String): String {
@@ -232,30 +275,28 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         val chosen=candidates.firstOrNull { local.optJSONObject(edgeKey(it.before,it.uci))?.optString("kind")=="main" }
         if(chosen!=null)return if(chosen.uci==edge.uci)"main" else "alternative"
         if(candidates.size==1)return "main"
+        if(edge.reentry)return "unassigned" // A position match is not a ranking of its incoming moves.
         if(candidates.none { !it.optional })return "unassigned"
         return if(edge.optional)"alternative" else "main"
     }
     /** Cheap first-stage UI facts; comments and full move details arrive separately. */
     fun marker(fen: String): JSONObject {
         val active=active(fen)
-        val continuation=if(!active)false else if(!hasLabels && localNodes.isEmpty() && "fen_before" in columns)
-            db?.rawQuery("SELECT 1 FROM nodes WHERE repertoire_id=? AND fen_before=? AND theory=1 LIMIT 1",arrayOf(rep,fen),cancellation)?.use { it.moveToFirst() }==true
-        else factsChildren(fen).let { prepareFlags(it);it.any { n -> effective(n).active } }
+        val continuation=active && hasContinuation(fen)
         return JSONObject().put("fen",fen).put("theory",active).put("end_of_line",active && !continuation)
     }
     /** Nearest earlier position with another active book continuation, not a path ID. */
     fun intersection(history: List<String>,moves: List<String>): Int {
         if(history.size!=moves.size+1)return -1
-        val possible=mutableSetOf<String>()
-        if("fen_before" in columns)for(chunk in history.dropLast(1).distinct().chunked(400)) {
-            db?.rawQuery("SELECT DISTINCT fen_before FROM nodes WHERE repertoire_id=? AND fen_before IN (${chunk.joinToString(",") { "?" }}) AND theory=1",arrayOf(rep,*chunk.toTypedArray()),cancellation)?.use { while(it.moveToNext())possible.add(it.getString(0)) }
-        } else possible.addAll(history)
-        possible.addAll(localNodes.map { it.before })
         for(ply in moves.indices.reversed()) {
             cancellation?.throwIfCanceled()
-            if(history[ply] !in possible)continue
-            val candidates=factsChildren(history[ply]);prepareFlags(candidates)
-            if(candidates.any { it.uci!=moves[ply] && effective(it).active })return ply
+            val fen=history[ply]
+            val choices=sharedActivity?.choices(rep,fen) ?: run {
+                val recorded=mergeEdges(fen,factsChildren(fen))
+                (recorded+reentries(fen,recorded)).filter { it.active && !deleted(it) }.map { it.uci }
+                    .also { sharedActivity?.putChoices(rep,fen,it) }
+            }
+            if(choices.any { it!=moves[ply] })return ply
         }
         return -1
     }
@@ -267,8 +308,10 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         return mergeEdges(fen,source + localNodes.filter { it.before==fen && it.uci==uci }).firstOrNull()
     }
     private fun transition(fen: String, uci: String): Transition = sharedActivity?.transition(rep,fen,uci) ?: transitions.getOrPut(fen to uci) {
+        val edit=local.optJSONObject(edgeKey(fen,uci))
         val edge=edge(fen,uci)
         when {
+            edit?.optBoolean("deleted")==true || edit?.optString("kind")=="analysis" -> Transition.BLOCKED
             edge==null -> Transition.MISSING
             deleted(edge) -> Transition.BLOCKED
             edge.active -> Transition.ACTIVE
@@ -309,9 +352,9 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         return JSONObject().put("fen",fen).put("known",nodes.isNotEmpty()).put("theory",eligible.isNotEmpty()).put("alternative",optional)
             .put("kind",if(eligible.isNotEmpty())"repertoire" else best?.kind ?: "unknown")
             .put("reason",best?.reason ?: "Outside this repertoire.").put("deviation",0)
-            .put("end_of_line",eligible.isNotEmpty() && edges(fen).none { it.active })
+            .put("end_of_line",eligible.isNotEmpty() && !hasContinuation(fen))
             .put("comments",positionComments(fen,comments(nodes))).put("starting_comments",comments(nodes,true))
-            .also { sharedActivity?.put(rep,fen,eligible.isNotEmpty());if(local.optJSONObject(commentKey(fen))?.has("comment")==true) it.put("comment_edited",true) }
+            .also { sharedActivity?.put(rep,fen,eligible.isNotEmpty());if(local.optJSONObject(commentKey(fen))?.has("comment")==true) it.put("comment_edited",true).put("source_comments",comments(nodes)) }
     }
     fun moveJson(edge: Edge, side: String): JSONObject {
         val own = edge.before.split(' ').getOrNull(1) == if(side=="white")"w" else "b"
@@ -320,7 +363,9 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
             .put("recommendation",recommendation(edge,side)).put("deleted",deleted(edge))
             .put("alternative",edge.optional).put("own",own).put("kind",if(edge.active && edge.optional && own)"alternative" else edge.kind)
             .put("reason",edge.reason).put("edited",edge.edited).put("deviation",0)
-            .put("comments",positionComments(edge.fen,comments(edge.nodes))).put("starting_comments",comments(edge.nodes,true))
+            .put("comments",if(edge.reentry)target.getJSONArray("comments") else positionComments(edge.fen,comments(edge.nodes)))
+            .put("starting_comments",if(edge.reentry)JSONArray() else comments(edge.nodes,true))
+            .also { if(target.has("source_comments"))it.put("source_comments",target.getJSONArray("source_comments")) }
             .put("position",target).put("end_of_line",target.getBoolean("end_of_line"))
     }
     /** One ordinary save extends the most recent recorded position, whether its

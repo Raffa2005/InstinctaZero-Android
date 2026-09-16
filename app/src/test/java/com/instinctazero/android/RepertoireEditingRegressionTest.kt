@@ -131,4 +131,41 @@ class RepertoireEditingRegressionTest {
         }
         File(output!!).writeText(rows.toString())
     }
+    /** Run only after the immutable correction snapshot is ready. This uses real
+     * old/new downloads, not node IDs or a fabricated replacement corpus. */
+    @Test fun readySourceSnapshotRefreshRetainsPersonalOverlayRestartUndoAndBackup() {
+        val next=System.getenv("REPERTOIRE_REFRESH_INDEX");assumeTrue(next!=null)
+        val file=corpus();val pictured=pictured(file);val parent=before(pictured);val extension=extend(pictured)
+        var store=RepertoireStore(RuntimeEnvironment.getApplication())
+        fun result(r: JSONObject)=store.lookup(r).getJSONArray("results").getJSONObject(0)
+        fun edit(r: JSONObject,kind: String)=store.edit(JSONObject(r.toString()).put("id","taimanov").put("kind",kind))
+        edit(extension,"add")
+        val other=JSONObject(parent.toString());val alternate=RepertoireLegalMoves.from(PARENT).single { it.uci=="g7g6" }
+        other.getJSONArray("history").put(alternate.uci);other.getJSONArray("entries").put(JSONObject().put("san","g6").put("fen",alternate.fen));other.put("fen",alternate.fen)
+        edit(other,"add")
+        val main=JSONObject(parent.toString()).put("history",pictured.getJSONArray("history"));edit(main,"main")
+        val alternative=JSONObject(parent.toString()).put("history",other.getJSONArray("history"));edit(alternative,"alternative")
+        val deletion=prefix(extension,19).put("history",prefix(extension,20).getJSONArray("history"));edit(deletion,"delete")
+        store.edit(JSONObject(parent.toString()).put("id","taimanov").put("kind","comment").put("comment","Personal note preserved across source refresh."))
+        store.saveSettings("{\"_selected\":[\"taimanov\",\"symmetrical_english\"],\"_bookMarker\":true}")
+        val before=store.backupSnapshot();val token=store.undoInfo()!!.getString("token")
+        val bytes=File(next!!).readBytes();store.install(bytes.inputStream(),RepertoireStore.hash(bytes))
+        store=RepertoireStore(RuntimeEnvironment.getApplication())
+        assertEquals(before.getJSONObject("edits").toString(),store.backupSnapshot().getJSONObject("edits").toString())
+        val current=result(parent);val choices=current.getJSONArray("moves").let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
+        assertEquals("main",choices.single { it.getString("uci")=="b5b4" }.getString("recommendation"))
+        assertEquals("alternative",choices.single { it.getString("uci")=="g7g6" }.getString("recommendation"))
+        assertEquals("g8f6",result(prefix(extension,19)).getJSONArray("deleted_moves").getJSONObject(0).getString("uci"))
+        assertEquals("Personal note preserved across source refresh.",current.getJSONArray("comments").getString(0))
+        SQLiteDatabase.openDatabase(next,null,SQLiteDatabase.OPEN_READONLY).use { db ->
+            val comments=db.rawQuery("SELECT DISTINCT comment FROM nodes WHERE repertoire_id='taimanov' AND fen=? AND comment<>''",arrayOf(PARENT)).use { rows -> buildSet { while(rows.moveToNext())add(rows.getString(0)) } }
+            val visible=current.getJSONArray("source_comments")
+            assertEquals(comments,(0 until visible.length()).map { visible.getString(it) }.toSet())
+        }
+        val standalone=JSONObject(parent.toString()).put("root",PARENT).put("history",JSONArray()).put("entries",JSONArray())
+        assertEquals(current.getJSONArray("moves").toString(),result(standalone).getJSONArray("moves").toString())
+        store.undo(token);assertFalse(result(parent).optBoolean("comment_edited"))
+        store.restoreBackup(before);assertEquals(before.getJSONObject("edits").toString(),store.backupSnapshot().getJSONObject("edits").toString())
+        assertEquals(RepertoireStore.hash(bytes),RepertoireStore.hash(file.readBytes()))
+    }
 }

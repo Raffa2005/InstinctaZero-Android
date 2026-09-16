@@ -1,5 +1,9 @@
 # Offline analysis assets
 
+* Native repertoire one-ply move generation uses Chesslib 1.3.7
+  (https://github.com/bhlangonijr/chesslib) and Apache Commons Lang 3.18.0,
+  both Apache-2.0. The complete license is in `Apache-2.0.txt`.
+
 * `analysis/legacy-chessground.js` is derived from the Chessground implementation in
   lichobile commit `063167dda7119386cf36708d004d4565203d449a`. Per its upstream
   `COPYING.md`, they are GPL-3.0-or-later; the source and license are retained in

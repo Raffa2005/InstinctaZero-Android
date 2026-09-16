@@ -2,6 +2,15 @@ package com.instinctazero.android
 import org.junit.Assert.*
 import org.junit.Test
 class RepertoireActivityCacheTest {
+    @Test fun choicesAreBoundedIndependentAndClearedWithTheEditRevision() {
+        val cache=RepertoireActivityCache(maxBytes=500,maxEntries=2)
+        cache.putChoices("r","fen",listOf("a2a3"));cache.putChoices("s","fen",emptyList())
+        assertEquals(listOf("a2a3"),cache.choices("r","fen"));assertEquals(emptyList<String>(),cache.choices("s","fen"))
+        cache.putChoices("t","fen",listOf("b2b3"));assertNull(cache.choices("r","fen"))
+        cache.putChoices("t","fen",listOf("c2c3"));assertEquals(listOf("c2c3"),cache.choices("t","fen"))
+        cache.putChoices("r","huge".repeat(100),listOf("a2a3"));assertNull(cache.choices("r","huge".repeat(100)))
+        cache.clear();assertNull(cache.choices("t","fen"))
+    }
     @Test fun falseFactsStayDistinctFromMissesAndOtherRepertoires() {
         val cache=RepertoireActivityCache(maxEntries=2)
         cache.put("r","a",false);cache.put("s","a",true)

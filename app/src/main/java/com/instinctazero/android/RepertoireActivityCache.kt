@@ -5,6 +5,10 @@ internal class RepertoireActivityCache(private val maxBytes: Int = 512 * 1024, p
     enum class Transition { MISSING, ACTIVE, RECONNECTABLE, INFORMATIONAL, BLOCKED }
     private val entries = LinkedHashMap<String,Int>(16,.75f,true)
     private var bytes = 0
+    // Separate budget prevents a long game's coverage checks from evicting all its
+    // one-ply choices (and vice versa). Neither cache stores history or comments.
+    private val choices = LinkedHashMap<String,List<String>>(16,.75f,true)
+    private var choiceBytes = 0
     private fun key(rep: String, fen: String) = "p\n$rep\n$fen"
     private fun size(key: String) = 96 + key.length * 2
     fun get(rep: String, fen: String): Boolean? = entries[key(rep,fen)]?.let { it==1 }
@@ -22,5 +26,17 @@ internal class RepertoireActivityCache(private val maxBytes: Int = 512 * 1024, p
             val entry=oldest.next();bytes-=size(entry.key);oldest.remove()
         }
     }
-    fun clear() { entries.clear();bytes=0 }
+    fun choices(rep: String, fen: String): List<String>? = choices[key(rep,fen)]
+    private fun choiceSize(key: String,value: List<String>) = size(key)+32+value.sumOf { 40+it.length*2 }
+    fun putChoices(rep: String,fen: String,value: List<String>) {
+        val key=key(rep,fen);val size=choiceSize(key,value)
+        if(size>maxBytes)return
+        choices.remove(key)?.let { choiceBytes-=choiceSize(key,it) }
+        choices[key]=value.toList();choiceBytes+=size
+        val oldest=choices.entries.iterator()
+        while(choiceBytes>maxBytes || choices.size>maxEntries) {
+            val entry=oldest.next();choiceBytes-=choiceSize(entry.key,entry.value);oldest.remove()
+        }
+    }
+    fun clear() { entries.clear();bytes=0;choices.clear();choiceBytes=0 }
 }

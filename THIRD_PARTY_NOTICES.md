@@ -1,5 +1,12 @@
 # Third-party notices
 
+## Chesslib and Apache Commons Lang
+
+Native one-ply repertoire re-entry uses Chesslib 1.3.7 by bhlangonijr
+(https://github.com/bhlangonijr/chesslib), with Apache Commons Lang 3.18.0.
+Both use Apache-2.0; the license is shipped in `app/src/main/assets/licenses/Apache-2.0.txt`.
+Only local move generation/notation is used, not engine analysis.
+
 ## Legacy Lichess mobile Chessground
 
 `web-src/legacy-chessground/` is a source-preserving snapshot of the
