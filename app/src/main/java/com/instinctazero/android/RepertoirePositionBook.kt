@@ -296,8 +296,8 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
             }
     /** Only absent associations may be inferred. An explicit informational source
      * edge stays informational even if its destination also occurs in theory. */
-    private fun reentries(fen: String, recorded: List<Edge>): List<Edge> = candidateCache.getOrPut(fen) {
-        val legal=RepertoireLegalMoves.from(fen).filter { move -> recorded.none { it.uci==move.uci } }
+    private fun reentries(fen: String, recorded: Set<String>): List<Edge> = candidateCache.getOrPut(fen) {
+        val legal=RepertoireLegalMoves.from(fen).filter { move -> move.uci !in recorded }
         if(legal.isEmpty())return@getOrPut emptyList()
         if(hasLabels) {
             val source=factsAt(fen);prepareFlags(source)
@@ -319,7 +319,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
     }
     fun edges(fen: String): List<Edge> = edgeCache.getOrPut(fen) {
         val recorded=mergeEdges(fen,sourceChildren(fen) + localByBefore[fen].orEmpty())
-        (recorded+reentries(fen,recorded)).also { sharedActivity?.putChoices(rep,fen,it.filter { e -> e.active && !deleted(e) }.map { e -> e.uci }) }
+        (recorded+reentries(fen,recorded.mapTo(mutableSetOf()) { it.uci })).also { sharedActivity?.putChoices(rep,fen,it.filter { e -> e.active && !deleted(e) }.map { e -> e.uci }) }
     }
     private fun hasContinuation(fen: String): Boolean {
         sharedActivity?.choices(rep,fen)?.let { return it.isNotEmpty() }
@@ -328,7 +328,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
             (!hasLabels && "fen_before" in columns &&
                 db?.rawQuery("SELECT 1 FROM nodes WHERE repertoire_id=? AND fen_before=? AND theory=1 LIMIT 1",arrayOf(rep,fen),cancellation)?.use { it.moveToFirst() }==true) || run {
                 val recorded=mergeEdges(fen,factsChildren(fen))
-                recorded.any { it.active && !deleted(it) } || reentries(fen,recorded).any { it.active && !deleted(it) }
+                recorded.any { it.active && !deleted(it) } || reentries(fen,recorded.mapTo(mutableSetOf()) { it.uci }).any { it.active && !deleted(it) }
             }
         sharedActivity?.putContinuation(rep,fen,found)
         return found
@@ -351,18 +351,36 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         val continuation=active && hasContinuation(fen)
         return JSONObject().put("fen",fen).put("theory",active).put("end_of_line",active && !continuation)
     }
+    /** Intersections need complete UCI choices, not hundreds of duplicate source
+     * nodes. Keep all recorded UCIs so informational edges still suppress re-entry. */
+    private fun continuationChoices(fen: String): List<String> = sharedActivity?.choices(rep,fen) ?: run {
+        val choices = if(!hasLabels && (db==null || "fen_before" in columns)) {
+            val recorded=mutableSetOf<String>();val active=linkedSetOf<String>()
+            db?.rawQuery("SELECT uci,MAX(theory) FROM nodes WHERE repertoire_id=? AND fen_before=? GROUP BY uci",
+                arrayOf(rep,fen),cancellation)?.use { rows ->
+                while(rows.moveToNext()) {
+                    cancellation?.throwIfCanceled()
+                    val uci=rows.getString(0) ?: continue
+                    if(uci.matches(uciPattern)) { recorded.add(uci);if(rows.getInt(1)==1)active.add(uci) }
+                }
+            }
+            for(n in localByBefore[fen].orEmpty()) if(n.uci.matches(uciPattern)) {
+                recorded.add(n.uci);if(effective(n).active)active.add(n.uci)
+            }
+            for(edge in reentries(fen,recorded))if(edge.active && !deleted(edge))active.add(edge.uci)
+            active.toList()
+        } else {
+            val recorded=mergeEdges(fen,factsChildren(fen))
+            (recorded+reentries(fen,recorded.mapTo(mutableSetOf()) { it.uci })).filter { it.active && !deleted(it) }.map { it.uci }
+        }
+        choices.also { sharedActivity?.putChoices(rep,fen,it) }
+    }
     /** Nearest earlier position with another active book continuation, not a path ID. */
     fun intersection(history: List<String>,moves: List<String>): Int {
         if(history.size!=moves.size+1)return -1
         for(ply in moves.indices.reversed()) {
             cancellation?.throwIfCanceled()
-            val fen=history[ply]
-            val choices=sharedActivity?.choices(rep,fen) ?: run {
-                val recorded=mergeEdges(fen,factsChildren(fen))
-                (recorded+reentries(fen,recorded)).filter { it.active && !deleted(it) }.map { it.uci }
-                    .also { sharedActivity?.putChoices(rep,fen,it) }
-            }
-            if(choices.any { it!=moves[ply] })return ply
+            if(continuationChoices(history[ply]).any { it!=moves[ply] })return ply
         }
         return -1
     }

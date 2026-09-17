@@ -130,7 +130,7 @@ class RepertoireEditedLinePerformanceTest {
                 println("Edited Sicilian main=$main ply=$ply: $count queries, $read decoded rows, $elapsed ms")
                 if(System.getenv("EDITED_LINE_BASELINE")!="1") {
                     assertTrue("No per-addition source reads: $count",count<=40)
-                    assertTrue("Do not decode unrelated duplicate occurrences: $read",read<=2000)
+                    assertTrue("Do not decode unrelated duplicate occurrences: $read",read<=50)
                 }
             }
         }
