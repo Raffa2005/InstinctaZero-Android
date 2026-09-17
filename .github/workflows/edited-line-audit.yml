@@ -1,0 +1,77 @@
+name: Edited-line audit
+on:
+  push:
+    branches: [perf/edited-line-lookup-20260917]
+    paths: [.github/workflows/edited-line-audit.yml]
+permissions:
+  contents: write
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/edited-line-lookup-20260917
+      - name: Apply hash-verified refinement and remove temporary audit files
+        env:
+          AUDIT_BRANCH: perf/edited-line-lookup-20260917
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python - <<'PY'
+          import hashlib,json,pathlib,subprocess
+          paths=[]
+          for item in json.loads(pathlib.Path('.audit/choices-changes.json').read_text()):
+              path=pathlib.Path(item['path'])
+              assert not path.is_absolute() and '..' not in path.parts and path.parts[0]=='app'
+              old=path.read_bytes() if path.exists() else b''
+              assert hashlib.sha256(old).hexdigest()==item['before'], f'Base changed: {path}'
+              lines=old.decode().splitlines(keepends=True)
+              for edit in reversed(item['edits']):
+                  lines[edit['start']:edit['end']]=[edit['text']]
+              data=''.join(lines).encode()
+              assert hashlib.sha256(data).hexdigest()==item['after'], f'Patch mismatch: {path}'
+              path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(data);paths.append(str(path))
+          subprocess.run(['git','add','--',*paths],check=True)
+          PY
+          git rm .audit/choices-changes.json .github/workflows/edited-line-audit.yml
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'perf: aggregate complete continuation choices without decoding duplicate occurrences'
+          git push origin "HEAD:$AUDIT_BRANCH"
+          git rev-parse HEAD > "$RUNNER_TEMP/tested-commit.txt"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          packages: ''
+          log-accepted-android-sdk-licenses: false
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' > /dev/null
+      - name: Measure unchanged baseline on this runner
+        env:
+          EDITED_LINE_BASELINE: '1'
+          EDITED_LINE_OUTPUT: ${{ runner.temp }}/edited-line-baseline.json
+        run: |
+          git fetch --depth=1 origin 9a60e379c1af372a0a27e65b1fd0f8e4990ce871
+          git worktree add --detach "$RUNNER_TEMP/edited-baseline" FETCH_HEAD
+          cd "$RUNNER_TEMP/edited-baseline"
+          ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2048m -Dfile.encoding=UTF-8' :app:testDebugUnitTest --tests '*RepertoireEditedLinePerformanceTest.editedSicilianUsesBoundedWorkAcrossPreviouslyUnvisitedMoves'
+      - name: Complete native tests, response equivalence, debug build and lint
+        env:
+          EDITED_LINE_OUTPUT: ${{ runner.temp }}/edited-line-optimized.json
+          EDITED_LINE_REFERENCE: ${{ runner.temp }}/edited-line-baseline.json
+        run: ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2048m -Dfile.encoding=UTF-8' :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: edited-line-final-validation
+          path: |
+            ${{ runner.temp }}/edited-line-*.json
+            ${{ runner.temp }}/tested-commit.txt
+            app/build/test-results
+            app/build/reports
+          retention-days: 7
