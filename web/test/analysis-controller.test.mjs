@@ -201,9 +201,9 @@ test('rapid navigation and interrupted analysis settle only on the current reque
   let timerId=0,requestId=0;const timers=new Map(),requests=[],cancelled=[],state={history:['e2e4'],editing:false};
   const engine={attempts:0,lines:[]},settings={enabled:true,nodes:1000},cursor={},document={hidden:false},window={InstinctaZero:{}};
   const native=()=>({cancelAnalysis:id=>cancelled.push(id),startAnalysis:raw=>{const id='s'+ ++requestId;requests.push({id,...JSON.parse(raw)});return id;}});
-  const f=new Function('engine','settings','cursor','document','window','native','setTimeout','clearTimeout','studyRequest','coherentAnalysisSnapshot','applyAnalysisSnapshot','renderActivePanel','renderArrows','state',
+  const f=new Function('engine','settings','cursor','document','window','native','setTimeout','clearTimeout','studyRequest','coherentAnalysisSnapshot','applyAnalysisSnapshot','renderActivePanel','renderArrows','state','queueAnalysisRender',
     `let analysisActive=true,gameLoading=false,repertoirePanel=null,studyContext={},book={};const editingPosition=()=>state.editing,cancelBookRequest=()=>{},resetStudy=()=>{};const chess={moves:()=>['legal']};${transport}${recovery}${callback};return {scheduleAnalysis,recoverAnalysis,stopEngineTransport};`
-  )(engine,settings,cursor,document,window,native,(fn,ms)=>{const id=++timerId;timers.set(id,{fn,ms});return id;},id=>timers.delete(id),()=>({history:state.history}),data=>data.valid===false?null:data,(snapshot,status)=>{engine.lines=snapshot.lines;engine.status=status;},()=>{},()=>{},state);
+  )(engine,settings,cursor,document,window,native,(fn,ms)=>{const id=++timerId;timers.set(id,{fn,ms});return id;},id=>timers.delete(id),()=>({history:state.history}),data=>data.valid===false?null:data,(snapshot,status)=>{engine.lines=snapshot.lines;engine.status=status;},()=>{},()=>{},state,()=>{});
   const tick=ms=>{for(const [id,timer] of [...timers])if(timer.ms===ms){timers.delete(id);timer.fn();}};
   const emit=(id,event,data={})=>window.InstinctaZero.onNativeAnalysis(id,{event,data});
   f.scheduleAnalysis();tick(120);const obsolete=requests.at(-1).id;
@@ -532,7 +532,7 @@ test('active full-panel forms are not rebuilt by streamed engine updates', async
   const repertoire = new Function('panelView', 'renderPanel', 'heading', 'tab', `${source}; return renderActivePanel;`)(null, () => { renders += 1; }, () => { headings += 1; }, 'repertoire');
   repertoire();
   assert.equal(renders, 1, 'engine updates must not replace a repertoire control during a tap');
-  assert.match(controller.slice(controller.indexOf('onNativeAnalysis'),controller.indexOf('onNativeExplorer')), /renderActivePanel/);
+  assert.match(controller.slice(controller.indexOf('onNativeAnalysis'),controller.indexOf('onNativeExplorer')), /queueAnalysisRender/);
   assert.match(controller, /settings\.showArrows = !settings\.showArrows/);
   assert.match(controller, /renderArrows\(engine\.lines\)/);
 });
@@ -650,4 +650,53 @@ test('account changes and missing stored games safely detach archived context', 
   const controller = await readFile(controllerUrl, 'utf8');
   assert.match(controller, /onAccountChanged = function \(\) \{ if \(studyContext\.gameId \|\| gameLoading\) resetStudy\(\); \}/);
   assert.match(controller, /studyContext\.gameId && Number\(payload\.code \|\| data\.code\) === 404/);
+});
+
+
+test('stream bursts paint once per frame without rebuilding unrelated panels', async () => {
+  const controller = await readFile(controllerUrl, 'utf8');
+  const scheduler = functionSource(controller, 'queueAnalysisRender', 'watchAnalysis');
+  const transport = functionSource(controller, 'stopEngineTransport', 'commitMove');
+  const snapshot = functionSource(controller, 'applyAnalysisSnapshot', 'restoreCachedAnalysis');
+  const callback = controller.slice(controller.indexOf('window.InstinctaZero.onNativeAnalysis ='), controller.indexOf('  window.InstinctaZero.onNativeExplorer ='));
+  const frames = new Map(), paints = [], engine = {requestId:'current', lines:[]}, cursor = {};
+  let sequence = 0;
+  const window = {InstinctaZero:{}}, document = {hidden:false};
+  const ui = new Function('engine','cursor','window','document','requestAnimationFrame','cancelAnimationFrame','renderPanel','renderArrows','heading', `
+    let analysisActive=true, gameLoading=false, panelView=null, tab='engine';
+    const editingPosition=()=>false, native=()=>null, cancelBookRequest=()=>{}, watchAnalysis=()=>{}, recoverAnalysis=()=>{},
+      studyContext={}, settings={nodes:1000}, coherentAnalysisSnapshot=data=>data, chess={moves:()=>['e4']};
+    ${transport}${scheduler}${snapshot}${callback}
+    return { resetTransport, hide:()=>{analysisActive=false;resetTransport();}, setTab:value=>{tab=value;}, menu:()=>{panelView='settings';} };
+  `)(engine,cursor,window,document,fn=>{const id=++sequence;frames.set(id,fn);return id;},id=>frames.delete(id),
+    ()=>paints.push(['panel',engine.status]), lines=>paints.push(['arrows',lines[0]?.nodes]), ()=>paints.push(['heading']));
+  const emit=(event,data)=>window.InstinctaZero.onNativeAnalysis('current',{event,data});
+  const flush=()=>{for(const [id,fn] of [...frames]){frames.delete(id);fn();}};
+  for(let nodes=1;nodes<=100;nodes++)emit('lc0',{lines:[{nodes}]});
+  assert.equal(engine.lines[0].nodes,100,'model updates are synchronous, not dropped');
+  assert.equal(frames.size,1);assert.equal(paints.length,0);
+  emit('done',{final_snapshot:{lines:[{nodes:1000}]}});
+  assert.equal(engine.status,'done');assert.equal(engine.requestId,null);assert.equal(frames.size,1);
+  flush();assert.deepEqual(paints,[['arrows',1000],['panel','done']]);
+  for(const tab of ['moves','book','chart','repertoire']){
+    paints.length=0;engine.requestId='current';ui.setTab(tab);
+    emit('lc0',{progress:{nodes:123}});flush();
+    assert.deepEqual(paints,[['heading']],`${tab} is not rebuilt for engine progress`);
+  }
+  ui.setTab('info');paints.length=0;emit('lc0',{progress:{nodes:456}});flush();assert.deepEqual(paints,[['panel','done']]);
+  ui.menu();paints.length=0;emit('lc0',{progress:{nodes:789}});flush();assert.deepEqual(paints,[['heading']]);
+  emit('lc0',{lines:[{nodes:2000}]});ui.resetTransport();assert.equal(frames.size,0,'navigation cancels queued paints');
+  engine.requestId='current';emit('lc0',{lines:[{nodes:3000}]});document.hidden=true;paints.length=0;flush();assert.equal(paints.length,0);
+  document.hidden=false;emit('lc0',{lines:[{nodes:4000}]});ui.hide();assert.equal(frames.size,0);
+});
+
+test('history remains root-to-cursor including promotions on long branches', async () => {
+  const controller = await readFile(controllerUrl, 'utf8');
+  const history = functionSource(controller, 'history', 'legalDests');
+  let cursor = {move:null,parent:null}; const expected=[];
+  for(let i=0;i<512;i++){
+    const move = i===511 ? {from:'a7',to:'a8',promotion:'n'} : {from:'g1',to:'f3'};
+    expected.push(move.from+move.to+(move.promotion||''));cursor={parent:cursor,move};
+  }
+  assert.deepEqual(new Function('cursor',`${history};return history();`)(cursor),expected);
 });
