@@ -1,6 +1,6 @@
 # Unified repertoire store — implementation acceptance plan
 
-Implementation awaiting private acceptance, not a released migration. Baseline: v0.8.9. PR2 reviewed at
+Implementation privately accepted for v0.8.10. Baseline: v0.8.9. PR2 reviewed at
 1bcf38c7f84988c12954cadbf1047a2656457428: useful bounded batching/cancellation and
 complete-response regression coverage, but its persisted source/JSON split is not
 the requested final architecture. No live library or phone changes are authorized
@@ -98,7 +98,15 @@ note links now use the exact equivalent format filter. Raw source occurrences an
 their position notes remain intact. Synthetic coverage includes invalid/null
 records beside ordinary moves and missing-edge re-entry, plus terminal markers.
 Another 324 artificial source-mask/recommendation/repeated-position comparisons
-pass. The corrected commit still requires a fresh private acceptance run.
+pass. Fresh private acceptance passed at `a04b5d1`: 600 independent source cases
+plus 1,116 personal positions, using the current 1,079-entry backup. All 1,716
+complete-response requests match the released reader through migration, refresh,
+restart, actual Undo, replacement-phone restore and old-reader v1 rollback.
+The four private refresh tests pass, including a personal note at an actually
+clarified source comment. The full current-index suite discovered 134 tests:
+123 passed, 11 optional-input skips, zero failures. All seven private input hashes
+were unchanged. Private fixtures/results remain outside this repository. This is
+host/native acceptance, not physical-phone validation.
 
 ## Same-host measurements
 

@@ -57,5 +57,11 @@ Python policy tests: 25 passed. Controller/browser checks: 65 passed. Phone-size
 touch checks cover repertoire comments/edits/Undo, re-entry in both orientations,
 game loading, privacy, maneuvers and the board editor. No USB-phone testing.
 
-Release remains gated on fresh scoped private acceptance of the corrected
-candidate, followed by signed-artifact and public-download verification.
+Scoped private acceptance of `a04b5d1` passed on the current 1,079-entry personal
+backup and old/current source snapshots. All 1,716 full-response comparisons pass
+through migration, refresh, restart, Undo, replacement-phone restore and old-reader
+rollback. The actual clarified-source/personal-note checks pass. Full current-index
+suite: 134 discovered, 123 passed, 11 optional-input skips, zero failures. Private
+inputs and live data were unchanged. Release publication also requires matching
+production signer/app ID, version 38 / 0.8.10, portrait orientation, extracted-asset
+touch checks and a byte-identical publicly downloadable APK.
