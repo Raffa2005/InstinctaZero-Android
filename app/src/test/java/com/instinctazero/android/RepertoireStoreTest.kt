@@ -62,7 +62,7 @@ class RepertoireStoreTest {
                 node(8,1,listOf("e2e4"),"model_game",0)
             }
         }
-        bytes = fixture.readBytes(); store = RepertoireStore(context)
+        bytes = fixture.readBytes();fixture.copyTo(File(context.filesDir,"mobile_repertoire.sqlite")); store = RepertoireStore(context)
         store.install(bytes.inputStream(), RepertoireStore.hash(bytes))
     }
     @Test fun warmTheoryAndMarkerCachesAvoidOpeningTheDatabase() {
@@ -141,6 +141,12 @@ class RepertoireStoreTest {
         .put("root",root).put("fen",fen(moves)).put("entries",entries(moves)).put("history",JSONArray(moves)).put("selected",JSONArray(selected))
     private fun result(moves: List<String>) = store.lookup(request(moves)).getJSONArray("results").getJSONObject(0)
     private fun edit(moves: List<String>, kind: String, rep: String = "white") = store.edit(request(moves).put("id",rep).put("kind",kind).put("fen",fen(moves.dropLast(1))))
+    private fun updateSource(change:(SQLiteDatabase)->Unit) {
+        val staged=File(context.cacheDir,"changed-source.sqlite");staged.writeBytes(bytes)
+        SQLiteDatabase.openDatabase(staged.path,null,SQLiteDatabase.OPEN_READWRITE).use(change)
+        val incoming=staged.readBytes();store.install(incoming.inputStream(),RepertoireStore.hash(incoming))
+    }
+    private fun savedEdits()=UnifiedRepertoireDatabase.canonical(store.backupSnapshot().getJSONObject("edits")).toByteArray()
 
     @Test fun mainRecommendationsArePositionScopedRecoverableAndNeverAllAlternatives() {
         addLine(listOf("d2d4"))
@@ -343,7 +349,7 @@ class RepertoireStoreTest {
 
     @Test fun allDistinctSourceCommentsSurviveForCurrentMoveAndContinuations() {
         val longComment = "A full annotation with <markup> & variations.\n".repeat(110)
-        SQLiteDatabase.openDatabase(File(context.filesDir,"mobile_repertoire.sqlite").path,null,SQLiteDatabase.OPEN_READWRITE).use { db ->
+        updateSource { db ->
             db.execSQL("UPDATE nodes SET comment=? WHERE id=8", arrayOf(longComment))
         }
         val played = result(listOf("e2e4")).getJSONArray("comments")
@@ -355,7 +361,7 @@ class RepertoireStoreTest {
 
     @Test fun transpositionMarkersRespectSourceExclusionsAndPositionIdentity() {
         val target = "rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -"
-        SQLiteDatabase.openDatabase(File(context.filesDir,"mobile_repertoire.sqlite").path,null,SQLiteDatabase.OPEN_READWRITE).use { db ->
+        updateSource { db ->
             db.execSQL("UPDATE nodes SET fen=? WHERE id=3",arrayOf(target))
         }
         fun match(fen: String = target) = store.lookup(request(listOf("g1f3","g8f6")).put("fen",fen)).getJSONArray("results").getJSONObject(0)
@@ -384,7 +390,7 @@ class RepertoireStoreTest {
 
     @Test fun endOfLineIncludesInformationalTailsAndExcludesUnknownHistories() {
         val terminal = listOf("e2e4","e7e5","g1f3","b8c6")
-        SQLiteDatabase.openDatabase(File(context.filesDir,"mobile_repertoire.sqlite").path,null,SQLiteDatabase.OPEN_READWRITE).use { db ->
+        updateSource { db ->
             db.execSQL("INSERT INTO nodes VALUES(9,5,'white',?,'f1b5','Bb5','analysis',0,0,'Information','A tail',?)",arrayOf(RepertoireStore.pathId(root,terminal+"f1b5"),fen(terminal+"f1b5")))
         }
         assertTrue(result(terminal).getBoolean("end_of_line"))
@@ -467,10 +473,10 @@ class RepertoireStoreTest {
     private fun addLine(moves: List<String>, rep: String = "white") = store.edit(request(moves).put("id",rep).put("kind","add")
         .put("entries",entries(moves)))
     private fun editsWithoutUndo(): Map<String, Map<String, String>> {
-        val saved = JSONObject(File(context.filesDir,"mobile_repertoire_edits.json").readText()).also { it.remove("_undo");it.remove("_settings") }
+        val saved = store.backupSnapshot().getJSONObject("edits").also { it.remove("_undo");it.remove("_settings") }
         return saved.keys().asSequence().associateWith { rep ->
             val paths = saved.getJSONObject(rep)
-            paths.keys().asSequence().associateWith { paths.getJSONObject(it).toString() }
+            paths.keys().asSequence().associateWith { UnifiedRepertoireDatabase.canonical(paths.getJSONObject(it)) }
         }
     }
     private fun undoToken() = store.undoInfo()!!.getString("token")
@@ -535,11 +541,11 @@ class RepertoireStoreTest {
 
     @Test fun failedAndNoOpEditsKeepTheLastMeaningfulUndo() {
         edit(listOf("e2e4"),"analysis"); val token = undoToken()
-        val before = File(context.filesDir,"mobile_repertoire_edits.json").readBytes()
+        val before = savedEdits()
         edit(listOf("e2e4"),"analysis")
         edit(listOf("e2e4","e7e5"),"reset")
         assertThrows(IllegalArgumentException::class.java) { addLine(listOf("e2e4","c7c5")) }
-        assertEquals(token,undoToken()); assertArrayEquals(before,File(context.filesDir,"mobile_repertoire_edits.json").readBytes())
+        assertEquals(token,undoToken()); assertArrayEquals(before,savedEdits())
         store.undo(token); assertTrue(result(listOf("e2e4")).getBoolean("theory"))
     }
 
@@ -557,30 +563,32 @@ class RepertoireStoreTest {
 
     @Test fun failedAtomicWritesPreserveBothTheEditsAndTheirUndo() {
         edit(listOf("e2e4"),"analysis"); val token = undoToken()
-        val before = File(context.filesDir,"mobile_repertoire_edits.json").readBytes()
-        val blocker = File(context.filesDir,"mobile_repertoire_edits.json.new")
-        assertTrue(blocker.mkdir())
-        try {
-            assertThrows(java.io.IOException::class.java) { store.undo(token) }
-            assertThrows(java.io.IOException::class.java) { edit(listOf("e2e4"),"analysis","black") }
-            assertEquals(token,undoToken()); assertFalse(result(listOf("e2e4")).getBoolean("theory"))
-            assertArrayEquals(before,File(context.filesDir,"mobile_repertoire_edits.json").readBytes())
-        } finally { assertTrue(blocker.delete()) }
+        val before = savedEdits()
+        store=RepertoireStore(context,checkpoint={ phase -> if(phase=="edit_commit")throw java.io.IOException("Injected transaction interruption") })
+        assertThrows(java.io.IOException::class.java) { store.undo(token) }
+        assertThrows(java.io.IOException::class.java) { edit(listOf("e2e4"),"analysis","black") }
+        assertEquals(token,undoToken()); assertFalse(result(listOf("e2e4")).getBoolean("theory"))
+        assertArrayEquals(before,savedEdits())
         store = RepertoireStore(context); store.undo(token)
         assertTrue(result(listOf("e2e4")).getBoolean("theory"))
     }
 
     @Test fun oldEditsAndInvalidJournalsRemainUsableWithoutInventingAnUndo() {
         edit(listOf("e2e4"),"analysis")
-        val saved = File(context.filesDir,"mobile_repertoire_edits.json")
-        val original = saved.readText()
-        val corrupt = JSONObject(original); corrupt.getJSONObject("_undo").remove("changes"); saved.writeText(corrupt.toString())
-        store = RepertoireStore(context); assertNull(store.undoInfo()); assertFalse(result(listOf("e2e4")).getBoolean("theory"))
+        val original = store.backupSnapshot().getJSONObject("edits").toString()
+        fun migrate(value:JSONObject) {
+            val directory=java.nio.file.Files.createTempDirectory(context.cacheDir.toPath(),"legacy-journal-").toFile()
+            File(directory,"mobile_repertoire.sqlite").writeBytes(bytes)
+            File(directory,"mobile_repertoire_edits.json").writeText(value.toString())
+            store=RepertoireStore(object:android.content.ContextWrapper(context) {override fun getFilesDir()=directory})
+        }
+        val corrupt = JSONObject(original); corrupt.getJSONObject("_undo").remove("changes");migrate(corrupt)
+        assertNull(store.undoInfo()); assertFalse(result(listOf("e2e4")).getBoolean("theory"))
         val stale = JSONObject(original)
         stale.put("black",JSONObject().put(RepertoireStore.pathId(root,listOf("e2e4")),JSONObject().put("kind","analysis")))
-        saved.writeText(stale.toString()); store = RepertoireStore(context)
+        migrate(stale)
         assertNull(store.undoInfo()); assertFalse(result(listOf("e2e4")).getBoolean("theory"))
-        stale.remove("_undo"); saved.writeText(stale.toString()); store = RepertoireStore(context)
+        stale.remove("_undo");migrate(stale)
         assertNull(store.undoInfo())
         edit(listOf("e2e4"),"reset"); store.undo(undoToken())
         assertFalse(result(listOf("e2e4")).getBoolean("theory"))

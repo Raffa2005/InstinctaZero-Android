@@ -103,7 +103,7 @@ class RepertoireReentryTest {
             db.execSQL("UPDATE nodes SET id=id+10000,parent_id=parent_id+10000")
             db.execSQL("UPDATE nodes SET comment=comment || ' Verified source clarification.' WHERE comment<>''")
         };install();store=RepertoireStore(RuntimeEnvironment.getApplication())
-        assertEquals(before.getJSONObject("edits").toString(),store.backupSnapshot().getJSONObject("edits").toString())
+        assertEquals(UnifiedRepertoireDatabase.canonical(before.getJSONObject("edits")),UnifiedRepertoireDatabase.canonical(store.backupSnapshot().getJSONObject("edits")))
         val now=result();assertTrue(moves(now).any { it.getString("uci")=="a7a6" });assertFalse(moves(now).any { it.getString("uci")=="e7e6" })
         assertEquals("main",moves(now).single { it.getString("uci")=="g8f6" }.getString("recommendation"))
         val destination=result(played+"g8f6");assertEquals("My private note.",destination.getJSONArray("comments").getString(0))

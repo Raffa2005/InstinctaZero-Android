@@ -12,23 +12,21 @@ import java.security.MessageDigest
 import java.util.UUID
 
 /** Private indexed corpus, loaded on demand. Source PGNs and the PC index are read-only. */
-internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = {}, private val openDatabase: (File) -> SQLiteDatabase = {
+internal class LegacyRepertoireStore(context: Context, private val openDatabase: (File) -> SQLiteDatabase = {
     SQLiteDatabase.openDatabase(it.path, null, SQLiteDatabase.OPEN_READONLY)
 }) {
     private val file = File(context.filesDir, "mobile_repertoire.sqlite")
     private val prefs = context.getSharedPreferences("mobile_repertoire_preferences", Context.MODE_PRIVATE)
     private val editsFile = AtomicFile(File(context.filesDir, "mobile_repertoire_edits.json"))
-    private val unified = UnifiedRepertoireDatabase(context.filesDir,checkpoint)
-    private var unifiedReady = false
     private val positionCache = RepertoireLookupCache()
     private val markerCache = RepertoireLookupCache(512*1024,1024)
     private val activityCache = RepertoireActivityCache()
+    private var sourceColumns: Set<String>? = null
     private fun clearCaches() { positionCache.clear();markerCache.clear();activityCache.clear() }
     private var undoRecord: JSONObject? = null
-    private var persistedEntries: String? = null
-    private val editState = lazy {
-        val saved = if(unified.exists)unified.edits() else if(editsFile.baseFile.isFile || File(editsFile.baseFile.path+".bak").isFile)JSONObject(String(editsFile.readFully(), Charsets.UTF_8)) else JSONObject()
-        val record = if(unified.exists)unified.undo() else saved.remove("_undo") as? JSONObject
+    private val edits: JSONObject by lazy {
+        val saved = runCatching { JSONObject(String(editsFile.readFully(), Charsets.UTF_8)) }.getOrDefault(JSONObject())
+        val record = saved.remove("_undo") as? JSONObject
         // Older versions can still read the repertoire keys. If one changed the edits without
         // updating the journal, do not present a stale undo after upgrading again.
         undoRecord = record?.takeIf { runCatching {
@@ -38,10 +36,8 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
                     change.getString("path").matches(Regex("[a-f0-9]{32}")) && change.has("before") && (change.isNull("before") || change.optJSONObject("before") != null)
                 } } && it.optString("after_hash") == fingerprint(saved)
         }.getOrDefault(false) }
-        persistedEntries=canonical(saved)
         saved
     }
-    private val edits:JSONObject get()=editState.value
 
     companion object {
         const val MAX_BYTES = 128L * 1024 * 1024
@@ -82,24 +78,16 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
                 db.rawQuery("SELECT parent_id,path_id,uci,kind,theory,line_alternative,fen,comment,reason FROM nodes LIMIT 1", null).use { require(it.moveToFirst()) }
             }
             synchronized(this) {
-                if(unified.exists)unified.refresh(temporary,expected)
-                else unified.ensure(temporary,edits,undoRecord,expected)
-                unifiedReady=true
+                check(temporary.renameTo(file)) { "Unable to install repertoire download" }
                 clearCaches()
+                sourceColumns = null
                 prefs.edit().putString("fingerprint", expected).apply()
             }
         } finally { temporary.delete() }
     }
 
     private fun open(path: File = file) = openDatabase(path)
-    private fun prepareUnified() {
-        if(!unifiedReady) {
-            if(unified.exists)unified.checkVersion()
-            else unified.ensure(file,edits,undoRecord,prefs.getString("fingerprint","").orEmpty())
-            unifiedReady=true
-        }
-    }
-    private fun source():SQLiteDatabase { prepareUnified();return openDatabase(unified.file) }
+    private fun source() = if(file.isFile) open() else null
     /** A fully cached request needs no connection. A miss shares one connection, closed
      * even on cancellation; no handle survives an atomic source replacement. */
     private fun <T> withLazySource(block: (() -> SQLiteDatabase?) -> T): T {
@@ -107,12 +95,16 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
         try { return block { database.value } }
         finally { if (database.isInitialized()) database.value?.close() }
     }
-    private fun positionBook(db: SQLiteDatabase?, rep: String, cancellation: CancellationSignal?) = RepertoireIndexedBook(requireNotNull(db),rep,cancellation,activityCache)
+    private fun positionBook(db: SQLiteDatabase?, rep: String, cancellation: CancellationSignal?): LegacyRepertoirePositionBook {
+        val columns = if (db == null) emptySet() else sourceColumns
+            ?: LegacyRepertoirePositionBook.readColumns(db, cancellation).also { sourceColumns = it }
+        return LegacyRepertoirePositionBook(db, rep, overrides(rep), localRoot(rep), cancellation, activityCache, columns)
+    }
     private fun localLibrary() = edits.optJSONObject("_local_repertoires") ?: JSONObject()
-    /** Metadata shares the authoritative database, but creating/renaming an empty book does
+    private fun localRoot(rep: String) = localLibrary().optJSONObject(rep)?.optString("root")
+    /** Metadata shares the atomic edits file, but creating/renaming an empty book does
      * not discard the user's last reversible line/comment edit. */
     @Synchronized fun saveRepertoire(request: JSONObject): JSONObject {
-        prepareUnified()
         val name = request.getString("name").trim()
         require(name.isNotEmpty() && name.length<=80) { "Use a repertoire name of 1–80 characters." }
         val before = edits.toString(); val previousUndo = undoRecord?.toString()
@@ -151,17 +143,18 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
     private fun persistEdits(record: JSONObject?) {
         val content = edits.toString()
         require(content.toByteArray(Charsets.UTF_8).size <= 4 * 1024 * 1024) { "Local edits have reached the 4 MiB limit" }
-        check(unifiedReady)
-        unified.commit(edits,record,expectedEntries=persistedEntries)
-        persistedEntries=canonical(edits)
+        val saved = JSONObject(content)
+        if (record != null) saved.put("_undo", record)
+        val output = editsFile.startWrite()
+        try { output.write(saved.toString().toByteArray(Charsets.UTF_8)); editsFile.finishWrite(output) }
+        catch (error: Exception) { editsFile.failWrite(output); throw error }
     }
     @Synchronized fun undoInfo(): JSONObject? {
-        val record=if(!editState.isInitialized() && unified.exists)unified.undo() else {edits;undoRecord}
-        return record?.let { JSONObject().put("token", it.getString("token"))
+        edits // Initialize the journal together with the edits on first access.
+        return undoRecord?.let { JSONObject().put("token", it.getString("token"))
             .put("repertoire", it.getString("repertoire")).put("name", it.getString("name")).put("label", it.getString("label")) }
     }
     @Synchronized fun undo(token: String) {
-        prepareUnified()
         edits
         val record = undoRecord ?: throw IllegalStateException("No repertoire change to undo.")
         require(token == record.getString("token")) { "The last repertoire change has changed. Check the undo label and try again." }
@@ -183,9 +176,8 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
         } catch (error: Exception) { restoreEdits(before); throw error }
         finally { clearCaches() }
     }
-    @Synchronized fun settings(): String = (if(!editState.isInitialized() && unified.exists)unified.settings() else edits.optJSONObject("_settings")?.toString()) ?: prefs.getString("settings", "{}") ?: "{}"
+    @Synchronized fun settings(): String = edits.optJSONObject("_settings")?.toString() ?: prefs.getString("settings", "{}") ?: "{}"
     @Synchronized fun saveSettings(raw: String) {
-        prepareUnified()
         require(raw.length <= 32 * 1024)
         val before=edits.toString();val oldUndo=undoRecord?.toString()
         try {
@@ -198,7 +190,7 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
         val saved=JSONObject(edits.toString())
         undoRecord?.let { saved.put("_undo",JSONObject(it.toString())) }
         return JSONObject().put("v",1).put("edits",saved).put("settings",JSONObject(settings()))
-            .put("corpus",if(unified.exists)unified.fingerprint() else prefs.getString("fingerprint",""))
+            .put("corpus",prefs.getString("fingerprint",""))
     }
     @Synchronized fun restoreBackup(snapshot: JSONObject) {
         require(snapshot.optInt("v")==1 && snapshot.toString().toByteArray().size<=12*1024*1024) { "Unsupported repertoire backup." }
@@ -244,7 +236,6 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
         }.getOrDefault(false) }
         replacement.put("_settings",JSONObject(settings.toString()))
         val before=edits.toString();val oldUndo=undoRecord?.toString()
-        prepareUnified()
         try {
             restoreEdits(replacement.toString());undoRecord=restoredUndo
             undoRecord?.put("after_hash",fingerprint(edits));persistEdits(undoRecord)
@@ -253,15 +244,20 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
         finally { clearCaches() }
     }
     @Synchronized fun catalog(): JSONObject {
-        val result = JSONObject().put("fingerprint",if(unified.exists)unified.fingerprint() else prefs.getString("fingerprint", ""))
+        val library = localLibrary()
+        val result = JSONObject().put("installed", file.isFile || library.length()>0).put("fingerprint", prefs.getString("fingerprint", ""))
         val list = JSONArray()
-        source().use { db ->
-            db.rawQuery("SELECT rep,name,side,pgn,local FROM uz_library ORDER BY local,CASE WHEN local=1 THEN rowid ELSE 0 END,rep", null).use { rows ->
+        if (file.isFile) open().use { db ->
+            db.rawQuery("SELECT id,name,side,pgn FROM repertoires ORDER BY id", null).use { rows ->
                 while (rows.moveToNext()) list.put(JSONObject().put("id", rows.getString(0)).put("name", rows.getString(1))
-                    .put("side", rows.getString(2)).put("file", rows.getString(3)).also { if(rows.getInt(4)==1)it.put("local",true) })
+                    .put("side", rows.getString(2)).put("file", rows.getString(3)))
             }
         }
-        return result.put("installed",list.length()>0).put("repertoires", list).put("undo", undoInfo() ?: JSONObject.NULL)
+        library.keys().forEach { id ->
+            val item = library.getJSONObject(id)
+            list.put(JSONObject().put("id",id).put("name",item.getString("name")).put("side",item.getString("side")).put("file","").put("local",true))
+        }
+        return result.put("repertoires", list).put("undo", undoInfo() ?: JSONObject.NULL)
     }
 
     private fun overrides(rep: String): JSONObject = edits.optJSONObject(rep) ?: JSONObject()
@@ -297,7 +293,7 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
         val selected = request.getJSONArray("selected")
         require(selected.length() <= 16)
         val results = JSONArray()
-        if (!file.isFile && !unified.exists && localLibrary().length()==0) return JSONObject().put("results", results)
+        if (!file.isFile && localLibrary().length()==0) return JSONObject().put("results", results)
         withLazySource { database ->
             for (index in 0 until selected.length()) {
                 cancellation?.throwIfCanceled()
@@ -328,13 +324,13 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
         return JSONObject().put("results",results)
     }
     private fun identity(db: SQLiteDatabase?, rep: String): Pair<String, String> {
+        localLibrary().optJSONObject(rep)?.let { return it.getString("name") to it.getString("side") }
         require(db!=null) { "Repertoire is not installed" }
-        return db.rawQuery("SELECT name,side FROM uz_library WHERE rep=?", arrayOf(rep)).use {
+        return db.rawQuery("SELECT name,side FROM repertoires WHERE id=?", arrayOf(rep)).use {
         require(it.moveToFirst()) { "Repertoire is not installed" }; it.getString(0) to it.getString(1)
         }
     }
     @Synchronized fun edit(request: JSONObject) {
-        prepareUnified()
         val rep = request.getString("id"); val moves = checkedMoves(request)
         val kind = request.getString("kind")
         require(kind in listOf("analysis", "alternative", "main", "delete", "restore_move", "reset", "add", "comment", "reset_comment"))
@@ -347,11 +343,11 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
             source().use { db ->
                 val identity = identity(db, rep); repertoireName = identity.first
                 val local = overrides(rep); edits.put(rep, local)
-                val book = RepertoireIndexedBook(db,rep)
+                val book = LegacyRepertoirePositionBook(db,rep,local,localRoot(rep))
                 if(kind in listOf("comment","reset_comment")) {
                     val fen = position(request.getString("fen"))
                     require(fen.length<=100 && book.status(fen).getBoolean("known")) { "Add the line before commenting on it." }
-                    val key = RepertoirePositionBook.commentKey(fen)
+                    val key = LegacyRepertoirePositionBook.commentKey(fen)
                     if(kind=="reset_comment") local.remove(key)
                     else {
                         val text = request.getString("comment").replace("\r\n","\n")
@@ -365,14 +361,14 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
                     require(additions!=null) { "Restore any deliberately deleted or excluded move on this route before extending it, or start from a recorded repertoire position." }
                     require(additions.isNotEmpty()) { "This line is already in the repertoire." }
                     for (addition in additions) {
-                        local.put(RepertoirePositionBook.edgeKey(addition.before,addition.uci),JSONObject().put("added",true).put("scope","position")
+                        local.put(LegacyRepertoirePositionBook.edgeKey(addition.before,addition.uci),JSONObject().put("added",true).put("scope","position")
                             .put("kind","repertoire").put("anchored",addition.anchored).put("before",addition.before).put("fen",addition.fen).put("uci",addition.uci).put("san",addition.san))
                     }
                 } else {
                     // The adjustment menu describes an outgoing move from request.fen, even
                     // when that move was discovered through a different source move order.
                     val beforeFen = position(request.getString("fen")); val uci = moves.last()
-                    val key = RepertoirePositionBook.edgeKey(beforeFen,uci)
+                    val key = LegacyRepertoirePositionBook.edgeKey(beforeFen,uci)
                     val edge = book.edges(beforeFen).find { it.uci==uci }
                     if(kind=="delete" || kind=="restore_move") {
                         require(edge!=null) { "Choose a recorded repertoire move." }
@@ -381,10 +377,9 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
                         if(kind=="delete")value.put("deleted",true) else value.remove("deleted")
                         local.put(key,value)
                     } else if (kind=="reset") {
-                        val keys=edge?.let(book::occurrenceKeys).orEmpty()
-                        removedAddition = local.optJSONObject(key)?.optBoolean("added") == true || keys.any { it.second }
+                        removedAddition = local.optJSONObject(key)?.optBoolean("added") == true || edge?.nodes?.any { it.added } == true
                         local.remove(key)
-                        keys.forEach { (path,_)->if(local.optJSONObject(path)?.optString("scope")!="position")local.remove(path) }
+                        edge?.nodes?.forEach { if(local.optJSONObject(it.path)?.optString("scope")!="position")local.remove(it.path) }
                     } else {
                         require(edge!=null) { "Add this move before adjusting it" }
                         if (kind == "alternative" || kind=="main") {
@@ -393,7 +388,7 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
                             require(!book.deleted(edge)) { "Restore the deleted move first." }
                             if(kind=="alternative")require(book.edges(beforeFen).any { it.uci!=uci && book.recommendation(it,identity.second)=="main" }) { "Choose another main recommendation first." }
                             if(kind=="main")book.edges(beforeFen).filter { it.uci!=uci }.forEach {
-                                local.optJSONObject(RepertoirePositionBook.edgeKey(beforeFen,it.uci))?.takeIf { it.optString("kind")=="main" }?.put("kind","alternative")
+                                local.optJSONObject(LegacyRepertoirePositionBook.edgeKey(beforeFen,it.uci))?.takeIf { it.optString("kind")=="main" }?.put("kind","alternative")
                             }
                         }
                         local.put(key,(local.optJSONObject(key) ?: JSONObject()).put("scope","position").put("kind",kind)

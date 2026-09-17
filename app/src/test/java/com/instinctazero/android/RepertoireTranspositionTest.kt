@@ -65,7 +65,7 @@ class RepertoireTranspositionTest {
                 }
             }
         }
-        original = file.readBytes(); store = RepertoireStore(context)
+        original = file.readBytes();file.copyTo(File(context.filesDir,"mobile_repertoire.sqlite")); store = RepertoireStore(context)
         store.install(original.inputStream(),RepertoireStore.hash(original))
     }
     @Test fun terminalReferenceMergesBothMovesAndDeduplicatedPositionComments() {
@@ -192,9 +192,12 @@ class RepertoireTranspositionTest {
         val journal = JSONObject().put("v",1).put("token","legacy-test").put("repertoire","qga").put("name","QGA fixture")
             .put("label","Added 2 moves").put("had_repertoire",false).put("changes",changes)
             .put("after_hash",RepertoireStore.hash(canonical(saved).toByteArray(Charsets.UTF_8)))
-        val file = File(RuntimeEnvironment.getApplication().filesDir,"mobile_repertoire_edits.json")
+        val app=RuntimeEnvironment.getApplication()
+        val folder=java.nio.file.Files.createTempDirectory(app.cacheDir.toPath(),"legacy-path-").toFile()
+        File(folder,"mobile_repertoire.sqlite").writeBytes(original)
+        val file = File(folder,"mobile_repertoire_edits.json")
         file.writeText(saved.put("_undo",journal).toString())
-        store = RepertoireStore(RuntimeEnvironment.getApplication())
+        store = RepertoireStore(object:android.content.ContextWrapper(app) {override fun getFilesDir()=folder})
         assertEquals("legacy-test",store.undoInfo()!!.getString("token"))
         assertTrue(lookup("addition",18).getBoolean("theory"))
         assertTrue(active(lookup("canonical")).contains("a2a3"))

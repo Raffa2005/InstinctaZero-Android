@@ -47,7 +47,7 @@ class RepertoirePerformanceTest {
                     val rep = positions.getString(0); val fen = positions.getString(1)
                     assertEquals(rows("n.parent_id IN (SELECT id FROM nodes WHERE repertoire_id=? AND fen=?)",arrayOf(rep,rep,fen)),
                         rows("n.fen_before=?",arrayOf(rep,fen)))
-                    val book = RepertoirePositionBook(db,rep,JSONObject())
+                    val book = LegacyRepertoirePositionBook(db,rep,JSONObject())
                     for(uci in listOf(null,"a2a3")) {
                         val (sql,args) = book.childQuery(fen,uci)
                         db.rawQuery("EXPLAIN QUERY PLAN " + sql,args).use { plan ->

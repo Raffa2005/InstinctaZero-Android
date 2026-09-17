@@ -136,6 +136,7 @@ class RepertoireEditingRegressionTest {
     @Test fun readySourceSnapshotRefreshRetainsPersonalOverlayRestartUndoAndBackup() {
         val next=System.getenv("REPERTOIRE_REFRESH_INDEX");assumeTrue(next!=null)
         val file=corpus();val pictured=pictured(file);val parent=before(pictured);val extension=extend(pictured)
+        val legacyHash=RepertoireStore.hash(file.readBytes())
         var store=RepertoireStore(RuntimeEnvironment.getApplication())
         fun result(r: JSONObject)=store.lookup(r).getJSONArray("results").getJSONObject(0)
         fun edit(r: JSONObject,kind: String)=store.edit(JSONObject(r.toString()).put("id","taimanov").put("kind",kind))
@@ -151,7 +152,7 @@ class RepertoireEditingRegressionTest {
         val before=store.backupSnapshot();val token=store.undoInfo()!!.getString("token")
         val bytes=File(next!!).readBytes();store.install(bytes.inputStream(),RepertoireStore.hash(bytes))
         store=RepertoireStore(RuntimeEnvironment.getApplication())
-        assertEquals(before.getJSONObject("edits").toString(),store.backupSnapshot().getJSONObject("edits").toString())
+        assertEquals(UnifiedRepertoireDatabase.canonical(before.getJSONObject("edits")),UnifiedRepertoireDatabase.canonical(store.backupSnapshot().getJSONObject("edits")))
         val current=result(parent);val choices=current.getJSONArray("moves").let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
         assertEquals("main",choices.single { it.getString("uci")=="b5b4" }.getString("recommendation"))
         assertEquals("alternative",choices.single { it.getString("uci")=="g7g6" }.getString("recommendation"))
@@ -165,8 +166,9 @@ class RepertoireEditingRegressionTest {
         val standalone=JSONObject(parent.toString()).put("root",PARENT).put("history",JSONArray()).put("entries",JSONArray())
         assertEquals(current.getJSONArray("moves").toString(),result(standalone).getJSONArray("moves").toString())
         store.undo(token);assertFalse(result(parent).optBoolean("comment_edited"))
-        store.restoreBackup(before);assertEquals(before.getJSONObject("edits").toString(),store.backupSnapshot().getJSONObject("edits").toString())
-        assertEquals(RepertoireStore.hash(bytes),RepertoireStore.hash(file.readBytes()))
+        store.restoreBackup(before);assertEquals(UnifiedRepertoireDatabase.canonical(before.getJSONObject("edits")),UnifiedRepertoireDatabase.canonical(store.backupSnapshot().getJSONObject("edits")))
+        assertEquals(RepertoireStore.hash(bytes),store.catalog().getString("fingerprint"))
+        assertEquals(legacyHash,RepertoireStore.hash(file.readBytes()))
     }
     @Test fun actualClarifiedSourceCommentRemainsReadableBehindPersonalNoteThroughRefresh() {
         val next=System.getenv("REPERTOIRE_REFRESH_INDEX");val casePath=System.getenv("REPERTOIRE_CLARIFIED_CASE")
@@ -191,7 +193,7 @@ class RepertoireEditingRegressionTest {
             return current
         }
         val current=verify("My current personal note.")
-        assertEquals(backup.getJSONObject("edits").toString(),store.backupSnapshot().getJSONObject("edits").toString())
+        assertEquals(UnifiedRepertoireDatabase.canonical(backup.getJSONObject("edits")),UnifiedRepertoireDatabase.canonical(store.backupSnapshot().getJSONObject("edits")))
         store.undo(token);verify("My previous personal note.")
         store.restoreBackup(backup);store=RepertoireStore(RuntimeEnvironment.getApplication());verify("My current personal note.")
         System.getenv("REPERTOIRE_CLARIFIED_PREVIEW")?.let { File(it).writeText(JSONObject().put("positions",JSONArray().put(JSONObject().put("request",request).put("result",current))).toString()) }
@@ -221,7 +223,7 @@ class RepertoireEditingRegressionTest {
         }
         val before=positions.map { (rep,fen) -> RepertoireStore.hash(canonical(lookup(rep,fen)).toByteArray()) }
         val bytes=File(next!!).readBytes();store.install(bytes.inputStream(),RepertoireStore.hash(bytes));store=RepertoireStore(RuntimeEnvironment.getApplication())
-        assertTrue("All private overlay fields preserved",saved.getJSONObject("edits").toString()==store.backupSnapshot().getJSONObject("edits").toString())
+        assertEquals("All private overlay fields preserved",UnifiedRepertoireDatabase.canonical(saved.getJSONObject("edits")),UnifiedRepertoireDatabase.canonical(store.backupSnapshot().getJSONObject("edits")))
         positions.forEachIndexed { i,(rep,fen) ->
             val current=lookup(rep,fen)
             assertEquals("Coverage/labels/deletions at private edited position $i",before[i],RepertoireStore.hash(canonical(current).toByteArray()))
