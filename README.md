@@ -1,5 +1,10 @@
 # InstinctaZero Android
 
+For GitHub-only repertoire performance work, start with the
+[self-contained development handoff](docs/repertoire-optimization-handoff.md).
+It includes the source-index builder, synthetic data generator and offline tests.
+No private books, account access, production server or signing keys are needed.
+
 Version **0.8.4** adds **Privacy mode** on Home, in the sidebar and in **Account / PC**.
 Switch it on to display your account as **Player**, hide other player names and
 ratings, and conceal account-bearing text in the mobile UI. It remembers your

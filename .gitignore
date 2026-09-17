@@ -16,3 +16,16 @@ signing.properties
 *.properties.local
 .env
 .env.*
+/.venv/
+/.repertoire-work/
+__pycache__/
+*.pyc
+# Generated or private repertoire content must not enter this public repository.
+*.pgn
+*.sqlite
+*.sqlite3
+*.db
+*.annotations.json
+/tools/repertoire/manifest.json
+/tools/repertoire/Summary.json
+/tools/repertoire/Annotations.csv

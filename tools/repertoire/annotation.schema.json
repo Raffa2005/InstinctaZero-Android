@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Repertoire annotation sidecar v1",
+  "type": "object",
+  "required": ["schema_version", "repertoire_id", "name", "side", "pgn", "baseline", "rules"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "repertoire_id": {"type": "string", "minLength": 1},
+    "name": {"type": "string"},
+    "side": {"enum": ["white", "black"]},
+    "pgn": {
+      "type": "object", "required": ["file", "sha256"],
+      "properties": {"file": {"type": "string"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+    },
+    "baseline": {
+      "type": "object", "required": ["games", "additional_known_path_ids"],
+      "properties": {
+        "games": {"type": "object", "additionalProperties": {"type": "object", "required": ["known_path_ids", "mainline_path_ids"], "properties": {"known_path_ids": {"$ref": "#/$defs/pathIds"}, "mainline_path_ids": {"$ref": "#/$defs/pathIds"}}}},
+        "additional_known_path_ids": {"$ref": "#/$defs/pathIds"}
+      }
+    },
+    "game_metadata": {"type": "object", "description": "One-based game record keys. Model-game source tags do not themselves exclude opening moves; rules define the cutoffs."},
+    "preferred_moves": {"type": "object", "description": "Explicit author recommendations: canonical before-position FEN to legal own-side UCI. Each selected move must have an eligible occurrence; preferences never override exclusions.", "additionalProperties": {"type": "string", "pattern": "^[a-h][1-8][a-h][1-8][qrbn]?$"}},
+    "rules": {"type": "array", "items": {"$ref": "#/$defs/rule"}}
+  },
+  "$defs": {
+    "pathIds": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
+    "rule": {
+      "type": "object",
+      "required": ["id", "game", "root_fen", "path_uci", "kind", "reason", "evidence", "confidence", "descendants"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "game": {"type": ["integer", "null"], "minimum": 1},
+        "root_fen": {"type": "string", "description": "Canonical first four FEN fields, legal en passant only."},
+        "path_uci": {"type": "array", "items": {"type": "string", "pattern": "^([a-h][1-8][a-h][1-8][qrbn]?|0000)$"}},
+        "kind": {"enum": ["repertoire", "alternative", "refutation", "analysis", "model_game"]},
+        "reason": {"type": "string", "minLength": 1},
+        "evidence": {"type": "string"},
+        "confidence": {"enum": ["high", "medium", "low"]},
+        "descendants": {"type": "boolean"}
+      },
+      "allOf": [{"if": {"properties": {"kind": {"enum": ["alternative", "refutation", "analysis", "model_game"]}}}, "then": {"properties": {"descendants": {"const": true}}}}]
+    }
+  }
+}
