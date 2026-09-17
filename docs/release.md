@@ -1,10 +1,12 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.8.8). The local one-ply repertoire re-entry update is described in
+(version 0.8.9). The reviewed PR #1 performance update is described in
+[v0.8.9](release-v0.8.9.md). It needs no server change, repertoire redownload or
+re-pairing. The local one-ply repertoire re-entry update is described in
 [v0.8.8](release-v0.8.8.md). It works with the existing downloaded library.
-The coordinated source-comment audit is separate and is not included until its
-immutable dataset is accepted and deployed. The web maneuver-arrow port is described in
+The separate source-comment update `2026-09-16.v1` has been accepted and deployed;
+its remaining unresolved references are documented in the v0.8.8 notes. The web maneuver-arrow port is described in
 [v0.8.7](release-v0.8.7.md). No server or repertoire update is needed.
 The unified repertoire-add correction is described in
 [v0.8.6](release-v0.8.6.md). It requires no server update or repertoire redownload.
@@ -57,7 +59,10 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 36 / 0.8.8 release values;
+- versionCode/versionName are the intended 37 / 0.8.9 release values;
+- confirm the signed artifact descends from merged PR #1, retains the production
+  application ID and signing certificate, and passes the bounded-body/stream,
+  lazy-connection, corpus/transposition and private-edit preservation regressions;
 - run `ManeuverSettingsTest`, `maneuver-arrows.test.mjs` and
   `maneuver-arrows-ui.mjs` against the signed APK assets. Check the web parity,
   both orientations, count/mode/off controls, settings persistence, inherited PVs,
