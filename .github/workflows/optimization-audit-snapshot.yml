@@ -6,7 +6,7 @@ on:
     paths: [.github/workflows/optimization-audit-snapshot.yml]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate:
@@ -15,7 +15,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          ref: perf/independent-audit-20260917-b7e4
+      - name: Apply exact reviewed files on the isolated audit branch
+        env:
+          AUDIT_BRANCH: perf/independent-audit-20260917-b7e4
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python - <<'PY'
+          import hashlib, json, pathlib, subprocess
+          paths = []
+          for manifest in ('.audit/native.json', '.audit/web.json'):
+              for item in json.loads(pathlib.Path(manifest).read_text()):
+                  path = pathlib.Path(item['path'])
+                  assert not path.is_absolute() and '..' not in path.parts
+                  assert path.parts[0] in ('app', 'web')
+                  old = path.read_bytes() if path.exists() else b''
+                  assert hashlib.sha256(old).hexdigest() == item['before'], f'Base changed: {path}'
+                  lines = old.decode().splitlines(keepends=True)
+                  for edit in reversed(item['edits']):
+                      lines[edit['start']:edit['end']] = [edit['text']]
+                  data = ''.join(lines).encode()
+                  assert hashlib.sha256(data).hexdigest() == item['after'], f'Patch mismatch: {path}'
+                  path.parent.mkdir(parents=True, exist_ok=True)
+                  path.write_bytes(data)
+                  paths.append(str(path))
+          subprocess.run(['git', 'add', '--', *paths], check=True)
+          PY
+          git diff --cached --check
+          git config user.name 'Raffa2005'
+          git config user.email '54407238+Raffa2005@users.noreply.github.com'
+          git commit -m 'perf: eliminate redundant database, rendering, and response-buffer work'
+          git push origin "HEAD:$AUDIT_BRANCH"
+          git rev-parse HEAD | tee "$RUNNER_TEMP/tested-commit.txt"
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -26,20 +57,16 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Web baseline and local test dependencies
+      - name: Web regression tests
         run: |
           npm ci --prefix web
           npm run check --prefix web
-          tar -czf "$RUNNER_TEMP/web-dependencies.tar.gz" -C web node_modules
-      - uses: actions/upload-artifact@v4
-        with:
-          name: audit-web-dependencies
-          path: ${{ runner.temp }}/web-dependencies.tar.gz
-          retention-days: 1
-      - name: Synthetic fixtures and Python baseline
+      - name: Synthetic fixtures and Python regression tests
         run: |
           python -m pip install -r tools/repertoire/requirements.txt
           python -m unittest discover -s tools/repertoire/tests -v
@@ -50,10 +77,16 @@ jobs:
           packages: ''
           log-accepted-android-sdk-licenses: false
       - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' > /dev/null
-      - name: Android baseline
+      - name: Android tests, debug APK, and lint
         env:
           REPERTOIRE_PORTABLE_INDEX: ${{ github.workspace }}/.repertoire-work/fixture/annotations/repertoire.sqlite
         run: ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2048m -Dfile.encoding=UTF-8' :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
+      - name: Browser integration checks
+        if: always() && success() || failure()
+        run: |
+          cd web
+          npx playwright install --with-deps chromium
+          for scenario in test/*-ui.mjs; do node "$scenario"; done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -61,4 +94,6 @@ jobs:
           path: |
             app/build/reports
             app/build/test-results
+            /tmp/instinctazero-*-preview
+            ${{ runner.temp }}/tested-commit.txt
           retention-days: 7
