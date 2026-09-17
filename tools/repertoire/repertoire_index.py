@@ -153,7 +153,6 @@ def build(folder, pgn_root=None):
     db = sqlite3.connect(temporary)
     db.executescript(SCHEMA)
     next_id = 1
-    all_rows = []
     csv_rows = []
     summaries = []
     try:
@@ -268,7 +267,13 @@ def build(folder, pgn_root=None):
                     # line_alternative separately preserves the branch's training policy.
                     row['kind'] = 'alternative' if alt and row['own_move'] else 'repertoire'
                 row['srs'] = int(bool(row['own_move'] and row['theory'] and not alt))
-            all_rows.extend(rep_rows)
+            # Classification depends only on this repertoire. Insert the finished
+            # batch now rather than retaining every corpus row until the end.
+            # All batches remain in the same transaction and temporary database.
+            if rep_rows:
+                keys = list(rep_rows[0])
+                db.executemany('INSERT INTO nodes('+','.join(keys)+') VALUES('+','.join('?' for _ in keys)+')',
+                               ([r[k] for k in keys] for r in rep_rows))
             kind_counts = Counter(row['kind'] for row in rep_rows if row['ply'])
             unique_by_kind = {kind:len({r['path_id'] for r in rep_rows if r['ply'] and r['kind']==kind}) for kind in KINDS}
             active_positions = {r['fen'] for r in rep_rows if r['theory']}
@@ -277,8 +282,7 @@ def build(folder, pgn_root=None):
             all_answers = {(r['fen_before'],r['uci']) for r in rep_rows if r['own_move'] and r['theory']}
             # Preserve the legacy optional field (positions), and expose answer-edge counts explicitly.
             summaries[-1].update(unique_optional_alternative_positions=summaries[-1]['unique_optional_alternative_prompts'], unique_srs_answer_edges_including_alternatives=len(all_answers), unique_additional_optional_srs_answer_edges=len(all_answers-normal_answers))
-        keys = list(all_rows[0])
-        db.executemany('INSERT INTO nodes('+','.join(keys)+') VALUES('+','.join('?' for _ in keys)+')',([r[k] for k in keys] for r in all_rows))
+            del rep_rows
         db.execute('INSERT INTO meta VALUES(?,?)',('schema_version',str(VERSION)))
         db.execute('INSERT INTO meta VALUES(?,?)',('fingerprints',json.dumps(fingerprints,sort_keys=True)))
         db.execute('INSERT INTO meta VALUES(?,?)',('summary',json.dumps(summaries)))
@@ -329,9 +333,12 @@ class Book:
         if isinstance(moves,str): moves = moves.split()
         pid = path_id(root_fen,moves)
         rows = [dict(r) for r in self.db.execute('SELECT id,game_number,kind,theory,srs,line_alternative,reason,confidence,rule_ids,fen FROM nodes WHERE repertoire_id=? AND path_id=?',(repertoire,pid))]
-        children = []
-        for r in rows:
-            children.extend(dict(c) for c in self.db.execute('SELECT game_number,uci,san,kind,theory,srs,line_alternative,reason,confidence,path_id FROM nodes WHERE parent_id=?',(r['id'],)))
+        # One index-backed query replaces one round trip per duplicate occurrence.
+        # Parent/id ordering retains the original occurrence and continuation order.
+        children = [dict(c) for c in self.db.execute(
+            'SELECT c.game_number,c.uci,c.san,c.kind,c.theory,c.srs,c.line_alternative,c.reason,c.confidence,c.path_id '
+            'FROM nodes c JOIN nodes p ON c.parent_id=p.id '
+            'WHERE p.repertoire_id=? AND p.path_id=? ORDER BY p.id,c.id', (repertoire,pid))] if rows else []
         return dict(repertoire_id=repertoire,path_id=pid,known=bool(rows),still_theory=any(r['theory'] for r in rows),has_theory_continuation=any(c['theory'] for c in children),occurrences=rows,continuations=children)
 
     def position_candidates(self,repertoire,fen):

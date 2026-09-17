@@ -53,7 +53,7 @@ class BoundedResponseBodyTest {
     @Test fun okhttpCharsetAndBomDecodingArePreserved() {
         val latin1 = byteArrayOf(0xe9.toByte()).toResponseBody("text/plain; charset=iso-8859-1".toMediaType())
         assertEquals("é", latin1.boundedString(1))
-        val bom = Buffer().writeHex("fffe6100").readByteArray().toResponseBody("text/plain; charset=utf-8".toMediaType())
+        val bom = byteArrayOf(0xff.toByte(), 0xfe.toByte(), 0x61, 0x00).toResponseBody("text/plain; charset=utf-8".toMediaType())
         assertEquals("a", bom.boundedString(4))
     }
 }
