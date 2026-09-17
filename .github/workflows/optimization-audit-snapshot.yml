@@ -1,4 +1,4 @@
-name: Independent audit snapshot
+name: Independent audit validation
 
 on:
   push:
@@ -9,18 +9,56 @@ permissions:
   contents: read
 
 jobs:
-  source-snapshot:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Archive tracked public source only
-        run: git archive --format=tar HEAD > "$RUNNER_TEMP/audit-source.tar"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Web baseline and local test dependencies
+        run: |
+          npm ci --prefix web
+          npm run check --prefix web
+          tar -czf "$RUNNER_TEMP/web-dependencies.tar.gz" -C web node_modules
       - uses: actions/upload-artifact@v4
         with:
-          name: independent-audit-source
-          path: ${{ runner.temp }}/audit-source.tar
+          name: audit-web-dependencies
+          path: ${{ runner.temp }}/web-dependencies.tar.gz
           retention-days: 1
-          if-no-files-found: error
+      - name: Synthetic fixtures and Python baseline
+        run: |
+          python -m pip install -r tools/repertoire/requirements.txt
+          python -m unittest discover -s tools/repertoire/tests -v
+          python tools/repertoire/generate_fixture.py .repertoire-work/fixture
+          python tools/repertoire/repertoire_index.py --folder .repertoire-work/fixture/annotations check
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          packages: ''
+          log-accepted-android-sdk-licenses: false
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' > /dev/null
+      - name: Android baseline
+        env:
+          REPERTOIRE_PORTABLE_INDEX: ${{ github.workspace }}/.repertoire-work/fixture/annotations/repertoire.sqlite
+        run: ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2048m -Dfile.encoding=UTF-8' :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: independent-audit-test-results
+          path: |
+            app/build/reports
+            app/build/test-results
+          retention-days: 7
