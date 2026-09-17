@@ -86,7 +86,8 @@ backup history is unchanged. Neither journal is a backup of games or accounts.
 - Python policy tests: 25 passed. Browser/controller checks: 65 passed. Touch
   repertoire/authoring/game-load/re-entry scenarios pass at 360×640, 390×780 and
   412×844, with actual native synthetic re-entry results. Current UI is unchanged.
-- Still required: private scoped acceptance, final signed APK/release verification.
+- Private acceptance is complete. Final signed APK/public-download verification
+  remains required before announcing release readiness.
 - No live corpus/state, services, source snapshot or USB phone touched.
 
 ### Private acceptance correction
