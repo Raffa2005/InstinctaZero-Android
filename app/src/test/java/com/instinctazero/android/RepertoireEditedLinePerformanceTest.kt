@@ -159,6 +159,35 @@ class RepertoireEditedLinePerformanceTest {
         source.inputStream().use { store.install(it,RepertoireStore.hash(source.readBytes())) }
         assertFalse("Source replacement must invalidate cached local anchors",row(line).getBoolean("theory"))
     }
+    @Test fun maskedAncestorBatchesUsePrimaryKeySearchRatherThanScanningARepertoire() {
+        SQLiteDatabase.openDatabase(source.path,null,SQLiteDatabase.OPEN_READONLY).use { db ->
+            val book=RepertoirePositionBook(db,"book",JSONObject())
+            val (sql,args)=book.ancestorQuery((1L..400L).toList())
+            db.rawQuery("EXPLAIN QUERY PLAN $sql",args).use { rows ->
+                val plan=buildList { while(rows.moveToNext())add(rows.getString(3)) }.joinToString("\n")
+                assertTrue(plan,plan.contains("SEARCH n USING INTEGER PRIMARY KEY"))
+                assertFalse(plan,plan.contains("nodes_training"))
+            }
+        }
+    }
+    @Test fun cancellationDuringAnchorResolutionLeavesTheSharedIndexRetryable() {
+        val cache=RepertoireLocalIndexCache();val cancel=CancellationSignal()
+        var interrupted=false
+        SQLiteDatabase.openDatabase(source.path,{ _,driver,table,query ->
+            if(!interrupted && query.toString().contains("SELECT fen,MAX(theory)")) {
+                interrupted=true;cancel.cancel()
+            }
+            SQLiteCursor(driver,table,query)
+        },SQLiteDatabase.OPEN_READONLY).use { db ->
+            val edits=snapshot.getJSONObject("edits").getJSONObject("book")
+            val book=RepertoirePositionBook(db,"book",edits,cancellation=cancel,sharedLocal=cache)
+            assertThrows(OperationCanceledException::class.java) { book.marker(request(line).getString("fen")) }
+            assertTrue(interrupted);assertNull(cache.get("book")!!.flags)
+            val retried=RepertoirePositionBook(db,"book",edits,sharedLocal=cache)
+            assertTrue(retried.marker(request(line).getString("fen")).getBoolean("theory"))
+            assertNotNull(cache.get("book")!!.flags)
+        }
+    }
     @Test fun cancellationDoesNotPublishPartiallyResolvedLocalState() {
         val cancel=CancellationSignal();cancel.cancel()
         assertThrows(OperationCanceledException::class.java) { store.markers(request(line),cancel) }

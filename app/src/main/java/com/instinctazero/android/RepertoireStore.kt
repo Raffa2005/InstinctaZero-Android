@@ -21,8 +21,9 @@ internal class RepertoireStore(context: Context, private val openDatabase: (File
     private val positionCache = RepertoireLookupCache()
     private val markerCache = RepertoireLookupCache(512*1024,1024)
     private val activityCache = RepertoireActivityCache()
+    private val localIndexCache = RepertoireLocalIndexCache()
     private var sourceColumns: Set<String>? = null
-    private fun clearCaches() { positionCache.clear();markerCache.clear();activityCache.clear() }
+    private fun clearCaches() { positionCache.clear();markerCache.clear();activityCache.clear();localIndexCache.clear() }
     private var undoRecord: JSONObject? = null
     private val edits: JSONObject by lazy {
         val saved = runCatching { JSONObject(String(editsFile.readFully(), Charsets.UTF_8)) }.getOrDefault(JSONObject())
@@ -98,7 +99,7 @@ internal class RepertoireStore(context: Context, private val openDatabase: (File
     private fun positionBook(db: SQLiteDatabase?, rep: String, cancellation: CancellationSignal?): RepertoirePositionBook {
         val columns = if (db == null) emptySet() else sourceColumns
             ?: RepertoirePositionBook.readColumns(db, cancellation).also { sourceColumns = it }
-        return RepertoirePositionBook(db, rep, overrides(rep), localRoot(rep), cancellation, activityCache, columns)
+        return RepertoirePositionBook(db, rep, overrides(rep), localRoot(rep), cancellation, activityCache, columns, localIndexCache)
     }
     private fun localLibrary() = edits.optJSONObject("_local_repertoires") ?: JSONObject()
     private fun localRoot(rep: String) = localLibrary().optJSONObject(rep)?.optString("root")

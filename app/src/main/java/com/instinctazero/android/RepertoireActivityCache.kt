@@ -15,6 +15,8 @@ internal class RepertoireActivityCache(private val maxBytes: Int = 512 * 1024, p
     fun put(rep: String, fen: String, active: Boolean) {
         putState(key(rep,fen),if(active)1 else 0)
     }
+    fun continuation(rep: String, fen: String): Boolean? = entries["c\n$rep\n$fen"]?.let { it==1 }
+    fun putContinuation(rep: String, fen: String, value: Boolean) = putState("c\n$rep\n$fen",if(value)1 else 0)
     fun transition(rep: String, fen: String, uci: String): Transition? = entries["e\n$rep\n$fen\n$uci"]?.let { Transition.entries[it] }
     fun putTransition(rep: String, fen: String, uci: String, state: Transition) = putState("e\n$rep\n$fen\n$uci",state.ordinal)
     private fun putState(key: String, value: Int) {
