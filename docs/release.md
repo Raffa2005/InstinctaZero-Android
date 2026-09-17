@@ -1,7 +1,10 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.8.9). The reviewed PR #1 performance update is described in
+(version 0.8.10). The unified indexed library and its migration/recovery contract
+are described in [v0.8.10](release-v0.8.10.md). It needs no server change,
+repertoire redownload or re-pairing. Private acceptance and signed-artifact checks
+must pass before publishing. The reviewed PR #1 performance update is described in
 [v0.8.9](release-v0.8.9.md). It needs no server change, repertoire redownload or
 re-pairing. The local one-ply repertoire re-entry update is described in
 [v0.8.8](release-v0.8.8.md). It works with the existing downloaded library.
@@ -59,7 +62,7 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 37 / 0.8.9 release values;
+- versionCode/versionName are the intended 38 / 0.8.10 release values;
 - confirm the signed artifact descends from merged PR #1, retains the production
   application ID and signing certificate, and passes the bounded-body/stream,
   lazy-connection, corpus/transposition and private-edit preservation regressions;
