@@ -89,6 +89,17 @@ backup history is unchanged. Neither journal is a backup of games or accounts.
 - Still required: private scoped acceptance, final signed APK/release verification.
 - No live corpus/state, services, source snapshot or USB phone touched.
 
+### Private acceptance correction
+
+The first private acceptance of `10ae064` caught one extra `0000` null-move
+analysis record in a full response. The projection had checked UCI length only,
+whereas the released reader checks the full move format. Effective edges and their
+note links now use the exact equivalent format filter. Raw source occurrences and
+their position notes remain intact. Synthetic coverage includes invalid/null
+records beside ordinary moves and missing-edge re-entry, plus terminal markers.
+Another 324 artificial source-mask/recommendation/repeated-position comparisons
+pass. The corrected commit still requires a fresh private acceptance run.
+
 ## Same-host measurements
 
 `RepertoireReadPathBenchmarkTest` ran unchanged on clean v0.8.9, PR2 and this

@@ -78,6 +78,37 @@ class RepertoireReentryTest {
         SQLiteDatabase.openDatabase(source.path,null,0).use { db -> db.execSQL("DELETE FROM nodes WHERE id>=200");db.execSQL("UPDATE nodes SET theory=0,kind='analysis' WHERE id>=104") };install()
         assertFalse(moves(result()).any { it.getString("uci")=="g8f6" })
     }
+    @Test fun nullAndMalformedSourceMovesDoNotBecomeChoicesOrChangeTerminalAndReentryMarkers() {
+        SQLiteDatabase.openDatabase(source.path,null,0).use {line(it,played+"e7e6",200)};install()
+        val expected=UnifiedRepertoireDatabase.canonical(result())
+        val marker=UnifiedRepertoireDatabase.canonical(store.markers(request()))
+        val before=request().getString("fen")
+        val nullPosition=before.split(' ').toMutableList().also {it[1]="w"}.joinToString(" ")
+        SQLiteDatabase.openDatabase(source.path,null,0).use {db ->
+            for((i,uci) in listOf("0000","a9a8","e7e8x","a2a3\n").withIndex())db.execSQL(
+                "INSERT INTO nodes(id,parent_id,repertoire_id,path_id,uci,san,kind,theory,line_alternative,reason,comment,fen,starting_comment,fen_before,srs) VALUES(?,4,'book',?,?,'--','analysis',0,0,'Source analysis','Retained null-move annotation',?,'',?,0)",
+                arrayOf<Any>(9000+i,"synthetic-invalid-$i",uci,nullPosition,before))
+        };install()
+        assertEquals(expected,UnifiedRepertoireDatabase.canonical(result()))
+        assertEquals(marker,UnifiedRepertoireDatabase.canonical(store.markers(request())))
+        assertEquals(setOf("g8f6","e7e6"),moves(result()).map {it.getString("uci")}.toSet())
+        val ctx=RuntimeEnvironment.getApplication()
+        source.copyTo(File(ctx.filesDir,"mobile_repertoire.sqlite"),overwrite=true)
+        val old=LegacyRepertoireStore(ctx)
+        assertEquals(UnifiedRepertoireDatabase.canonical(old.lookup(request())),UnifiedRepertoireDatabase.canonical(store.lookup(request())))
+        // Even malformed source rows marked active cannot count as playable continuations.
+        SQLiteDatabase.openDatabase(source.path,null,0).use {db ->
+            db.execSQL("UPDATE nodes SET theory=0 WHERE id>=100 AND id<9000")
+            db.execSQL("UPDATE nodes SET theory=1 WHERE id>=9000")
+        };install()
+        assertTrue(result().getBoolean("end_of_line"))
+        assertTrue(store.markers(request()).getJSONArray("results").getJSONObject(0).getBoolean("end_of_line"))
+        assertFalse(moves(result()).any {it.getString("uci")=="0000"})
+        // These remain source provenance, not deleted or rewritten PGN material.
+        UnifiedRepertoireDatabase(ctx.filesDir).read().use {db ->
+            db.rawQuery("SELECT COUNT(*) FROM nodes WHERE id>=9000 AND comment='Retained null-move annotation'",null).use {it.moveToFirst();assertEquals(4,it.getInt(0))}
+        }
+    }
     @Test fun derivedDeletionExclusionUndoAndRestartAreStableAndDoNotReappearOnRefresh() {
         adjust("g8f6","delete");val backup=store.backupSnapshot()
         assertFalse(moves(result()).any { it.getString("uci")=="g8f6" });assertTrue(result().getBoolean("end_of_line"))

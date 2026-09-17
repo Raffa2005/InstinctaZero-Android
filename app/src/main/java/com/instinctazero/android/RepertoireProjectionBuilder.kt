@@ -7,6 +7,9 @@ import org.json.JSONObject
  * overlay graph: every origin is compiled into the same indexed positions and moves. */
 internal class RepertoireProjectionBuilder(private val db:SQLiteDatabase) {
     companion object {
+        // The source may retain PGN null moves and other non-playable analysis records.
+        // Match the released reader's complete UCI format, not merely its length.
+        private fun playableUci(column:String)="($column GLOB '[a-h][1-8][a-h][1-8]' OR $column GLOB '[a-h][1-8][a-h][1-8][qrbn]')"
         fun ancestrySql(before:String):String {
             val joins=" LEFT JOIN nodes p ON p.id=n.parent_id LEFT JOIN uz_entries e ON e.rep=n.repertoire_id AND e.entry_key=n.path_id "+
                 "LEFT JOIN uz_entries g ON g.rep=n.repertoire_id AND g.valid_edge=1 AND g.\"before\"=$before AND g.uci=n.uci "
@@ -142,7 +145,7 @@ internal class RepertoireProjectionBuilder(private val db:SQLiteDatabase) {
                 WHEN MAX(o.origin<2 AND o.allowed=1)=1 THEN 'INFORMATIONAL'
                 WHEN MIN(o.origin=2 AND o.kind!='analysis')=1 THEN 'RECONNECTABLE' ELSE 'BLOCKED' END,MIN(PRINTF('%d:%010d:%020d',o.origin,o.source_order,o.ordinal))
             FROM uz_occurrences o LEFT JOIN uz_entries e ON e.rep=o.rep AND e.valid_edge=1 AND e."before"=o.before_fen AND e.uci=o.uci
-            WHERE o.rep=? AND LENGTH(o.uci) IN (4,5) GROUP BY o.rep,o.before_fen,o.uci""",arrayOf(rep))
+            WHERE o.rep=? AND ${playableUci("o.uci")} GROUP BY o.rep,o.before_fen,o.uci""",arrayOf(rep))
         // Read order is part of the UI contract. Deduplicate complete comments once at
         // revision build time, never truncate them during a move lookup.
         val columns=RepertoirePositionBook.readColumns(db)
@@ -151,7 +154,7 @@ internal class RepertoireProjectionBuilder(private val db:SQLiteDatabase) {
         for((role,column) in listOf(0 to "comment",1 to "starting_comment"))if(column in columns) {
             db.execSQL("INSERT OR IGNORE INTO uz_notes(text) SELECT $column FROM nodes WHERE repertoire_id=? AND LENGTH(TRIM($column,CHAR(9)||CHAR(10)||CHAR(13)||' '))>0",arrayOf(rep))
             db.execSQL("INSERT INTO uz_position_notes SELECT n.repertoire_id,n.fen,?,MIN(n.id),t.id FROM nodes n JOIN uz_notes t ON t.text=n.$column WHERE n.repertoire_id=? GROUP BY n.fen,t.id",arrayOf<Any>(role,rep))
-            db.execSQL("INSERT INTO uz_edge_notes SELECT n.repertoire_id,$before,n.uci,?,MIN(PRINTF('%010d:%020d',$order,n.id)),t.id FROM nodes n LEFT JOIN nodes p ON p.id=n.parent_id JOIN uz_notes t ON t.text=n.$column WHERE n.repertoire_id=? AND LENGTH(n.uci) IN (4,5) GROUP BY $before,n.uci,t.id",arrayOf<Any>(role,rep))
+            db.execSQL("INSERT INTO uz_edge_notes SELECT n.repertoire_id,$before,n.uci,?,MIN(PRINTF('%010d:%020d',$order,n.id)),t.id FROM nodes n LEFT JOIN nodes p ON p.id=n.parent_id JOIN uz_notes t ON t.text=n.$column WHERE n.repertoire_id=? AND ${playableUci("n.uci")} GROUP BY $before,n.uci,t.id",arrayOf<Any>(role,rep))
         }
     }
 }
