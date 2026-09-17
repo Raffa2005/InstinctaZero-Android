@@ -12,13 +12,16 @@ import java.security.MessageDigest
 import java.util.UUID
 
 /** Private indexed corpus, loaded on demand. Source PGNs and the PC index are read-only. */
-internal class RepertoireStore(context: Context) {
+internal class RepertoireStore(context: Context, private val openDatabase: (File) -> SQLiteDatabase = {
+    SQLiteDatabase.openDatabase(it.path, null, SQLiteDatabase.OPEN_READONLY)
+}) {
     private val file = File(context.filesDir, "mobile_repertoire.sqlite")
     private val prefs = context.getSharedPreferences("mobile_repertoire_preferences", Context.MODE_PRIVATE)
     private val editsFile = AtomicFile(File(context.filesDir, "mobile_repertoire_edits.json"))
     private val positionCache = RepertoireLookupCache()
     private val markerCache = RepertoireLookupCache(512*1024,1024)
     private val activityCache = RepertoireActivityCache()
+    private var sourceColumns: Set<String>? = null
     private fun clearCaches() { positionCache.clear();markerCache.clear();activityCache.clear() }
     private var undoRecord: JSONObject? = null
     private val edits: JSONObject by lazy {
@@ -39,7 +42,9 @@ internal class RepertoireStore(context: Context) {
     companion object {
         const val MAX_BYTES = 128L * 1024 * 1024
         const val START_POSITION = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -"
-        fun position(fen: String): String = fen.trim().split(Regex("\\s+")).take(4).joinToString(" ")
+        private val whitespace = Regex("\\s+")
+        private val uci = Regex("[a-h][1-8][a-h][1-8][qrbn]?")
+        fun position(fen: String): String = fen.trim().split(whitespace).take(4).joinToString(" ")
         fun pathId(root: String, moves: List<String>): String = hash(("repertoire-path-v1\n${position(root)}\n${moves.joinToString(" ")}").toByteArray()).take(32)
         fun hash(bytes: ByteArray): String {
             val hex="0123456789abcdef"
@@ -75,13 +80,26 @@ internal class RepertoireStore(context: Context) {
             synchronized(this) {
                 check(temporary.renameTo(file)) { "Unable to install repertoire download" }
                 clearCaches()
+                sourceColumns = null
                 prefs.edit().putString("fingerprint", expected).apply()
             }
         } finally { temporary.delete() }
     }
 
-    private fun open(path: File = file) = SQLiteDatabase.openDatabase(path.path, null, SQLiteDatabase.OPEN_READONLY)
+    private fun open(path: File = file) = openDatabase(path)
     private fun source() = if(file.isFile) open() else null
+    /** A fully cached request needs no connection. A miss shares one connection, closed
+     * even on cancellation; no handle survives an atomic source replacement. */
+    private fun <T> withLazySource(block: (() -> SQLiteDatabase?) -> T): T {
+        val database = lazy(LazyThreadSafetyMode.NONE) { source() }
+        try { return block { database.value } }
+        finally { if (database.isInitialized()) database.value?.close() }
+    }
+    private fun positionBook(db: SQLiteDatabase?, rep: String, cancellation: CancellationSignal?): RepertoirePositionBook {
+        val columns = if (db == null) emptySet() else sourceColumns
+            ?: RepertoirePositionBook.readColumns(db, cancellation).also { sourceColumns = it }
+        return RepertoirePositionBook(db, rep, overrides(rep), localRoot(rep), cancellation, activityCache, columns)
+    }
     private fun localLibrary() = edits.optJSONObject("_local_repertoires") ?: JSONObject()
     private fun localRoot(rep: String) = localLibrary().optJSONObject(rep)?.optString("root")
     /** Metadata shares the atomic edits file, but creating/renaming an empty book does
@@ -246,7 +264,7 @@ internal class RepertoireStore(context: Context) {
     private fun checkedMoves(request: JSONObject): List<String> {
         val raw = request.getJSONArray("history")
         require(raw.length() <= 512)
-        return (0 until raw.length()).map { raw.getString(it).also { move -> require(move.matches(Regex("[a-h][1-8][a-h][1-8][qrbn]?"))) } }
+        return (0 until raw.length()).map { raw.getString(it).also { move -> require(move.matches(uci)) } }
     }
     private fun positionHistory(request: JSONObject, moves: List<String>): List<String> {
         val entries = request.optJSONArray("entries") ?: return if(moves.isEmpty())listOf(position(request.getString("root"))) else emptyList()
@@ -258,10 +276,10 @@ internal class RepertoireStore(context: Context) {
     @Synchronized fun markers(request: JSONObject,cancellation: CancellationSignal?=null): JSONObject {
         val fen=position(request.getString("fen"));val selected=request.getJSONArray("selected");require(selected.length()<=16)
         val results=JSONArray()
-        source().use { db ->
+        withLazySource { database ->
             for(i in 0 until selected.length()) {
                 cancellation?.throwIfCanceled();val rep=selected.getString(i)
-                val result=markerCache.get(rep,fen) ?: RepertoirePositionBook(db,rep,overrides(rep),localRoot(rep),cancellation,activityCache).marker(fen)
+                val result=markerCache.get(rep,fen) ?: positionBook(database(),rep,cancellation).marker(fen)
                     .put("id",rep).also { markerCache.put(rep,fen,it) }
                 results.put(result)
             }
@@ -276,13 +294,13 @@ internal class RepertoireStore(context: Context) {
         require(selected.length() <= 16)
         val results = JSONArray()
         if (!file.isFile && localLibrary().length()==0) return JSONObject().put("results", results)
-        source().use { db ->
+        withLazySource { database ->
             for (index in 0 until selected.length()) {
                 cancellation?.throwIfCanceled()
                 val rep = selected.getString(index)
-                val book by lazy { RepertoirePositionBook(db,rep,overrides(rep),localRoot(rep),cancellation,activityCache) }
+                val book by lazy { positionBook(database(),rep,cancellation) }
                 val current = positionCache.get(rep,fen) ?: run {
-                    val identity = identity(db,rep)
+                    val identity = identity(database(),rep)
                     book.status(fen).put("id",rep).put("name",identity.first).put("side",identity.second)
                         .put("moves",JSONArray(book.edges(fen).filterNot(book::deleted).map { book.moveJson(it,identity.second) }))
                         .put("deleted_moves",JSONArray(book.edges(fen).filter(book::deleted).map { book.moveJson(it,identity.second) }))

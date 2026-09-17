@@ -65,6 +65,39 @@ class RepertoireStoreTest {
         bytes = fixture.readBytes(); store = RepertoireStore(context)
         store.install(bytes.inputStream(), RepertoireStore.hash(bytes))
     }
+    @Test fun warmTheoryAndMarkerCachesAvoidOpeningTheDatabase() {
+        val connections = mutableListOf<SQLiteDatabase>()
+        val counted = RepertoireStore(context) { file ->
+            SQLiteDatabase.openDatabase(file.path,null,SQLiteDatabase.OPEN_READONLY).also(connections::add)
+        }
+        val payload = request(emptyList(),listOf("white","black"))
+        val expected = counted.lookup(payload).toString()
+        assertEquals(1,connections.size)
+        assertFalse(connections.single().isOpen)
+        val markers = counted.markers(payload).toString()
+        assertEquals(2,connections.size)
+        connections.clear()
+        repeat(10) {
+            assertEquals(expected,counted.lookup(payload).toString())
+            assertEquals(markers,counted.markers(payload).toString())
+        }
+        assertTrue("Warm reads must not open SQLite",connections.isEmpty())
+        counted.lookup(request(emptyList(),emptyList()))
+        counted.markers(request(emptyList(),emptyList()))
+        assertTrue(connections.isEmpty())
+    }
+    @Test fun failedAndCancelledLookupsCloseTheirLazyConnection() {
+        val connections = mutableListOf<SQLiteDatabase>()
+        val counted = RepertoireStore(context) { file ->
+            SQLiteDatabase.openDatabase(file.path,null,SQLiteDatabase.OPEN_READONLY).also(connections::add)
+        }
+        assertThrows(IllegalArgumentException::class.java) { counted.lookup(request(emptyList(),listOf("missing"))) }
+        assertEquals(1,connections.size);assertFalse(connections.single().isOpen)
+        connections.clear()
+        val cancelled = android.os.CancellationSignal().also { it.cancel() }
+        assertThrows(android.os.OperationCanceledException::class.java) { counted.lookup(request(emptyList()),cancelled) }
+        assertTrue(connections.isEmpty())
+    }
     @Test fun upgradingTheIndexInvalidatesWarmFactsWithoutErasingEditsOrComments() {
         val before = result(emptyList()) // Populate the native cache with the old package.
         val upgraded = File(context.cacheDir,"upgraded.sqlite")

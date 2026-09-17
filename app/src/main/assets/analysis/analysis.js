@@ -32,7 +32,7 @@
   Promise.all(boardAssets.map(source => new Promise(resolve => { const image = new Image(); image.onload = image.onerror = resolve; image.src = source; }))).then(() => { document.documentElement.classList.remove('board-assets-loading'); refreshBoardBounds(); });
 
   function color() { return chess.turn() === 'w' ? 'white' : 'black'; }
-  function history() { const result = []; for (let n = cursor; n && n.move; n = n.parent) result.unshift(n.move.from + n.move.to + (n.move.promotion || '')); return result; }
+  function history() { const result = []; for (let n = cursor; n && n.move; n = n.parent) result.push(n.move.from + n.move.to + (n.move.promotion || '')); return result.reverse(); }
   function legalDests() { const result = {}; chess.moves({ verbose: true }).forEach(move => (result[move.from] || (result[move.from] = [])).push(move.to)); return result; }
   function sync(lastMove) { ground.set({ fen: chess.fen(), turnColor: color(), dests: legalDests(), lastMove: lastMove || null }); }
   function mainlineChild(node) { return node && node.children ? node.children[0] || null : null; }
@@ -44,7 +44,7 @@
   }
   function cancelBookRequest() { if (book.requestId && native() && native().cancelAnalysis) native().cancelAnalysis(book.requestId); book.requestId = null; book.loading = false; }
   function stopEngineTransport() { if(engine.watchdog)clearTimeout(engine.watchdog);engine.watchdog=null;if(engine.timer)clearTimeout(engine.timer);engine.timer=null;if(engine.requestId && native())native().cancelAnalysis(engine.requestId);engine.requestId=null; }
-  function resetTransport() { stopEngineTransport(); cancelBookRequest(); }
+  function resetTransport() { stopEngineTransport(); cancelBookRequest(); if (engine.renderFrame != null) cancelAnimationFrame(engine.renderFrame); engine.renderFrame = null; engine.arrowsPending = false; }
   function clearEngine(nextStatus) { if(engine.watchdog)clearTimeout(engine.watchdog);engine.watchdog=null; if (engine.timer) clearTimeout(engine.timer); engine.timer = null; if (engine.requestId && native()) native().cancelAnalysis(engine.requestId); engine.requestId = null; engine.status = nextStatus || 'idle'; engine.lastGood = null; engine.lines = []; engine.stats = null; engine.progress = null; engine.error = ''; renderArrows([]); }
   function commitMove(from, to, promotion) { if (gameLoading || editingPosition()) return;
     const number = chess.moveNumber(), mover = chess.turn(), uci = from + to + (promotion || '');
@@ -136,6 +136,19 @@
     }
   }
   function renderActivePanel() { if (panelView || tab === 'repertoire') heading(); else renderPanel(); }
+  // Process every stream message immediately, but paint only the latest state per
+  // frame. Engine progress must not rebuild the unrelated notation/book panels.
+  function queueAnalysisRender(arrowsChanged = false) {
+    engine.arrowsPending = engine.arrowsPending || arrowsChanged;
+    if (engine.renderFrame != null) return;
+    engine.renderFrame = requestAnimationFrame(() => {
+      engine.renderFrame = null;
+      const redrawArrows = engine.arrowsPending; engine.arrowsPending = false;
+      if (!analysisActive || document.hidden || gameLoading || editingPosition()) return;
+      if (redrawArrows) renderArrows(engine.lines);
+      if (!panelView && (tab === 'engine' || tab === 'info')) renderPanel(); else heading();
+    });
+  }
   function watchAnalysis() {
     if(engine.watchdog)clearTimeout(engine.watchdog);
     const id=engine.requestId;
@@ -193,7 +206,7 @@
   }
   function joinedPositiveLines(data) { const stats = Array.isArray(data && data.move_stats) ? data.move_stats.filter(stat => finiteMetric(stat && stat.visits) > 0) : []; const byMove = new Map(stats.map(stat => [stat.uci, stat])); return { lines:(Array.isArray(data && data.lines) ? data.lines : []).filter(line => line && Array.isArray(line.pv) && byMove.has(line.pv[0])), stats }; }
   function coherentAnalysisSnapshot(data, targetNodes) { if (!data || !Array.isArray(data.lines) || data.search_phase === 'provisional') return null; const joined = joinedPositiveLines(data), authoritative = data.search_phase === 'ready' || data.search_phase === 'final'; if (!joined.lines.length && !authoritative) return null; return Object.assign({}, data, { inherited:false, mobile_backend:settings.backend, target_nodes:targetNodes == null ? data.target_nodes : targetNodes, lines:joined.lines, move_stats:joined.stats }); }
-  function applyAnalysisSnapshot(snapshot, status) { engine.lastGood = snapshot; engine.lines = snapshot && Array.isArray(snapshot.lines) ? snapshot.lines : []; engine.stats = snapshot || null; engine.progress = snapshot && snapshot.progress || null; engine.status = status || 'cached'; engine.error = ''; renderArrows(engine.lines); }
+  function applyAnalysisSnapshot(snapshot, status, redraw = true) { engine.lastGood = snapshot; engine.lines = snapshot && Array.isArray(snapshot.lines) ? snapshot.lines : []; engine.stats = snapshot || null; engine.progress = snapshot && snapshot.progress || null; engine.status = status || 'cached'; engine.error = ''; if (redraw) renderArrows(engine.lines); }
   function restoreCachedAnalysis() { const cached = cursor.analysisCache, target = finiteMetric(cached && cached.target_nodes); if (cached && target === settings.nodes && cached.mobile_backend === settings.backend) applyAnalysisSnapshot(cached, cached.inherited ? 'inherited' : 'cached'); else { engine.status = 'idle'; engine.lastGood = null; engine.lines = []; engine.stats = null; engine.progress = null; engine.error = ''; renderArrows([]); } }
   function onPositionChanged() { if (gameLoading || editingPosition()) return; if (repertoirePanel) repertoirePanel.refresh(); resetTransport(); restoreCachedAnalysis(); scheduleAnalysis(); if (tab === 'book') requestBook(); renderActivePanel(); }
   function finiteMetric(value) { if (value === null || value === undefined || value === '') return null; const number = Number(value); return Number.isFinite(number) ? number : null; }
@@ -414,16 +427,16 @@
     if(payload.event==='engine-error' || payload.event==='error' || data.error){
       if(studyContext.gameId && Number(payload.code || data.code) === 404){resetStudy();return;}
       if(payload.retryable===true || data.retryable===true){recoverAnalysis();return;}
-      stopEngineTransport();engine.error=data.error || payload.message || 'Engine unavailable';engine.status='error';renderActivePanel();return;
+      stopEngineTransport();engine.error=data.error || payload.message || 'Engine unavailable';engine.status='error';queueAnalysisRender();return;
     }
     if(payload.event==='done'){
-      if(data.final_snapshot){const snapshot=coherentAnalysisSnapshot(data.final_snapshot,settings.nodes);if(snapshot && snapshot.lines.length){cursor.analysisCache=snapshot;applyAnalysisSnapshot(snapshot,'done');engine.received=true;}}
+      if(data.final_snapshot){const snapshot=coherentAnalysisSnapshot(data.final_snapshot,settings.nodes);if(snapshot && snapshot.lines.length){cursor.analysisCache=snapshot;applyAnalysisSnapshot(snapshot,'done',false);engine.received=true;queueAnalysisRender(true);}}
       if(data.cancelled || (!engine.received && chess.moves().length)){recoverAnalysis();return;}
-      stopEngineTransport();engine.status='done';renderActivePanel();return;
+      stopEngineTransport();engine.status='done';queueAnalysisRender();return;
     }
     watchAnalysis();
-    if(data.lines){const snapshot=coherentAnalysisSnapshot(data,settings.nodes);if(snapshot && snapshot.lines.length){cursor.analysisCache=snapshot;applyAnalysisSnapshot(snapshot,'running');engine.received=true;renderActivePanel();}else if(data.progress){engine.progress=data.progress;renderActivePanel();}}
-    else if(data.progress){engine.progress=data.progress;renderActivePanel();}
+    if(data.lines){const snapshot=coherentAnalysisSnapshot(data,settings.nodes);if(snapshot && snapshot.lines.length){cursor.analysisCache=snapshot;applyAnalysisSnapshot(snapshot,'running',false);engine.received=true;queueAnalysisRender(true);}else if(data.progress){engine.progress=data.progress;queueAnalysisRender();}}
+    else if(data.progress){engine.progress=data.progress;queueAnalysisRender();}
   };
   window.InstinctaZero.onNativeExplorer = function (id, payloadJson) {
     if (id !== book.requestId) return;

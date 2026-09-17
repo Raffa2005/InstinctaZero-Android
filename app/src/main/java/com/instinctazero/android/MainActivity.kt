@@ -1599,7 +1599,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         }
         try {
             call.execute().use { response ->
-                val payload = response.body?.string().orEmpty()
+                val payload = response.body.boundedString(512 * 1024)
                 if (!response.isSuccessful) throw GatewayException(response.code, responseError(response, payload))
                 val responseJson = JSONObject(payload)
                 val token = responseJson.optString("token")
@@ -1812,8 +1812,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         val call = restHttp.newCall(request)
         if (!pending.attach(call)) throw IOException("Request cancelled.")
         return call.execute().use { response ->
-            val body = response.body?.string().orEmpty()
-            if (body.length > maximumBytes) throw IOException("Gateway response is too large.")
+            val body = response.body.boundedString(maximumBytes)
             if (!response.isSuccessful) throw GatewayException(response.code, responseError(response, body))
             JSONObject(body)
         }
@@ -1834,7 +1833,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         try {
             call.execute().use { response ->
                 if (!response.isSuccessful) {
-                    throw GatewayException(response.code, responseError(response, response.body?.string().orEmpty()))
+                    throw GatewayException(response.code, responseError(response, response.body.boundedString(512 * 1024)))
                 }
                 val source = response.body?.source() ?: throw IOException("Analysis gateway returned no stream.")
                 val terminal=AnalysisStreamReader.read(source,{ !pending.isCanceled() && newestAnalysis.get()===pending }) { wrapped ->
@@ -1864,9 +1863,8 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         }
         try {
             call.execute().use { response ->
-                val payload = response.body?.string().orEmpty()
+                val payload = response.body.boundedString(512 * 1024)
                 if (!response.isSuccessful) throw GatewayException(response.code, responseError(response, payload))
-                if (payload.length > 512 * 1024) throw IOException("Opening-book response is too large.")
                 // Reject malformed values before they cross the native/web boundary.
                 JSONObject(payload)
                 emit("onNativeExplorer", id, payload)

@@ -15,13 +15,22 @@ internal class GameThumbnailView(
     orientation: String,
 ) : View(context) {
     private var blackAtBottom = orientation == "black"
-    private var pieces = parseFen(fen)
+    private var placement = fen.substringBefore(' ')
+    private var pieces = parseFen(placement)
     private val squarePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val piecePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
+    private val pieceBounds = RectF()
+
     fun setPosition(fen: String, orientation: String) {
-        blackAtBottom = orientation == "black"
-        pieces = parseFen(fen)
+        val nextPlacement = fen.substringBefore(' ')
+        val nextBlackAtBottom = orientation == "black"
+        if (placement == nextPlacement && blackAtBottom == nextBlackAtBottom) return
+        if (placement != nextPlacement) {
+            placement = nextPlacement
+            pieces = parseFen(placement)
+        }
+        blackAtBottom = nextBlackAtBottom
         invalidate()
     }
 
@@ -42,17 +51,9 @@ internal class GameThumbnailView(
             val rank = if (blackAtBottom) screenRank else 7 - screenRank
             val piece = pieces[rank * 8 + file] ?: continue
             val bitmap = CburnettBitmapCache.get(context, piece) ?: continue
-            canvas.drawBitmap(
-                bitmap,
-                null,
-                RectF(
-                    screenFile * square,
-                    screenRank * square,
-                    (screenFile + 1) * square,
-                    (screenRank + 1) * square,
-                ),
-                piecePaint,
-            )
+            pieceBounds.set(screenFile * square, screenRank * square,
+                (screenFile + 1) * square, (screenRank + 1) * square)
+            canvas.drawBitmap(bitmap, null, pieceBounds, piecePaint)
         }
     }
 

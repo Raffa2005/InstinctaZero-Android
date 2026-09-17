@@ -9,8 +9,13 @@ import org.json.JSONObject
 /** Position graph for the opening book. Source-path annotations describe occurrences,
  * not the route the player must take to reach a position. Queries remain index-backed. */
 internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private val rep: String, private val local: JSONObject, private val localRoot: String? = null,
-    private val cancellation: CancellationSignal? = null, private val sharedActivity: RepertoireActivityCache? = null) {
+    private val cancellation: CancellationSignal? = null, private val sharedActivity: RepertoireActivityCache? = null, sourceColumns: Set<String>? = null) {
     companion object {
+        private val uciPattern = Regex("[a-h][1-8][a-h][1-8][qrbn]?")
+        fun readColumns(db: SQLiteDatabase, cancellation: CancellationSignal? = null): Set<String> =
+            db.rawQuery("PRAGMA table_info(nodes)", null, cancellation).use { rows ->
+                buildSet { while (rows.moveToNext()) { cancellation?.throwIfCanceled(); add(rows.getString(1)) } }
+            }
         fun edgeKey(before: String, uci: String) = RepertoireStore.hash(
             "repertoire-edge-v1\n${RepertoireStore.position(before)}\n$uci".toByteArray()).take(32)
         fun commentKey(fen: String) = RepertoireStore.hash("repertoire-comment-v1\n${RepertoireStore.position(fen)}".toByteArray()).take(32)
@@ -31,12 +36,10 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
     private val edgeCache = mutableMapOf<String,List<Edge>>()
     private val candidateCache = mutableMapOf<String,List<Edge>>()
     private val activeCache = mutableMapOf<String,Boolean>()
-    private val positionEdits = mutableMapOf<String,JSONObject?>()
+    private val edgeEdits = mutableMapOf<Pair<String,String>,JSONObject?>()
     private val transitions = mutableMapOf<Pair<String,String>,Transition>()
     private val hasLabels = local.keys().asSequence().any { local.getJSONObject(it).let { e -> e.optBoolean("deleted") || e.optString("kind") in listOf("analysis","alternative","main") } }
-    private val columns = db?.rawQuery("PRAGMA table_info(nodes)",null,cancellation)?.use { rows ->
-        buildSet { while (rows.moveToNext()) add(rows.getString(1)) }
-    } ?: emptySet()
+    private val columns = sourceColumns ?: db?.let { readColumns(it, cancellation) } ?: emptySet()
     private val intro = if ("starting_comment" in columns) "n.starting_comment" else "''"
     private val sourceOrder = if ("srs" in columns) "n.srs" else "0"
     private val select = "SELECT n.id,n.parent_id,n.path_id,n.uci,n.san,n.fen,p.fen,n.theory,n.line_alternative,n.kind,n.reason,n.comment,$intro,$sourceOrder " +
@@ -46,7 +49,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
     private fun factsAt(fen: String) = facts("n.fen=?",arrayOf(fen)) + if(localRoot==fen) listOf(Node(0,0,"","","",fen,"",true,false,"repertoire","","","")) else emptyList()
     private fun factsChildren(fen: String): List<Node> {
         val (sql,args)=childQuery(fen)
-        return readQuery(sql.replace("n.comment,$intro","'', ''"),args)+localNodes.filter { it.before==fen }
+        return readQuery(sql.replace("n.comment,$intro","'', ''"),args)+localByBefore[fen].orEmpty()
     }
     private fun readQuery(sql: String, args: Array<String>): List<Node> = db?.rawQuery(sql,args,cancellation)?.use { rows ->
         buildList { while (rows.moveToNext()) {
@@ -78,11 +81,13 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         return if("fen_before" in columns) nodes.sortedWith(compareBy<Node> { it.sourceOrder }.thenBy { it.id }) else nodes
     }
     private fun sourceChildren(fen: String) = children.getOrPut(fen) { readChildren(fen) }
-    private fun positionEdit(n: Node): JSONObject? {
-        val key="${n.before}\n${n.uci}"
-        if(!positionEdits.containsKey(key))positionEdits[key]=local.optJSONObject(edgeKey(n.before,n.uci))?.takeIf { it.optString("scope") == "position" }
-        return positionEdits[key]
+    private fun edgeEdit(before: String, uci: String): JSONObject? {
+        val key = before to uci
+        // Cache absent edits too: getOrPut would rehash every miss.
+        if (!edgeEdits.containsKey(key)) edgeEdits[key] = local.optJSONObject(edgeKey(before,uci))
+        return edgeEdits[key]
     }
+    private fun positionEdit(n: Node) = edgeEdit(n.before,n.uci)?.takeIf { it.optString("scope") == "position" }
     /** Batch the same ancestors flags() already visits; retain occurrence-scoped semantics. */
     private fun prepareFlags(nodes: List<Node>) {
         if(!hasLabels)return
@@ -135,6 +140,11 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
                 RepertoireStore.position(before),true,false,edit.optString("kind"),"Added on this phone.","","",true)
         }.toList()
     }
+    // Preserve source order, but index local additions once instead of scanning the
+    // entire edit library for every visited position and every candidate move.
+    private val localByBefore by lazy { localNodes.groupBy { it.before } }
+    private val localByFen by lazy { localNodes.groupBy { it.fen } }
+    private val localByPath by lazy { localNodes.associateBy { it.path } }
     private fun legacyFlags(n: Node): Flags {
         var key = n.path; var optional = false; val seen = mutableSetOf<String>()
         repeat(513) {
@@ -143,7 +153,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
             if (edit?.optString("kind")=="analysis" || edit?.optBoolean("deleted")==true) return Flags(false)
             optional = optional || edit?.optString("kind")=="alternative"
             if (edit?.optBoolean("added")==true && edit.optString("scope")!="position") {
-                val entry = localNodes.firstOrNull { it.path==key } ?: return Flags(false)
+                val entry = localByPath[key] ?: return Flags(false)
                 val global = positionEdit(entry)
                 if (global?.optString("kind")=="analysis" || global?.optBoolean("deleted")==true) return Flags(false)
                 optional = optional || global?.optString("kind")=="alternative"
@@ -186,7 +196,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         result
     }
     private fun effective(n: Node) = if(n.added)localFlags[n.path] ?: Flags(false) else flags(n)
-    private fun allAt(fen: String) = at(fen) + localNodes.filter { it.fen==fen }
+    private fun allAt(fen: String) = at(fen) + localByFen[fen].orEmpty()
     fun active(fen: String): Boolean {
         cancellation?.throwIfCanceled()
         sharedActivity?.get(rep,fen)?.let { return it }
@@ -194,7 +204,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         // Departure/extension checks only need existence. Do not load hundreds of
         // duplicate occurrence comments at every historical position in an unedited book.
         if(!hasLabels && localNodes.isEmpty()) localRoot==fen || db?.rawQuery("SELECT 1 FROM nodes WHERE repertoire_id=? AND fen=? AND theory=1 LIMIT 1",arrayOf(rep,fen),cancellation)?.use { it.moveToFirst() } == true
-        else { val nodes=factsAt(fen)+localNodes.filter { it.fen==fen };prepareFlags(nodes);nodes.any { effective(it).active } }
+        else { val nodes=factsAt(fen)+localByFen[fen].orEmpty();prepareFlags(nodes);nodes.any { effective(it).active } }
         }.also { sharedActivity?.put(rep,fen,it) }
     }
     /** A new game can have hundreds of past positions. Resolve unedited membership
@@ -212,11 +222,11 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         }
     }
     private fun mergeEdges(fen: String, nodes: List<Node>): List<Edge> =
-        nodes.also { cancellation?.throwIfCanceled();prepareFlags(it) }.filter { it.uci.matches(Regex("[a-h][1-8][a-h][1-8][qrbn]?")) }
+        nodes.also { cancellation?.throwIfCanceled();prepareFlags(it) }.filter { it.uci.matches(uciPattern) }
             .groupBy { it.uci }.map { (uci,nodes) ->
                 val eligible = nodes.filter { effective(it).active }
                 val best = eligible.firstOrNull { !effective(it).optional } ?: eligible.firstOrNull() ?: nodes.first()
-                val edit = local.optJSONObject(edgeKey(fen,uci))
+                val edit = edgeEdit(fen,uci)
                 Edge(uci,best.san,best.fen,fen,eligible.isNotEmpty(),eligible.isNotEmpty() && eligible.all { effective(it).optional },
                     if(eligible.isNotEmpty())"repertoire" else best.kind.takeUnless { it in listOf("repertoire","alternative") } ?: "analysis",
                     if(edit?.optString("kind")=="analysis")"Excluded on this phone. The original remains unchanged." else best.reason,
@@ -229,7 +239,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         if(legal.isEmpty())return@getOrPut emptyList()
         if(hasLabels) {
             val source=factsAt(fen);prepareFlags(source)
-            if(source.isNotEmpty() && source.none(::sourceAllowed) && localNodes.none { it.fen==fen && effective(it).active })return@getOrPut emptyList()
+            if(source.isNotEmpty() && source.none(::sourceAllowed) && localByFen[fen].orEmpty().none { effective(it).active })return@getOrPut emptyList()
         }
         val targets=legal.map { it.fen }.distinct()
         // Unedited source membership needs no occurrence objects, parent joins or
@@ -240,14 +250,14 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
                 while(it.moveToNext())result[it.getString(0)]=it.getInt(1)==1
             };result
         } else {
-            val found=facts("n.fen IN (${targets.joinToString(",") { "?" }})",targets.toTypedArray()) + localNodes.filter { it.fen in targets }
+            val found=facts("n.fen IN (${targets.joinToString(",") { "?" }})",targets.toTypedArray()) + targets.flatMap { localByFen[it].orEmpty() }
             prepareFlags(found)
             found.filter { effective(it).active }.groupBy { it.fen }.mapValues { (_,nodes) -> nodes.all { effective(it).optional } }
         }
         legal.mapNotNull { move ->
             cancellation?.throwIfCanceled()
             if(move.fen !in eligiblePositions && localRoot!=move.fen)return@mapNotNull null
-            val edit=local.optJSONObject(edgeKey(fen,move.uci))
+            val edit=edgeEdit(fen,move.uci)
             val excluded=edit?.optBoolean("deleted")==true || edit?.optString("kind")=="analysis"
             Edge(move.uci,RepertoireLegalMoves.san(fen,move.uci),move.fen,fen,!excluded,
                 edit?.optString("kind")=="alternative" || eligiblePositions[move.fen]==true,
@@ -257,7 +267,7 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         }
     }
     fun edges(fen: String): List<Edge> = edgeCache.getOrPut(fen) {
-        val recorded=mergeEdges(fen,sourceChildren(fen) + localNodes.filter { it.before==fen })
+        val recorded=mergeEdges(fen,sourceChildren(fen) + localByBefore[fen].orEmpty())
         (recorded+reentries(fen,recorded)).also { sharedActivity?.putChoices(rep,fen,it.filter { e -> e.active && !deleted(e) }.map { e -> e.uci }) }
     }
     private fun hasContinuation(fen: String): Boolean {
@@ -267,12 +277,12 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         val recorded=mergeEdges(fen,factsChildren(fen))
         return recorded.any { it.active && !deleted(it) } || reentries(fen,recorded).any { it.active && !deleted(it) }
     }
-    fun deleted(edge: Edge) = local.optJSONObject(edgeKey(edge.before,edge.uci))?.optBoolean("deleted")==true
+    fun deleted(edge: Edge) = edgeEdit(edge.before,edge.uci)?.optBoolean("deleted")==true
     fun recommendation(edge: Edge,side: String): String {
         if(!edge.active || deleted(edge))return "informational"
         if(edge.before.split(' ')[1] != if(side=="white")"w" else "b")return "reply"
         val candidates=edges(edge.before).filter { it.active && !deleted(it) }
-        val chosen=candidates.firstOrNull { local.optJSONObject(edgeKey(it.before,it.uci))?.optString("kind")=="main" }
+        val chosen=candidates.firstOrNull { edgeEdit(it.before,it.uci)?.optString("kind")=="main" }
         if(chosen!=null)return if(chosen.uci==edge.uci)"main" else "alternative"
         if(candidates.size==1)return "main"
         if(edge.reentry)return "unassigned" // A position match is not a ranking of its incoming moves.
@@ -305,10 +315,10 @@ internal class RepertoirePositionBook(private val db: SQLiteDatabase?, private v
         // Extension validation needs just the played edge, not all alternative source
         // occurrences/comments at each earlier position (often the initial position).
         val source = children[fen]?.filter { it.uci==uci } ?: readChildren(fen,uci)
-        return mergeEdges(fen,source + localNodes.filter { it.before==fen && it.uci==uci }).firstOrNull()
+        return mergeEdges(fen,source + localByBefore[fen].orEmpty().filter { it.uci==uci }).firstOrNull()
     }
     private fun transition(fen: String, uci: String): Transition = sharedActivity?.transition(rep,fen,uci) ?: transitions.getOrPut(fen to uci) {
-        val edit=local.optJSONObject(edgeKey(fen,uci))
+        val edit=edgeEdit(fen,uci)
         val edge=edge(fen,uci)
         when {
             edit?.optBoolean("deleted")==true || edit?.optString("kind")=="analysis" -> Transition.BLOCKED

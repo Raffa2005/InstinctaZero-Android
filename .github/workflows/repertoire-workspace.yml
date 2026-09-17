@@ -9,34 +9,35 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   portable-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache: pip
+          cache-dependency-path: tools/repertoire/requirements.txt
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
       - name: Python policy tests and synthetic source package
+        shell: bash
         run: |
           python -m pip install -r tools/repertoire/requirements.txt
-          python -m unittest discover -s tools/repertoire/tests -v
+          python -m unittest discover -s tools/repertoire/tests -v 2>&1 | tee "$RUNNER_TEMP/python-tests.log"
           python tools/repertoire/generate_fixture.py .repertoire-work/fixture
           python tools/repertoire/repertoire_index.py --folder .repertoire-work/fixture/annotations check
-      - name: Browser source and controller checks
-        run: |
-          npm ci --prefix web
-          npm run check --prefix web
       - name: Set up Android SDK tools
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
         with:
@@ -44,7 +45,80 @@ jobs:
           log-accepted-android-sdk-licenses: false
       - name: Android SDK
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' > /dev/null
-      - name: Native tests with generated source fixture
+      - name: Native tests, debug APK, and lint with generated source fixture
         env:
           REPERTOIRE_PORTABLE_INDEX: ${{ github.workspace }}/.repertoire-work/fixture/annotations/repertoire.sqlite
-        run: ./gradlew --no-daemon --max-workers=1 -Dorg.gradle.jvmargs='-Xmx1024m -Dfile.encoding=UTF-8' :app:testDebugUnitTest
+        run: ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2048m -Dfile.encoding=UTF-8' :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
+      - name: Native test summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import os, pathlib, xml.etree.ElementTree as ET
+          reports = list(pathlib.Path('app/build/test-results').glob('**/TEST-*.xml'))
+          totals = {key: 0 for key in ('tests', 'failures', 'errors', 'skipped')}
+          for report in reports:
+              for key in totals:
+                  totals[key] += int(ET.parse(report).getroot().get(key, 0))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('## Native regression results\n\n')
+              summary.write(', '.join(f'{key}: {value}' for key, value in totals.items()) + '\n' if reports else 'No native test report was produced; inspect the preceding build step.\n')
+              summary.write('\nPrivate-corpus tests remain conditional on their documented local fixtures.\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-regression-reports
+          path: |
+            app/build/reports
+            app/build/test-results
+            ${{ runner.temp }}/python-tests.log
+          retention-days: 7
+
+  browser-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Browser source and controller checks
+        working-directory: web
+        shell: bash
+        run: |
+          npm ci
+          npm run check 2>&1 | tee "$RUNNER_TEMP/browser-checks.log"
+      - name: Install Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Portable phone-sized browser scenarios
+        working-directory: web
+        shell: bash
+        run: |
+          # Other UI scripts require private native-corpus exports; do not silently
+          # treat absent exports as passing tests or contact the private gateway.
+          failed=0
+          for scenario in game-load maneuver-arrows position-editor privacy repertoire-authoring repertoire; do
+            echo "::group::$scenario"
+            if PHONE_PREVIEW_OUTPUT="$RUNNER_TEMP/browser-reports/$scenario" node "test/$scenario-ui.mjs" 2>&1 | tee "$RUNNER_TEMP/$scenario-ui.log"; then
+              echo "- $scenario: passed" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- $scenario: failed" >> "$GITHUB_STEP_SUMMARY"
+              failed=1
+            fi
+            echo '::endgroup::'
+          done
+          exit "$failed"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-regression-reports
+          path: |
+            ${{ runner.temp }}/browser-checks.log
+            ${{ runner.temp }}/*-ui.log
+            ${{ runner.temp }}/browser-reports
+          retention-days: 7

@@ -46,6 +46,7 @@ try{for(const [width,height] of [[360,640],[390,780],[412,844]]){
  await page.evaluate(()=>window.InstinctaZero.setAnalysisActive(true));await page.waitForFunction(()=>!!window.__test.engine);
  await page.getByRole('button',{name:'Engine',exact:true}).tap();
  await page.evaluate(()=>window.InstinctaZero.onNativeAnalysis(window.__test.engine,{event:'error',message:'SecretOwner HiddenHandle failed'}));
+ await page.waitForFunction(()=>document.querySelector('#panel').textContent.includes('Leela unavailable'));
  assert.match(await page.locator('#panel').innerText(),/Leela unavailable/);await noLeak();
  await page.getByRole('button',{name:'Book',exact:true}).tap();await page.waitForFunction(()=>document.querySelector('#panel').textContent.includes('Opening book unavailable'));await noLeak();
  await page.getByRole('button',{name:'Repertoires',exact:true}).tap();await page.getByRole('button',{name:'Comment on played move',exact:true}).waitFor();await noLeak();
