@@ -6,16 +6,34 @@ on:
 permissions:
   contents: read
 jobs:
-  source:
+  baseline:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - run: git archive --format=tar HEAD > "$RUNNER_TEMP/source.tar"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/setup-java@v4
         with:
-          name: edited-line-source
-          path: ${{ runner.temp }}/source.tar
-          retention-days: 1
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          packages: ''
+          log-accepted-android-sdk-licenses: false
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' > /dev/null
+      - name: Measure baseline without optimized work budgets
+        env:
+          EDITED_LINE_BASELINE: '1'
+          EDITED_LINE_OUTPUT: ${{ runner.temp }}/edited-line-baseline.json
+        run: ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2048m -Dfile.encoding=UTF-8' :app:testDebugUnitTest --tests '*RepertoireEditedLinePerformanceTest'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: edited-line-baseline
+          path: |
+            ${{ runner.temp }}/edited-line-baseline.json
+            app/build/test-results
+            app/build/reports/tests
+          retention-days: 7
