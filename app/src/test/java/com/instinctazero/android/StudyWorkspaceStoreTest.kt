@@ -13,28 +13,18 @@ import org.robolectric.annotation.Config
 @Config(sdk=[35],manifest=Config.NONE)
 class StudyWorkspaceStoreTest {
     private val fen="4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 17"
-    @Test fun editedAnalysisKeepsTheOriginalGameAndDraftAcrossRestart() {
+    @Test fun editorDraftPersistsWithoutReplacingEitherLegacyBoard() {
         val prefs=RuntimeEnvironment.getApplication().getSharedPreferences("workspace",Context.MODE_PRIVATE)
+        prefs.edit().putString("state_v1","original study").putString("position_state_v1","original scratch board").commit()
         val store=StudyWorkspaceStore(prefs)
-        val original="""{"v":1,"gameId":"GameOld1","cursor":["e2e4"],"tree":[{"u":"e2e4","c":[]}]}"""
-        assertTrue(store.save(original));val source=store.source()
         assertTrue(store.saveDraft(JSONObject().put("fen",fen).put("black",true).toString()))
-        assertEquals(source,store.current())
-        val edited=JSONObject().put("v",1).put("editedPosition",true).put("gameId",JSONObject.NULL).put("initialFen",fen).put("cursor",org.json.JSONArray())
-        assertTrue(store.save(edited.toString()));assertEquals(source,store.source())
-        val recreated=StudyWorkspaceStore(prefs)
-        assertEquals(fen,JSONObject(recreated.current()).getString("initialFen"));assertEquals(fen,JSONObject(recreated.draft()).getString("fen"))
-        assertTrue(recreated.save(recreated.source()));assertEquals(source,recreated.current())
-        assertTrue(prefs.contains("position_state_v1"));assertEquals(source,recreated.source())
-    }
-    @Test fun invalidWritesDoNotReplaceEitherSavedBoard() {
-        val store=StudyWorkspaceStore(RuntimeEnvironment.getApplication().getSharedPreferences("invalid-workspace",Context.MODE_PRIVATE))
-        assertTrue(store.save("""{"v":1,"gameId":"GameOld1"}"""));val source=store.source()
-        assertFalse(store.save("""{"v":1,"editedPosition":true,"gameId":"GameOld1"}"""))
-        assertFalse(store.save("x".repeat(262145)));assertFalse(store.save("{}"))
-        assertEquals(source,store.current());assertEquals(source,store.source())
-        assertTrue(store.saveDraft(JSONObject().put("fen",fen).toString()))
-        assertFalse(store.saveDraft("{\"fen\":\"not a FEN\"}"));assertEquals(fen,JSONObject(store.draft()).getString("fen"))
+        val reopened=StudyWorkspaceStore(prefs)
+        assertEquals(fen,JSONObject(reopened.draft()).getString("fen"))
+        assertTrue(JSONObject(reopened.draft()).getBoolean("black"))
+        assertFalse(reopened.saveDraft("{\"fen\":\"not a FEN\"}"))
+        assertEquals(fen,JSONObject(reopened.draft()).getString("fen"))
+        assertEquals("original study",prefs.getString("state_v1",null))
+        assertEquals("original scratch board",prefs.getString("position_state_v1",null))
     }
     @Test fun fenTransportRetainsEpCastlingAndCountersButRejectsUnboundedOrMalformedValues() {
         assertEquals(fen,PositionFen.checked(fen))

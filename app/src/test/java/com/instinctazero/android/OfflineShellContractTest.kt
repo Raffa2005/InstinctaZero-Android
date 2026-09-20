@@ -287,18 +287,18 @@ class OfflineShellContractTest {
     }
 
     @Test
-    fun localStudyStateIsBoundedVersionedAndStoredWithoutWebStorage() {
+    fun localStudyStateIsTransactionalVersionedAndStoredWithoutWebStorage() {
         val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
-        val storage = projectFile("src/main/java/com/instinctazero/android/StudyWorkspaceStore.kt").readText()
+        val storage = projectFile("src/main/java/com/instinctazero/android/StudyDatabase.kt").readText()
         val controller = projectFile("src/main/assets/analysis/analysis.js").readText()
-        assertTrue(activity.contains("MAX_STUDY_JSON = 256 * 1024"))
         assertTrue(activity.contains("fun getStudyState()"))
         assertTrue(activity.contains("fun saveStudyState"))
-        assertTrue(storage.contains("raw.length<=256*1024"))
-        assertTrue(storage.contains("require(state.optInt(\"v\")==1)"))
-        assertTrue(storage.contains("state.optJSONArray(\"cursor\")?.length() ?: 0)<=512"))
+        assertTrue(activity.contains("fun saveStudyDelta"))
+        assertTrue(storage.contains("PRAGMA synchronous=FULL"))
+        assertTrue(storage.contains("analysis-legacy-before-migration.json"))
+        assertFalse(controller.contains("budget.count >= 512"))
         assertTrue(activity.contains("window.InstinctaZero.persistStudy"))
-        assertTrue(activity.contains("studyWorkspaces.save(rawState)"))
+        assertTrue(activity.contains("studyDatabase.saveLegacy(rawState)"))
         assertFalse(controller.contains("localStorage"))
     }
 

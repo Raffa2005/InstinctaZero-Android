@@ -3,25 +3,14 @@ package com.instinctazero.android
 import android.content.SharedPreferences
 import org.json.JSONObject
 
-/** The position scratch board never replaces the original study/game slot. */
+/** Small board-editor draft only. StudyDatabase owns the saved analysis trees. */
 internal class StudyWorkspaceStore(private val prefs: SharedPreferences) {
-    fun current(): String = prefs.getString(if(prefs.getBoolean("position_active",false))"position_state_v1" else "state_v1","{}") ?: "{}"
-    fun source(): String = prefs.getString("state_v1","{}") ?: "{}"
-    fun save(raw: String?): Boolean = runCatching {
-        require(raw!=null && raw.length<=256*1024)
-        val state=JSONObject(raw);require(state.optInt("v")==1)
-        require((state.optJSONArray("cursor")?.length() ?: 0)<=512)
-        val position=state.optBoolean("editedPosition",false)
-        require(!position || state.isNull("gameId")) { "Edited positions cannot change a stored game." }
-        prefs.edit().putString(if(position)"position_state_v1" else "state_v1",state.toString()).putBoolean("position_active",position).apply()
-        true
-    }.getOrDefault(false)
     fun draft(): String = prefs.getString("position_draft_v1","{}") ?: "{}"
     fun saveDraft(raw: String?): Boolean = runCatching {
         require(raw!=null && raw.length<=1024)
         val value=JSONObject(raw)
         val result=JSONObject().put("fen",PositionFen.checked(value.getString("fen"))).put("black",value.optBoolean("black",false))
-        prefs.edit().putString("position_draft_v1",result.toString()).apply();true
+        prefs.edit().putString("position_draft_v1",result.toString()).commit()
     }.getOrDefault(false)
 }
 

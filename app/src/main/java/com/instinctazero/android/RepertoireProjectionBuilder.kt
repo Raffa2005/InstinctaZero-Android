@@ -5,7 +5,7 @@ import org.json.JSONObject
 
 /** Runs only inside migration/import/edit transactions. Navigation never evaluates an
  * overlay graph: every origin is compiled into the same indexed positions and moves. */
-internal class RepertoireProjectionBuilder(private val db:SQLiteDatabase) {
+internal class RepertoireProjectionBuilder(private val db:SQLiteDatabase,private val checkpoint:(String)->Unit={}) {
     companion object {
         // The source may retain PGN null moves and other non-playable analysis records.
         // Match the released reader's complete UCI format, not merely its length.
@@ -79,15 +79,45 @@ internal class RepertoireProjectionBuilder(private val db:SQLiteDatabase) {
     }
     private data class Added(val key:String,val ordinal:Int,val scope:String,val before:String,val fen:String,val uci:String,val san:String,val kind:String,val deleted:Boolean,val anchored:Boolean,val parent:String)
     private data class Flags(val active:Boolean,val optional:Boolean=false)
-    private fun authored(rep:String) {
+    /** Plain user additions do not change any source mask or source note. Re-evaluate
+     * authored reachability (including transpositions), but aggregate only changed facts.
+     * This and Undo run in the same durable transaction as the authoritative entries. */
+    fun rebuildAdditions(rep:String) {
+        // Authored IDs already occupy a contiguous range of the (rep,oid) primary
+        // key. Filtering origin alone scans every imported occurrence in the book.
+        db.execSQL("CREATE TEMP TABLE uz_old_authored AS SELECT * FROM uz_occurrences WHERE rep=? AND oid>='a:' AND oid<'a;'",arrayOf(rep))
+        checkpoint("add_capture")
+        try {
+            db.execSQL("DELETE FROM uz_occurrences WHERE rep=? AND oid>='a:' AND oid<'a;' AND path NOT IN (SELECT entry_key FROM uz_entries WHERE rep=? AND added=1)",arrayOf(rep,rep))
+            authored(rep,incremental=true)
+            checkpoint("add_authored")
+            db.execSQL("CREATE TEMP TABLE uz_delta AS SELECT * FROM uz_old_authored EXCEPT SELECT * FROM uz_occurrences WHERE rep=? AND oid>='a:' AND oid<'a;'",arrayOf(rep))
+            db.execSQL("INSERT INTO uz_delta SELECT * FROM uz_occurrences WHERE rep=? AND oid>='a:' AND oid<'a;' EXCEPT SELECT * FROM uz_old_authored",arrayOf(rep))
+            db.execSQL("CREATE TEMP TABLE uz_dirty_positions(fen TEXT PRIMARY KEY)")
+            db.execSQL("INSERT OR IGNORE INTO uz_dirty_positions SELECT fen FROM uz_delta")
+            db.execSQL("CREATE TEMP TABLE uz_dirty_edges(before_fen TEXT,uci TEXT,PRIMARY KEY(before_fen,uci))")
+            db.execSQL("INSERT OR IGNORE INTO uz_dirty_edges SELECT before_fen,uci FROM uz_delta")
+            db.execSQL("DELETE FROM uz_positions WHERE rep=? AND fen IN (SELECT fen FROM uz_dirty_positions)",arrayOf(rep))
+            db.execSQL("DELETE FROM uz_edges WHERE rep=? AND (before_fen,uci) IN (SELECT before_fen,uci FROM uz_dirty_edges)",arrayOf(rep))
+            checkpoint("add_delta")
+            project(rep,incremental=true)
+            checkpoint("add_project")
+        } finally {
+            for(table in listOf("uz_old_authored","uz_delta","uz_dirty_positions","uz_dirty_edges"))db.execSQL("DROP TABLE IF EXISTS temp.$table")
+        }
+    }
+    private fun authored(rep:String,incremental:Boolean=false) {
         val all=db.rawQuery("SELECT entry_key,ordinal,COALESCE(scope,''),COALESCE(\"before\",''),COALESCE(fen,''),COALESCE(uci,''),COALESCE(san,''),COALESCE(kind,''),COALESCE(deleted,0),COALESCE(anchored,0),COALESCE(parent,'') FROM uz_entries WHERE rep=? AND added=1 ORDER BY ordinal",arrayOf(rep)).use { rows ->
             buildList { while(rows.moveToNext())add(Added(rows.getString(0),rows.getInt(1),rows.getString(2),rows.getString(3),rows.getString(4),rows.getString(5),rows.getString(6),rows.getString(7),rows.getInt(8)==1,rows.getInt(9)==1,rows.getString(10))) }
         }
         if(all.isEmpty())return
+        val previous=if(incremental)db.rawQuery("SELECT rep,oid,ordinal,path,before_fen,fen,uci,san,active,optional,kind FROM uz_occurrences WHERE rep=? AND oid>='a:' AND oid<'a;'",arrayOf(rep)).use {rows ->
+            buildMap {while(rows.moveToNext())put(rows.getString(1),(0 until rows.columnCount).map {rows.getString(it)})}
+        } else emptyMap()
         val byKey=all.associateBy { it.key };val states=mutableMapOf<String,Flags>()
         val reachable=mutableMapOf<String,Boolean>();val queue=ArrayDeque<String>()
         fun reach(fen:String,optional:Boolean) { val old=reachable[fen];if(old==null || old && !optional) {reachable[fen]=optional;queue.addLast(fen)} }
-        fun sourceFlags(path:String):Flags=db.rawQuery("SELECT MAX(active),MIN(CASE WHEN active=1 THEN optional ELSE 1 END) FROM uz_occurrences WHERE rep=? AND path=?",arrayOf(rep,path)).use { it.moveToFirst();Flags(it.getInt(0)==1,it.getInt(1)==1) }
+        fun sourceFlags(path:String):Flags=db.rawQuery("SELECT MAX(active),MIN(CASE WHEN active=1 THEN optional ELSE 1 END) FROM uz_occurrences WHERE rep=? AND path=? AND origin<2",arrayOf(rep,path)).use { it.moveToFirst();Flags(it.getInt(0)==1,it.getInt(1)==1) }
         fun override(before:String,uci:String):Pair<Boolean,Boolean> = db.rawQuery("SELECT COALESCE(deleted,0)=1 OR kind='analysis',kind='alternative' FROM uz_entries WHERE rep=? AND valid_edge=1 AND \"before\"=? AND uci=?",arrayOf(rep,before,uci)).use { if(it.moveToFirst())(it.getInt(0)==1) to (it.getInt(1)==1) else false to false }
         fun legacy(node:Added):Flags {
             var key=node.key;var optional=false;val seen=mutableSetOf<String>()
@@ -108,7 +138,7 @@ internal class RepertoireProjectionBuilder(private val db:SQLiteDatabase) {
         }
         val edges=all.filter { it.scope=="position" }.groupBy { it.before }
         for(chunk in edges.keys.chunked(400)) {
-            db.rawQuery("SELECT fen,MAX(active),MIN(CASE WHEN active=1 THEN optional ELSE 1 END),MAX(allowed) FROM uz_occurrences WHERE rep=? AND fen IN (${chunk.joinToString(",") { "?" }}) GROUP BY fen",arrayOf(rep,*chunk.toTypedArray())).use { rows -> while(rows.moveToNext()) {
+            db.rawQuery("SELECT fen,MAX(active),MIN(CASE WHEN active=1 THEN optional ELSE 1 END),MAX(allowed) FROM uz_occurrences WHERE rep=? AND origin<2 AND fen IN (${chunk.joinToString(",") { "?" }}) GROUP BY fen",arrayOf(rep,*chunk.toTypedArray())).use { rows -> while(rows.moveToNext()) {
                 val fen=rows.getString(0)
                 if(rows.getInt(1)==1)reach(fen,rows.getInt(2)==1)
                 if(rows.getInt(3)==1 && edges.getValue(fen).any { it.anchored && !it.deleted && it.kind!="analysis" })reach(fen,false)
@@ -124,16 +154,22 @@ internal class RepertoireProjectionBuilder(private val db:SQLiteDatabase) {
         for(node in all) {
             val before=if(node.scope=="position")node.before else byKey[node.parent]?.fen ?: db.rawQuery("SELECT fen FROM uz_occurrences WHERE rep=? AND path=? ORDER BY ordinal LIMIT 1",arrayOf(rep,node.parent)).use { if(it.moveToFirst())it.getString(0) else "" }
             val flags=states[node.key] ?: Flags(false)
-            db.execSQL("INSERT INTO uz_occurrences VALUES(?,?,2,?,0,?,?,?,?,?,?,?,1,?,'Added on this phone.')",arrayOf<Any>(rep,"a:"+node.key,node.ordinal,node.key,RepertoireStore.position(before),RepertoireStore.position(node.fen),node.uci,node.san,if(flags.active)1 else 0,if(flags.optional)1 else 0,node.kind))
+            val values=arrayOf<Any>(rep,"a:"+node.key,node.ordinal,node.key,RepertoireStore.position(before),RepertoireStore.position(node.fen),node.uci,node.san,if(flags.active)1 else 0,if(flags.optional)1 else 0,node.kind)
+            if(incremental) {
+                if(previous["a:"+node.key]==values.map {it.toString()})continue
+                db.execSQL("INSERT OR REPLACE INTO uz_occurrences VALUES(?,?,2,?,0,?,?,?,?,?,?,?,1,?,'Added on this phone.')",values)
+            } else db.execSQL("INSERT INTO uz_occurrences VALUES(?,?,2,?,0,?,?,?,?,?,?,?,1,?,'Added on this phone.')",values)
         }
     }
-    private fun project(rep:String) {
+    private fun project(rep:String,incremental:Boolean=false) {
+        val positions=if(incremental)" AND o.fen IN (SELECT fen FROM uz_dirty_positions)" else ""
+        val edges=if(incremental)" AND (o.before_fen,o.uci) IN (SELECT before_fen,uci FROM uz_dirty_edges)" else ""
         val positionOrder="b.active DESC,CASE WHEN b.active=1 THEN b.optional ELSE 0 END,b.origin,b.ordinal"
         fun positionBest(column:String)="(SELECT b.$column FROM uz_occurrences b WHERE b.rep=o.rep AND b.fen=o.fen ORDER BY $positionOrder LIMIT 1)"
         db.execSQL("""INSERT INTO uz_positions SELECT rep,fen,MAX(active),CASE WHEN MAX(active)=1 THEN MIN(CASE WHEN active=1 THEN optional ELSE 1 END) ELSE 0 END,
             CASE WHEN MAX(active)=1 THEN 'repertoire' ELSE ${positionBest("kind")} END,${positionBest("reason")},
             MAX(origin<2),MAX(origin<2 AND allowed=1),MAX(origin=2 AND active=1)
-            FROM uz_occurrences o WHERE rep=? GROUP BY rep,fen""",arrayOf(rep))
+            FROM uz_occurrences o WHERE rep=? $positions GROUP BY rep,fen""",arrayOf(rep))
         val edgeOrder="b.active DESC,CASE WHEN b.active=1 THEN b.optional ELSE 0 END,b.origin,b.source_order,b.ordinal"
         fun edgeBest(column:String)="(SELECT b.$column FROM uz_occurrences b WHERE b.rep=o.rep AND b.before_fen=o.before_fen AND b.uci=o.uci ORDER BY $edgeOrder LIMIT 1)"
         db.execSQL("""INSERT INTO uz_edges SELECT o.rep,o.before_fen,o.uci,${edgeBest("fen")},${edgeBest("san")},MAX(o.active),
@@ -145,7 +181,8 @@ internal class RepertoireProjectionBuilder(private val db:SQLiteDatabase) {
                 WHEN MAX(o.origin<2 AND o.allowed=1)=1 THEN 'INFORMATIONAL'
                 WHEN MIN(o.origin=2 AND o.kind!='analysis')=1 THEN 'RECONNECTABLE' ELSE 'BLOCKED' END,MIN(PRINTF('%d:%010d:%020d',o.origin,o.source_order,o.ordinal))
             FROM uz_occurrences o LEFT JOIN uz_entries e ON e.rep=o.rep AND e.valid_edge=1 AND e."before"=o.before_fen AND e.uci=o.uci
-            WHERE o.rep=? AND ${playableUci("o.uci")} GROUP BY o.rep,o.before_fen,o.uci""",arrayOf(rep))
+            WHERE o.rep=? $edges AND ${playableUci("o.uci")} GROUP BY o.rep,o.before_fen,o.uci""",arrayOf(rep))
+        if(incremental)return
         // Read order is part of the UI contract. Deduplicate complete comments once at
         // revision build time, never truncate them during a move lookup.
         val columns=RepertoirePositionBook.readColumns(db)

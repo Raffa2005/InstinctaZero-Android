@@ -1,5 +1,9 @@
 # Project handoff
 
+- All code written must be bottlenecked by physical reality. The bottleneck is never allowed to be the implementation itself.
+  Profile affected paths, remove avoidable work, and report measured constraints;
+  never mask a durability problem with optimistic UI feedback.
+
 - For repertoire optimization, read `docs/repertoire-optimization-handoff.md` first.
   Work from synthetic fixtures. Do not request, publish or depend on private books,
   local edit backups, account tokens or production signing keys.

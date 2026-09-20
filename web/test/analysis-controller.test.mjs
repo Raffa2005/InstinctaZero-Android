@@ -85,9 +85,9 @@ test('creating and restoring a new variation does not replace the main navigatio
   const controller = await readFile(controllerUrl, 'utf8');
   const rememberSource = controller.slice(controller.indexOf('function mainlineChild'), controller.indexOf('  function cancelBookRequest'));
   const makeRemember = (parent, fen) => new Function(
-    'initialCursor', 'chess', 'saveStudyNow',
+    'initialCursor', 'chess', 'saveStudyNow', 'changedBranch',
     `let cursor = initialCursor, nodeId = 10; ${rememberSource}; return remember;`
-  )(parent, { fen: () => fen }, () => {});
+  )(parent, { fen: () => fen }, () => {}, () => {});
 
   const main = { id:1, san:'e5', fen:'main', move:{from:'e7',to:'e5'}, children:[], selectedChild:null };
   const parent = { id:0, children:[main], selectedChild:main };

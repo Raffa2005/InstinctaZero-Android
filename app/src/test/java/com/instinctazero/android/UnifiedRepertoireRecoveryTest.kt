@@ -137,6 +137,24 @@ class UnifiedRepertoireRecoveryTest {
         val current=RepertoireStore(valid).catalog().getJSONArray("repertoires")
         assertEquals(setOf("One","Two"),(0 until current.length()).map {current.getJSONObject(it).getString("name")}.toSet())
     }
+    @Test fun completingAnEditDuringActivityReplacementInvalidatesTheNewReadersCachedMiss() {
+        val ctx=context("activity-replacement-");val writer=RepertoireStore(ctx)
+        val id=writer.saveRepertoire(JSONObject().put("name","Local").put("side","white")).getString("created_id")
+        val reader=RepertoireStore(ctx);val req=request(listOf("e2e4"),listOf(id))
+        assertFalse(reader.lookup(req).getJSONArray("results").getJSONObject(0).getBoolean("theory"))
+        assertFalse(reader.markers(req).getJSONArray("results").getJSONObject(0).getBoolean("theory"))
+        writer.edit(JSONObject(req.toString()).put("id",id).put("kind","add"))
+        UnifiedRepertoireDatabase(ctx.filesDir).read().use {db ->
+            db.rawQuery("EXPLAIN QUERY PLAN SELECT * FROM uz_occurrences WHERE rep=? AND oid>='a:' AND oid<'a;'",arrayOf(id)).use {rows ->
+                val plan=buildList {while(rows.moveToNext())add(rows.getString(3))}.joinToString()
+                assertTrue(plan,plan.contains("oid>?") && plan.contains("oid<?"))
+            }
+        }
+        assertTrue(reader.lookup(req).getJSONArray("results").getJSONObject(0).getBoolean("theory"))
+        assertTrue(reader.markers(req).getJSONArray("results").getJSONObject(0).getBoolean("theory"))
+        writer.undo(writer.undoInfo()!!.getString("token"))
+        assertFalse(reader.lookup(req).getJSONArray("results").getJSONObject(0).getBoolean("theory"))
+    }
 
     @Test fun boundedJournalRetainsCurrentStateUndoAndLegacyRecoveryInputs() {
         val ctx=context("journal-");val store=RepertoireStore(ctx)

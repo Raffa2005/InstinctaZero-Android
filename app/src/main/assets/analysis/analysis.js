@@ -22,6 +22,26 @@
   let studyContext = { gameId:null, initialFen:START_FEN, title:'Local analysis', subtitle:'Starting position' };
   const root = { id: 0, fen: START_FEN, san: null, move: null, number: 1, color: 'w', parent: null, children: [], selectedChild: null };
   let cursor = root;
+  let treeRevision = 0, renderedTreeRevision = -1, savedRevision = 0, replaceSavedTree = true, loadFailed = false;
+  const dirtyBranches = new Map(), nodeIndex = new Map([[0,root]]);
+  function changedBranch(parent) {
+    const previous=treeRevision++;
+    dirtyBranches.set(parent.id,parent); for(const child of parent.children)nodeIndex.set(child.id,child);
+    // The common edit extends a leaf. Append one control, preserving every existing
+    // variation element and its scroll position rather than rebuilding the whole tree.
+    if(renderedTreeRevision===previous && !panelView && tab==='moves' && parent.children.length===1) {
+      const button=panel.querySelector('[data-node="'+parent.id+'"]'), child=parent.children[0];
+      if(button && !panel.querySelector('[data-node="'+child.id+'"]')) {
+        button.insertAdjacentHTML('afterend',moveMarkup(child,false));bindMoveNode(button.nextElementSibling);renderedTreeRevision=treeRevision;
+      }
+    }
+  }
+  function saveNotice(message) {
+    let notice = document.getElementById('study-save-error');
+    if(!message){notice?.remove();return;}
+    if(!notice){notice=document.createElement('button');notice.id='study-save-error';notice.className='study-save-error';notice.setAttribute('role','alert');panel.before(notice);}
+    notice.textContent=message;notice.onclick=()=>{if(loadFailed)location.reload();else saveStudyNow();};
+  }
   let repertoirePanel = null;
   let positionEditor = null;
   const editingPosition = () => !!positionEditor && positionEditor.isOpen();
@@ -38,7 +58,7 @@
   function mainlineChild(node) { return node && node.children ? node.children[0] || null : null; }
   function remember(move, number, mover) {
     let child = cursor.children.find(item => item.san === move.san && item.fen === chess.fen());
-    if (!child) { child = { id: ++nodeId, fen: chess.fen(), san: move.san, move: { from: move.from, to: move.to, promotion: move.promotion || null }, number, color: mover, parent: cursor, children: [], selectedChild: null }; cursor.children.push(child); }
+    if (!child) { child = { id: ++nodeId, fen: chess.fen(), san: move.san, move: { from: move.from, to: move.to, promotion: move.promotion || null }, number, color: mover, parent: cursor, children: [], selectedChild: null }; cursor.children.push(child); changedBranch(cursor); }
     cursor.selectedChild = mainlineChild(cursor);
     cursor = child; saveStudyNow(); return child;
   }
@@ -46,7 +66,7 @@
   function stopEngineTransport() { if(engine.watchdog)clearTimeout(engine.watchdog);engine.watchdog=null;if(engine.timer)clearTimeout(engine.timer);engine.timer=null;if(engine.requestId && native())native().cancelAnalysis(engine.requestId);engine.requestId=null; }
   function resetTransport() { stopEngineTransport(); cancelBookRequest(); if (engine.renderFrame != null) cancelAnimationFrame(engine.renderFrame); engine.renderFrame = null; engine.arrowsPending = false; }
   function clearEngine(nextStatus) { if(engine.watchdog)clearTimeout(engine.watchdog);engine.watchdog=null; if (engine.timer) clearTimeout(engine.timer); engine.timer = null; if (engine.requestId && native()) native().cancelAnalysis(engine.requestId); engine.requestId = null; engine.status = nextStatus || 'idle'; engine.lastGood = null; engine.lines = []; engine.stats = null; engine.progress = null; engine.error = ''; renderArrows([]); }
-  function commitMove(from, to, promotion) { if (gameLoading || editingPosition()) return;
+  function commitMove(from, to, promotion) { if (loadFailed || gameLoading || editingPosition()) return;
     const number = chess.moveNumber(), mover = chess.turn(), uci = from + to + (promotion || '');
     const projected = projectAnalysisToChild(engine.stats, uci, settings.nodes); let move;
     try { move = chess.move({ from, to, promotion }); } catch (_) { move = null; }
@@ -83,21 +103,64 @@
   function studyRequest() { const request = { history: history(), nodes: settings.nodes, backend:settings.backend }; if (studyContext.gameId) request.game_id = studyContext.gameId; else if(studyContext.editedPosition)request.initial_fen = studyContext.initialFen; return request; }
   function explorerRequest() { const request = { history: history(), source:settings.bookSource }; if (studyContext.gameId) request.game_id = studyContext.gameId; else if(studyContext.editedPosition)request.initial_fen = studyContext.initialFen; if (settings.bookSource === 'lichess') { if (settings.bookSpeeds.length) request.speeds = settings.bookSpeeds.slice(); if (settings.bookRatings.length) request.ratings = settings.bookRatings.slice(); } return request; }
   function moveUci(node) { return node && node.move ? node.move.from + node.move.to + (node.move.promotion || '') : ''; }
-  function wireNode(node) { return { u:moveUci(node), x:0, c:node.children.map(wireNode) }; }
+  function wireNode(node) { const result={u:moveUci(node),x:0,c:[]}, pending=[[node,result]];while(pending.length){const [parent,wire]=pending.pop();for(const child of parent.children){const next={u:moveUci(child),x:0,c:[]};wire.c.push(next);pending.push([child,next]);}}return result; }
   function studyState() { return { v:1, gameId:studyContext.gameId, editedPosition:!!studyContext.editedPosition, initialFen:studyContext.initialFen, title:studyContext.title, subtitle:studyContext.subtitle, cursor:history(), tree:root.children.map(wireNode), selected:0, tab, black:wrap.classList.contains('orientation-black'), expanded:false }; }
-  function saveStudyNow() { if (persistTimer) clearTimeout(persistTimer); persistTimer = null; if (!native() || !native().saveStudyState) return; try { native().saveStudyState(JSON.stringify(studyState())); } catch (_) {} }
+  function saveStudyNow() {
+    if (persistTimer) clearTimeout(persistTimer); persistTimer = null;
+    if(loadFailed || restoring)return false;
+    if(!native())return true;
+    try {
+      if(native().saveStudyDelta) {
+        const attached=n=>{for(let child=n;child.parent;child=child.parent)if(!child.parent.children.includes(child))return false;return true;};
+        let parents=[...dirtyBranches.values()].filter(attached);
+        if(replaceSavedTree){parents=[];const pending=[root];while(pending.length){const n=pending.pop();parents.push(n);pending.push(...n.children.slice().reverse());}}
+        const meta={v:2,gameId:studyContext.gameId,editedPosition:!!studyContext.editedPosition,initialFen:studyContext.initialFen,title:studyContext.title,subtitle:studyContext.subtitle,cursor:history(),tab,black:wrap.classList.contains('orientation-black'),expanded:false};
+        const result=JSON.parse(native().saveStudyDelta(JSON.stringify({revision:savedRevision,meta,replace:replaceSavedTree,branches:parents.map(n=>({parent:n.id,children:n.children.map(child=>({id:child.id,u:moveUci(child)}))}))})));
+        if(!result.saved)throw Error('save');
+        savedRevision=result.revision;replaceSavedTree=false;dirtyBranches.clear();
+      } else if(native().saveStudyState && native().saveStudyState(JSON.stringify(studyState()))===false)throw Error('save');
+      saveNotice('');return true;
+    } catch (_) {saveNotice('Board not saved · keep it open and tap to retry');return false;}
+  }
   function scheduleStudySave() { if (restoring) return; if (persistTimer) clearTimeout(persistTimer); persistTimer = setTimeout(saveStudyNow, 120); }
-  function resetRoot(fen, context) { root.fen = fen; root.children = []; root.selectedChild = null; delete root.analysisCache; nodeId = 0; cursor = root; studyContext = context; chess.load(fen); }
-  function rebuildTree(rawChildren, parent, budget) { if (!Array.isArray(rawChildren)) return; rawChildren.forEach(raw => { if (budget.count >= 512 || !raw || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(String(raw.u || ''))) return; chess.load(parent.fen); let move; try { move = chess.move({ from:raw.u.slice(0,2), to:raw.u.slice(2,4), promotion:raw.u[4] }); } catch (_) { move = null; } if (!move) return; const child = { id:++nodeId, fen:chess.fen(), san:move.san, move:{ from:move.from, to:move.to, promotion:move.promotion || null }, number:chess.moveNumber() - (chess.turn() === 'w' ? 1 : 0), color:move.color, parent, children:[], selectedChild:null }; parent.children.push(child); budget.count += 1; rebuildTree(raw.c, child, budget); child.selectedChild = mainlineChild(child); }); }
+  function resetRoot(fen, context) { root.fen = fen; root.children = []; root.selectedChild = null; delete root.analysisCache; nodeId = 0; cursor = root; studyContext = context; chess.load(fen); treeRevision++;nodeIndex.clear();nodeIndex.set(0,root);dirtyBranches.clear();replaceSavedTree=true;savedRevision=native()?.getStudyRevision?.(!!context.editedPosition) || 0; }
+  function rebuildTree(rawChildren, parent) {
+    if(!Array.isArray(rawChildren))throw Error('Invalid saved tree');
+    const stack=rawChildren.slice().reverse().map(raw=>({raw,parent}));
+    while(stack.length) {
+      const {raw,parent}=stack.pop();
+      if(!raw || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(String(raw.u || '')))throw Error('Invalid saved move');
+      chess.load(parent.fen);const move=chess.move({from:raw.u.slice(0,2),to:raw.u.slice(2,4),promotion:raw.u[4]});
+      if(!move)throw Error('Invalid saved move');
+      const id=raw.id || ++nodeId;nodeId=Math.max(nodeId,id);
+      if(nodeIndex.has(id))throw Error('Duplicate saved move');
+      const child={id,fen:chess.fen(),san:move.san,move:{from:move.from,to:move.to,promotion:move.promotion || null},number:chess.moveNumber()-(chess.turn()==='w'?1:0),color:move.color,parent,children:[],selectedChild:null};
+      parent.children.push(child);parent.selectedChild=mainlineChild(parent);nodeIndex.set(id,child);
+      if(!Array.isArray(raw.c))throw Error('Invalid saved children');
+      for(let i=raw.c.length-1;i>=0;i--)stack.push({raw:raw.c[i],parent:child});
+    }
+  }
+  function decodedTree(raw) {
+    if(raw.v===1)return raw.tree;
+    if(raw.v!==2 || !Array.isArray(raw.nodes))throw Error('Unsupported saved board');
+    const nodes=new Map([[0,{c:[]}]]);
+    for(const n of raw.nodes){if(!Number.isSafeInteger(n.id)||n.id<=0||nodes.has(n.id))throw Error('Invalid saved move');nodes.set(n.id,{id:n.id,u:n.u,c:[]});}
+    for(const n of raw.nodes.slice().sort((a,b)=>a.o-b.o)){if(!nodes.has(n.p))throw Error('Missing saved parent');nodes.get(n.p).c.push(nodes.get(n.id));}
+    // A cycle or orphan is an error, never a reason to save a shortened board.
+    const seen=new Set(),stack=[nodes.get(0)];while(stack.length){const n=stack.pop();if(seen.has(n))throw Error('Cyclic saved board');seen.add(n);stack.push(...n.c);}
+    if(seen.size!==nodes.size)throw Error('Disconnected saved board');
+    return nodes.get(0).c;
+  }
   function cursorForHistory(moves) { let node = root; for (const uci of Array.isArray(moves) ? moves : []) { const child = node.children.find(item => moveUci(item) === uci); if (!child) break; node = child; } return node; }
-  function applyStudyState(raw) { if (!raw || raw.v !== 1 || typeof raw.initialFen !== 'string') return false; try { const probe = new Chess(raw.initialFen); const gameId = !raw.editedPosition && typeof raw.gameId === 'string' && /^[A-Za-z0-9]{8,16}$/.test(raw.gameId) ? raw.gameId : null; restoring = true; resetRoot(probe.fen({forceEnpassantSquare:true}), { gameId, editedPosition:raw.editedPosition === true, initialFen:probe.fen({forceEnpassantSquare:true}), title:String(raw.title || (gameId ? 'Completed game' : 'Local analysis')).slice(0,80), subtitle:String(raw.subtitle || 'Starting position').slice(0,120) }); rebuildTree(raw.tree, root, { count:0 }); root.selectedChild = mainlineChild(root); cursor = cursorForHistory(raw.cursor); chess.load(cursor.fen); tab = ['info','moves','engine','chart','book','repertoire'].includes(raw.tab) ? raw.tab : 'engine'; wrap.classList.toggle('orientation-black', raw.black === true); wrap.classList.toggle('orientation-white', raw.black !== true); if ((raw.black === true) !== (ground.state.orientation === 'black')) ground.toggleOrientation(); wrap.classList.remove('expanded'); sync(null); restoring = false; return true; } catch (_) { restoring = false; return false; } }
-  function loadStudyState() { if (!native() || !native().getStudyState) return false; try { return applyStudyState(JSON.parse(native().getStudyState() || '{}')); } catch (_) { return false; } }
+  function applyStudyState(raw) { if (!raw || ![1,2].includes(raw.v) || typeof raw.initialFen !== 'string') return false; try { const tree=decodedTree(raw),probe = new Chess(raw.initialFen); const gameId = !raw.editedPosition && typeof raw.gameId === 'string' && /^[A-Za-z0-9]{8,16}$/.test(raw.gameId) ? raw.gameId : null; restoring = true; resetRoot(probe.fen({forceEnpassantSquare:true}), { gameId, editedPosition:raw.editedPosition === true, initialFen:probe.fen({forceEnpassantSquare:true}), title:String(raw.title || (gameId ? 'Completed game' : 'Local analysis')).slice(0,80), subtitle:String(raw.subtitle || 'Starting position').slice(0,120) }); rebuildTree(tree, root); root.selectedChild = mainlineChild(root); cursor = cursorForHistory(raw.cursor); if(history().length!==(raw.cursor || []).length)throw Error('Saved cursor missing');chess.load(cursor.fen); tab = ['info','moves','engine','chart','book','repertoire'].includes(raw.tab) ? raw.tab : 'engine'; wrap.classList.toggle('orientation-black', raw.black === true); wrap.classList.toggle('orientation-white', raw.black !== true); if ((raw.black === true) !== (ground.state.orientation === 'black')) ground.toggleOrientation(); wrap.classList.remove('expanded'); sync(null); restoring = false; savedRevision=raw.revision || 0;replaceSavedTree=raw.v!==2;dirtyBranches.clear();return true; } catch (_) { restoring = false; return false; } }
+  function loadStudyState() { if (!native() || !native().getStudyState) return false; try { const raw=JSON.parse(native().getStudyState() || '{}');if(!Object.keys(raw).length)return false;if(!applyStudyState(raw))throw Error('restore');return true; } catch (_) { loadFailed=true;saveNotice('Saved board could not be opened · untouched · tap to retry');return false; } }
   function archivedTitle(game) { const white = game.white && (game.white.name || game.white.user || game.white.username) || 'White', black = game.black && (game.black.name || game.black.user || game.black.username) || 'Black'; return String(white + ' – ' + black).slice(0,80); }
   function stopGameLoad() { ++gameLoadId; gameLoading = null; wrap.classList.remove('game-loading'); }
   async function installArchivedGame(payload) {
     privacy.refresh();
     const game = payload && payload.game ? payload.game : payload;
     if (!game || !/^[A-Za-z0-9]{8,16}$/.test(String(game.id || '')) || !Array.isArray(game.moves)) return false;
+    if(loadFailed || !saveStudyNow())return false;
     const id = ++gameLoadId;
     stopActiveNavigation(); resetTransport(); panelView = null;
     gameLoading = {title:archivedTitle(game)}; wrap.classList.add('game-loading');
@@ -107,7 +170,7 @@
       // slices; a newer game or Back invalidates this import before it can commit.
       const probe = new Chess(game.initial_fen || START_FEN), initialFen = probe.fen();
       const temporary = {children:[]}; let parent = temporary, count = 0, slice = performance.now();
-      for (const item of game.moves.slice(0,512)) {
+      for (const item of game.moves) {
         if (id !== gameLoadId) return false;
         const uci = String(item && item.uci || '');
         if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(uci)) throw new Error('Invalid archived move');
@@ -223,7 +286,13 @@
     return notice + '<div class="stats"><span><b>visits:</b> ' + safe(visits) + '/' + safe(progress.target || settings.nodes) + '</span><span><b>nodes:</b> ' + safe(stats.total_nodes || stats.nodes || visits) + '</span><span><b>n/s:</b> ' + safe(stats.nps || progress.nps || 0) + '</span><span><b>time:</b> ' + safe(stats.elapsed_ms != null ? Math.round(stats.elapsed_ms / 1000) + 's' : '—') + '</span></div>' + rows + (engine.status==='error' || engine.status==='disconnected' ? '<button class="rep-button" data-engine-retry>Retry Leela</button>' : '');
   }
   function moveMarkup(child, variationRoot) { const number = child.color === 'w' ? child.number + '.' : variationRoot ? child.number + '...' : ''; return '<button class="move ' + (child === cursor ? 'current' : '') + '" data-node="' + child.id + '">' + (number ? '<span class="no">' + number + '</span>' : '') + safe(child.san) + '</button>'; }
-  function renderMoves(node) { if (!node.children.length) return ''; if (node.children.length === 1) { const child = node.children[0]; return moveMarkup(child, false) + renderMoves(child); } return '<div class="variations">' + node.children.map(child => '<div class="variation">' + moveMarkup(child, true) + renderMoves(child) + '</div>').join('') + '</div>'; }
+  function renderMoves(node) {
+    const parts=[],stack=[node];
+    while(stack.length){const next=stack.pop();if(typeof next==='string'){parts.push(next);continue;}if(!next.children.length)continue;
+      if(next.children.length===1){parts.push(moveMarkup(next.children[0],false));stack.push(next.children[0]);}
+      else {parts.push('<div class="variations">');stack.push('</div>');for(let i=next.children.length-1;i>=0;i--){const child=next.children[i];stack.push('</div>',child,'<div class="variation">'+moveMarkup(child,true));}}
+    }return parts.join('');
+  }
   function movesPanel() { return root.children.length ? '<div class="moves">' + renderMoves(root) + '</div>' : '<div class="empty">Tap or drag a legal move to begin a local line.</div>'; }
   function resultPercentages(result) { const games = finiteMetric(result.games) || (finiteMetric(result.white) || 0) + (finiteMetric(result.draws) || 0) + (finiteMetric(result.black) || 0); const requested = [finiteMetric(result.white_pct), finiteMetric(result.draw_pct), finiteMetric(result.black_pct)]; const counts = [finiteMetric(result.white) || 0, finiteMetric(result.draws) || 0, finiteMetric(result.black) || 0]; const values = requested.every(value => value !== null) ? requested : counts.map(value => games > 0 ? 100 * value / games : 0); const total = values.reduce((sum, value) => sum + Math.max(0, value), 0); return total > 0 ? values.map(value => Math.max(0, value) * 100 / total) : [0, 0, 0]; }
   function resultBar(result, index) { const values = resultPercentages(result); const white = values[0], draw = values[1], black = values[2], whiteEnd = white, drawEnd = white + draw; const label = Math.round(white) + '% white, ' + Math.round(draw) + '% draws, ' + Math.round(black) + '% black'; const percent = value => Math.max(0, Math.min(100, value)) + '%'; const text = (value, x, className) => value < 13 ? '' : '<text' + (className ? ' class="' + className + '"' : '') + ' x="' + percent(x) + '" y="14">' + Math.round(value) + '%</text>'; return '<svg class="result-bar" role="img" aria-label="' + safe(label) + '"><defs><clipPath id="book-bar-' + index + '"><rect width="100%" height="20" rx="10"/></clipPath></defs><g clip-path="url(#book-bar-' + index + ')"><rect class="result-white" width="' + percent(white) + '" height="20"/><rect class="result-draw" x="' + percent(whiteEnd) + '" width="' + percent(draw) + '" height="20"/><rect class="result-black" x="' + percent(drawEnd) + '" width="' + percent(black) + '" height="20"/></g><rect class="result-outline" x="0.25%" y="0.5" width="99.5%" height="19" rx="9.5"/>' + text(white, white / 2, 'on-white') + text(draw, white + draw / 2, '') + text(black, drawEnd + black / 2, '') + '</svg>'; }
@@ -276,8 +345,10 @@
     else if (panelView === 'variationActions') { panel.querySelector('[data-promote-variation]').onclick = promoteVariation; panel.querySelector('[data-delete-variation]').onclick = deleteVariation; panel.querySelector('[data-cancel-variation]').onclick = closePanelView; }
   }
   function bindMoveNode(button) { let held = false, timer = null; const stop = () => { if (timer) clearTimeout(timer); timer = null; }; button.onpointerdown = event => { if (event.pointerType === 'mouse' && event.button !== 0) return; stop(); held = false; const target = findNode(Number(button.dataset.node)); if (!target || !target.parent || target.parent.children.length < 2) return; timer = setTimeout(() => { held = true; variationTarget = target; openPanelView('variationActions'); }, 480); }; button.onpointerup = button.onpointercancel = button.onpointerleave = stop; button.oncontextmenu = event => event.preventDefault(); button.onclick = event => { if (held) { event.preventDefault(); held = false; return; } restore(findNode(Number(button.dataset.node))); }; }
-  function renderPanel() { if (gameLoading) { panel.innerHTML = '<div class="empty" role="status">Loading game…</div>'; heading(); for(const name of ['prev','next','mainline']) document.querySelector('[data-action="'+name+'"]').disabled = true; return; }  if (panelView === 'repertoireSettings' && repertoirePanel && repertoirePanel.hasEditorFocus()) { heading(); return; } const preserveEngine = !panelView && tab === 'engine' ? { scrollTop: panel.scrollTop, focusedPv: document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.pv : null } : null; const info = '<div class="empty"><b>Turn:</b> ' + (chess.turn() === 'w' ? 'White' : 'Black') + '<br><b>FEN:</b> ' + safe(chess.fen()) + '<br><b>Leela:</b> ' + safe(engine.status) + '<br>Paired PC credentials remain in the native shell.</div>'; document.querySelector('.game-title small').textContent = (cursor.san || privacy.subtitle(studyContext.subtitle)) + ' · ' + (engine.status === 'disconnected' ? 'PC disconnected' : chess.turn() === 'w' ? 'White to move' : 'Black to move'); panel.innerHTML = panelView ? panelViewHtml() : tab === 'engine' ? enginePanel() : tab === 'moves' ? movesPanel() : tab === 'book' ? bookPanel() : tab === 'repertoire' ? (repertoirePanel ? privacy.html(repertoirePanel.html()) : '') : tab === 'info' ? info : '<div class="chart-blank" aria-label="Chart intentionally empty"></div>'; heading(); const retry=panel.querySelector('[data-engine-retry]');if(retry)retry.onclick=()=>scheduleAnalysis(); if (panelView) bindPanelView(); if (!panelView && tab === 'repertoire' && repertoirePanel) repertoirePanel.bind(panel); panel.querySelectorAll('[data-node]').forEach(bindMoveNode); panel.querySelectorAll('[data-uci]').forEach(button => button.onclick = () => playUci(button.dataset.uci)); panel.querySelectorAll('[data-pv]').forEach(button => button.onclick = () => playUci(button.dataset.pvUci)); if (preserveEngine) { panel.scrollTop = preserveEngine.scrollTop; if (preserveEngine.focusedPv != null) { const focused = panel.querySelector('[data-pv="' + preserveEngine.focusedPv + '"]'); if (focused) { focused.focus({ preventScroll:true }); panel.scrollTop = preserveEngine.scrollTop; } } } const prev = document.querySelector('[data-action="prev"]'), next = document.querySelector('[data-action="next"]'), mainline = document.querySelector('[data-action="mainline"]'); prev.disabled = !cursor.parent; next.disabled = !mainlineChild(cursor); mainline.disabled = !navigationIntersection(); mainline.setAttribute('aria-label',tab==='repertoire'?'Return to intersection':'Return to mainline'); }
-  function findNode(id, node) { node = node || root; if (node.id === id) return node; for (const child of node.children) { const found = findNode(id, child); if (found) return found; } return null; }
+  function navigationControls() { const prev=document.querySelector('[data-action="prev"]'),next=document.querySelector('[data-action="next"]'),mainline=document.querySelector('[data-action="mainline"]');prev.disabled=!cursor.parent;next.disabled=!mainlineChild(cursor);mainline.disabled=!navigationIntersection();mainline.setAttribute('aria-label',tab==='repertoire'?'Return to intersection':'Return to mainline'); }
+  function renderPanel() { if(!gameLoading && !panelView && tab==='moves' && renderedTreeRevision===treeRevision && panel.querySelector('.moves')) { panel.querySelector('.move.current')?.classList.remove('current');panel.querySelector('[data-node="'+cursor.id+'"]')?.classList.add('current');document.querySelector('.game-title small').textContent=(cursor.san || privacy.subtitle(studyContext.subtitle))+' · '+(chess.turn()==='w'?'White to move':'Black to move');heading();navigationControls();return; } if (gameLoading) { panel.innerHTML = '<div class="empty" role="status">Loading game…</div>'; heading(); for(const name of ['prev','next','mainline']) document.querySelector('[data-action="'+name+'"]').disabled = true; return; }  if (panelView === 'repertoireSettings' && repertoirePanel && repertoirePanel.hasEditorFocus()) { heading(); return; } const preserveEngine = !panelView && tab === 'engine' ? { scrollTop: panel.scrollTop, focusedPv: document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.pv : null } : null; const info = '<div class="empty"><b>Turn:</b> ' + (chess.turn() === 'w' ? 'White' : 'Black') + '<br><b>FEN:</b> ' + safe(chess.fen()) + '<br><b>Leela:</b> ' + safe(engine.status) + '<br>Paired PC credentials remain in the native shell.</div>'; document.querySelector('.game-title small').textContent = (cursor.san || privacy.subtitle(studyContext.subtitle)) + ' · ' + (engine.status === 'disconnected' ? 'PC disconnected' : chess.turn() === 'w' ? 'White to move' : 'Black to move'); panel.innerHTML = panelView ? panelViewHtml() : tab === 'engine' ? enginePanel() : tab === 'moves' ? movesPanel() : tab === 'book' ? bookPanel() : tab === 'repertoire' ? (repertoirePanel ? privacy.html(repertoirePanel.html()) : '') : tab === 'info' ? info : '<div class="chart-blank" aria-label="Chart intentionally empty"></div>'; heading(); const retry=panel.querySelector('[data-engine-retry]');if(retry)retry.onclick=()=>scheduleAnalysis(); if (panelView) bindPanelView(); if (!panelView && tab === 'repertoire' && repertoirePanel) repertoirePanel.bind(panel); if(!panelView && tab==='moves')renderedTreeRevision=treeRevision;panel.querySelectorAll('[data-node]').forEach(bindMoveNode); panel.querySelectorAll('[data-uci]').forEach(button => button.onclick = () => playUci(button.dataset.uci)); panel.querySelectorAll('[data-pv]').forEach(button => button.onclick = () => playUci(button.dataset.pvUci)); if (preserveEngine) { panel.scrollTop = preserveEngine.scrollTop; if (preserveEngine.focusedPv != null) { const focused = panel.querySelector('[data-pv="' + preserveEngine.focusedPv + '"]'); if (focused) { focused.focus({ preventScroll:true }); panel.scrollTop = preserveEngine.scrollTop; } } } const prev = document.querySelector('[data-action="prev"]'), next = document.querySelector('[data-action="next"]'), mainline = document.querySelector('[data-action="mainline"]'); prev.disabled = !cursor.parent; next.disabled = !mainlineChild(cursor); mainline.disabled = !navigationIntersection(); mainline.setAttribute('aria-label',tab==='repertoire'?'Return to intersection':'Return to mainline'); }
+  function findNode(id) { if(nodeIndex.has(id))return nodeIndex.get(id);const pending=[root];while(pending.length){const n=pending.pop();nodeIndex.set(n.id,n);pending.push(...n.children);}return nodeIndex.get(id) || null; }
+  function forgetBranch(node) { const pending=[node];while(pending.length){const n=pending.pop();nodeIndex.delete(n.id);dirtyBranches.delete(n.id);pending.push(...n.children);} }
   function mainlineIntersection(node) { for (let branch = node; branch && branch.parent; branch = branch.parent) if (mainlineChild(branch.parent) !== branch) return branch.parent; return null; }
   function navigationIntersection() {
     const notation=mainlineIntersection(cursor);if(tab!=='repertoire' || !repertoirePanel)return notation;
@@ -380,21 +451,24 @@
     arrows.innerHTML = defs + shapes.map(shape => arrowLine(shape.move, shape.kind, shape.width, destinationCounts.get(shape.move.slice(2,4)) > 1 ? 20 : 10)).join('');
   }
   function openPanelView(kind) { if (wrap.classList.contains('expanded')) { wrap.classList.remove('expanded'); refreshBoardBounds(); scheduleStudySave(); } panelView = kind; if (kind === 'repertoireSettings' && repertoirePanel) repertoirePanel.beginSettings(); renderPanel(); }
-  function deleteCurrentBranch() { if (!cursor.parent) return; const parent = cursor.parent; parent.children = parent.children.filter(child => child !== cursor); parent.selectedChild = mainlineChild(parent); restore(parent); }
-  function promoteVariation() { const target = variationTarget, parent = target && target.parent; if (!parent) return closePanelView(); const index = parent.children.indexOf(target); if (index > 0) { parent.children.splice(index, 1); parent.children.unshift(target); } parent.selectedChild = target; variationTarget = null; panelView = null; scheduleStudySave(); renderPanel(); }
-  function deleteVariation() { const target = variationTarget, parent = target && target.parent; if (!parent) return closePanelView(); const containsCursor = (() => { for (let node = cursor; node; node = node.parent) if (node === target) return true; return false; })(); parent.children = parent.children.filter(child => child !== target); parent.selectedChild = mainlineChild(parent); variationTarget = null; panelView = null; if (containsCursor) restore(parent); else { scheduleStudySave(); renderPanel(); } }
-  function resetStudy() { const editedPosition = !!studyContext.editedPosition; stopGameLoad(); if(repertoirePanel)repertoirePanel.setActive(analysisActive,false); restoring = true; resetTransport(); resetRoot(START_FEN, { gameId:null, editedPosition, initialFen:START_FEN, title:editedPosition?'Edited position':'Local analysis', subtitle:'Starting position' }); wrap.classList.remove('orientation-black'); wrap.classList.add('orientation-white'); if (ground.state.orientation === 'black') ground.toggleOrientation(); sync(null); restoring = false; saveStudyNow(); onPositionChanged(); }
+  function deleteCurrentBranch() { if (!cursor.parent) return; const parent = cursor.parent; parent.children = parent.children.filter(child => child !== cursor); forgetBranch(cursor);changedBranch(parent);parent.selectedChild = mainlineChild(parent); restore(parent); }
+  function promoteVariation() { const target = variationTarget, parent = target && target.parent; if (!parent) return closePanelView(); const index = parent.children.indexOf(target); if (index > 0) { parent.children.splice(index, 1); parent.children.unshift(target); changedBranch(parent); } parent.selectedChild = target; variationTarget = null; panelView = null; saveStudyNow(); renderPanel(); }
+  function deleteVariation() { const target = variationTarget, parent = target && target.parent; if (!parent) return closePanelView(); const containsCursor = (() => { for (let node = cursor; node; node = node.parent) if (node === target) return true; return false; })(); parent.children = parent.children.filter(child => child !== target); forgetBranch(target);changedBranch(parent);parent.selectedChild = mainlineChild(parent); variationTarget = null; panelView = null; if (containsCursor) restore(parent); else { saveStudyNow(); renderPanel(); } }
+  function resetStudy() { if(!saveStudyNow())return; const editedPosition = !!studyContext.editedPosition; stopGameLoad(); if(repertoirePanel)repertoirePanel.setActive(analysisActive,false); restoring = true; resetTransport(); resetRoot(START_FEN, { gameId:null, editedPosition, initialFen:START_FEN, title:editedPosition?'Edited position':'Local analysis', subtitle:'Starting position' }); wrap.classList.remove('orientation-black'); wrap.classList.add('orientation-white'); if (ground.state.orientation === 'black') ground.toggleOrientation(); sync(null); restoring = false; saveStudyNow(); onPositionChanged(); }
   function showMenu() { openPanelView('study'); }
 
   function returnToSavedBoard() {
+    if(!saveStudyNow())return;
     resetTransport(); panelView = null;
     let saved=null;try { saved=JSON.parse(native()?.getSourceStudyState?.() || '{}'); } catch(_) {}
-    if(!saved || saved.editedPosition || !applyStudyState(saved)) { studyContext.editedPosition=false;resetStudy(); }
+    if(saved && Object.keys(saved).length && (saved.editedPosition || !applyStudyState(saved))) { loadFailed=true;saveNotice('Saved board could not be opened · untouched · tap to retry'); }
+    else if(!saved || !Object.keys(saved).length) { studyContext.editedPosition=false;resetStudy(); }
     else { saveStudyNow();onPositionChanged(); }
   }
   function openBoardEditor(useCurrent = false) {
     if(editingPosition())return;
-    stopGameLoad();stopActiveNavigation();saveStudyNow();resetTransport();panelView=null;
+    if(!saveStudyNow())return;
+    stopGameLoad();stopActiveNavigation();resetTransport();panelView=null;
     if(promotionPicker)promotionPicker.querySelector('[data-cancel]').click();
     if(repertoirePanel)repertoirePanel.setActive(false);
     if(!positionEditor)positionEditor=window.createPositionEditor({

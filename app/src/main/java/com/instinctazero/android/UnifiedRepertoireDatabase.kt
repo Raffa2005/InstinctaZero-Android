@@ -45,27 +45,54 @@ internal class UnifiedRepertoireDatabase(private val folder: File, private val c
             }
             checkpoint("migration_publish")
             check(stage.renameTo(file)) { "Unable to publish repertoire library. Original files are unchanged." }
+            generation.incrementAndGet()
         } finally { stage.delete() }
     }
     fun edits():JSONObject=read().use(::exportEntries)
     fun undo():JSONObject?=read().use { value(it,"undo")?.takeUnless { raw -> raw=="null" }?.let(::JSONObject) }
+    fun revision():Long=read().use(::revisionNumber)
+    private fun revisionNumber(db:SQLiteDatabase):Long=db.rawQuery("SELECT COALESCE(MAX(id),0) FROM uz_revisions",null).use {it.moveToFirst();it.getLong(0)}
+    data class EditSnapshot(val edits:JSONObject,val undo:JSONObject?,val revision:Long)
+    fun editSnapshot():EditSnapshot=read().use {db ->
+        val revision=revisionNumber(db);val edits=exportEntries(db);val undo=value(db,"undo")?.takeUnless {it=="null"}?.let(::JSONObject)
+        check(revisionNumber(db)==revision) {"The repertoire changed while opening. Reopen it before editing."}
+        EditSnapshot(edits,undo,revision)
+    }
 
-    fun commit(edits:JSONObject,undo:JSONObject?,reason:String="edit",expectedEntries:String?=null)=write().use { db ->
+    fun commit(edits:JSONObject,undo:JSONObject?,reason:String="edit",expectedEntries:String?=null,
+        expectedRevision:Long?=null,previousState:JSONObject?=null)=write().use { db ->
+        var committedRevision=0L
         transaction(db) {
-            val previous=exportEntries(db);val oldUndo=value(db,"undo")?.takeUnless { it=="null" }?.let(::JSONObject)
+            checkpoint("edit_begin")
+            check(expectedRevision==null || revisionNumber(db)==expectedRevision) { "The repertoire changed in another session. Reopen it before editing; your saved changes are intact." }
+            val previous=if(expectedRevision!=null && previousState!=null)previousState else exportEntries(db)
+            val oldUndo=value(db,"undo")?.takeUnless { it=="null" }?.let(::JSONObject)
             check(expectedEntries==null || canonical(previous)==expectedEntries) { "The repertoire changed in another session. Reopen it before editing; your saved changes are intact." }
-            val changed=(previous.keys().asSequence().toSet()+edits.keys().asSequence().toSet()).filter { key -> canonical(previous.opt(key))!=canonical(edits.opt(key)) }.toSet()
+            val changed=(previous.keys().asSequence().toSet()+edits.keys().asSequence().toSet()).filter { key -> !equivalent(previous.opt(key),edits.opt(key)) }.toSet()
+            checkpoint("edit_diff")
             saveEntries(db,edits,previous)
+            checkpoint("edit_entries")
             if(changed.any { it!="_settings" }) {
                 fun graph(book:JSONObject?):JSONObject=JSONObject().also { result -> book?.keys()?.forEach { key -> val entry=book.getJSONObject(key);if(entry.optString("scope")!="comment")result.put(key,entry) } }
-                val reps=if("_local_repertoires" in changed)null else changed.filterNot { it.startsWith("_") }.filter { canonical(graph(previous.optJSONObject(it)))!=canonical(graph(edits.optJSONObject(it))) }.toSet()
-                RepertoireProjectionBuilder(db).rebuild(reps)
+                val reps=if("_local_repertoires" in changed)null else changed.filterNot { it.startsWith("_") }.filter { !equivalent(graph(previous.optJSONObject(it)),graph(edits.optJSONObject(it))) }.toSet()
+                val builder=RepertoireProjectionBuilder(db,checkpoint)
+                if(reps==null)builder.rebuild() else for(rep in reps) {
+                    val old=graph(previous.optJSONObject(rep));val next=graph(edits.optJSONObject(rep))
+                    fun ordinary(value:JSONObject?)=value==null || (value.optBoolean("added") && value.optString("scope")=="position" && value.optString("kind")=="repertoire" && !value.optBoolean("deleted"))
+                    val onlyAdditions=(old.keys().asSequence().toSet()+next.keys().asSequence().toSet()).all { key ->
+                        equivalent(old.opt(key),next.opt(key)) || (ordinary(old.optJSONObject(key)) && ordinary(next.optJSONObject(key)))
+                    }
+                    if(onlyAdditions)builder.rebuildAdditions(rep) else builder.rebuild(setOf(rep))
+                }
             }
             checkpoint("edit_projection")
             put(db,"undo",undo?.toString() ?: "null")
             revision(db,reason,previous,edits,oldUndo,undo)
+            committedRevision=revisionNumber(db)
             checkpoint("edit_commit")
         }
+        generation.incrementAndGet()
+        committedRevision
     }
     /** Copy source provenance into this database in one rollback-safe transaction. The
      * normalized personal records and revision history never depend on incoming node IDs. */
@@ -89,6 +116,7 @@ internal class UnifiedRepertoireDatabase(private val folder: File, private val c
                 revision(db,"source refresh",current,current,undo,undo)
                 checkpoint("refresh_commit")
             }
+            generation.incrementAndGet()
         } finally { db.execSQL("DETACH DATABASE incoming") }
     }
     /** Explicit downgrade artifact, never automatic mirroring or a second authority. */
@@ -116,7 +144,7 @@ internal class UnifiedRepertoireDatabase(private val folder: File, private val c
         }
         for((repOrdinal,rep) in edits.keys().asSequence().withIndex()) {
             if(rep.startsWith("_")) {
-                if(canonical(previous.opt(rep))!=canonical(edits.get(rep)))db.execSQL("INSERT OR REPLACE INTO uz_config VALUES(?,?)",arrayOf(rep,edits.get(rep).toString()))
+                if(!equivalent(previous.opt(rep),edits.get(rep)))db.execSQL("INSERT OR REPLACE INTO uz_config VALUES(?,?)",arrayOf(rep,edits.get(rep).toString()))
                 continue
             }
             db.execSQL("INSERT OR REPLACE INTO uz_edit_books VALUES(?,?)",arrayOf(rep,repOrdinal))
@@ -129,7 +157,7 @@ internal class UnifiedRepertoireDatabase(private val folder: File, private val c
             val oldOrdinals=old.keys().asSequence().withIndex().associate {it.value to it.index}
             for((ordinal,key) in book.keys().asSequence().withIndex()) {
                 val entry=book.getJSONObject(key)
-                if(canonical(old.opt(key))==canonical(entry)) {
+                if(equivalent(old.opt(key),entry)) {
                     if(oldOrdinals[key]!=ordinal)db.execSQL("UPDATE uz_entries SET ordinal=? WHERE rep=? AND entry_key=?",arrayOf(ordinal,rep,key))
                     continue
                 }
@@ -168,10 +196,10 @@ internal class UnifiedRepertoireDatabase(private val folder: File, private val c
         val id=db.insertOrThrow("uz_revisions",null,values)
         for(rep in (before.keys().asSequence().toSet()+after.keys().asSequence().toSet())) {
             if(rep.startsWith("_")) {
-                if(canonical(before.opt(rep))!=canonical(after.opt(rep)))db.execSQL("INSERT INTO uz_changes VALUES(?,?,?,?,?)",arrayOf(id,rep,"",canonical(before.opt(rep)),canonical(after.opt(rep))))
+                if(!equivalent(before.opt(rep),after.opt(rep)))db.execSQL("INSERT INTO uz_changes VALUES(?,?,?,?,?)",arrayOf(id,rep,"",canonical(before.opt(rep)),canonical(after.opt(rep))))
             } else {
                 val old=before.optJSONObject(rep) ?: JSONObject();val next=after.optJSONObject(rep) ?: JSONObject()
-                for(key in old.keys().asSequence().toSet()+next.keys().asSequence().toSet())if(canonical(old.opt(key))!=canonical(next.opt(key)))db.execSQL("INSERT INTO uz_changes VALUES(?,?,?,?,?)",arrayOf(id,rep,key,canonical(old.opt(key)),canonical(next.opt(key))))
+                for(key in old.keys().asSequence().toSet()+next.keys().asSequence().toSet())if(!equivalent(old.opt(key),next.opt(key)))db.execSQL("INSERT INTO uz_changes VALUES(?,?,?,?,?)",arrayOf(id,rep,key,canonical(old.opt(key)),canonical(next.opt(key))))
             }
         }
         // The current graph and single-step Undo are independent of retained audit history.
@@ -204,6 +232,13 @@ internal class UnifiedRepertoireDatabase(private val folder: File, private val c
     }
     companion object {
         private val migrationLock=Any()
+        val generation=java.util.concurrent.atomic.AtomicLong()
+        fun equivalent(a:Any?,b:Any?):Boolean=when {
+            a===b -> true
+            a is JSONObject && b is JSONObject -> a.length()==b.length() && a.keys().asSequence().all { b.has(it) && equivalent(a.get(it),b.get(it)) }
+            a is org.json.JSONArray && b is org.json.JSONArray -> a.length()==b.length() && (0 until a.length()).all { equivalent(a.get(it),b.get(it)) }
+            else -> a==b
+        }
         fun canonical(value:Any?):String=when(value) {
             null,JSONObject.NULL->"null"
             is JSONObject->value.keys().asSequence().toList().sorted().joinToString(",","{","}") { JSONObject.quote(it)+":"+canonical(value.get(it)) }

@@ -1198,7 +1198,6 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         private const val ACCOUNT_LIST_KEY = "paired_account_list"
         private const val MAX_REQUEST_JSON = 16 * 1024
         private const val MAX_SETTINGS_JSON = 2 * 1024
-        private const val MAX_STUDY_JSON = 256 * 1024
         private const val MAX_ARCHIVE_JSON = 2 * 1024 * 1024
         private const val MAX_CACHED_ARCHIVE_JSON = 256 * 1024
         private val BOOK_SPEEDS = listOf("bullet", "blitz", "rapid", "classical", "correspondence")
@@ -1411,10 +1410,13 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     }
 
     @JavascriptInterface
-    fun getStudyState(): String = studyWorkspaces.current()
+    fun getStudyState(): String = runCatching {studyDatabase.current()}.getOrDefault("{\"load_error\":true}")
 
     private val studyWorkspaces by lazy { StudyWorkspaceStore(studyPreferences) }
-    @JavascriptInterface fun getSourceStudyState(): String = studyWorkspaces.source()
+    private val studyDatabase by lazy { StudyDatabase(activity.filesDir,studyPreferences) }
+    @JavascriptInterface fun getSourceStudyState(): String = runCatching {studyDatabase.current(source=true)}.getOrDefault("{\"load_error\":true}")
+    @JavascriptInterface fun saveStudyDelta(raw: String): String = studyDatabase.save(raw)
+    @JavascriptInterface fun getStudyRevision(edited: Boolean): Long = studyDatabase.revision(edited)
     @JavascriptInterface fun getEditorDraft(): String = studyWorkspaces.draft()
     @JavascriptInterface fun saveEditorDraft(raw: String?): Boolean = studyWorkspaces.saveDraft(raw)
     @JavascriptInterface fun pastePositionFen(): String = runCatching {
@@ -1428,15 +1430,11 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     }.getOrDefault(false)
 
     @JavascriptInterface
-    fun saveStudyState(rawState: String?): Boolean = studyWorkspaces.save(rawState)
+    fun saveStudyState(rawState: String?): Boolean = studyDatabase.saveLegacy(rawState)
 
     fun clearArchivedStudyContext() {
-        val state = runCatching {
-            JSONObject(studyPreferences.getString("state_v1", "{}") ?: "{}")
-        }.getOrNull() ?: return
-        if (state.optString("gameId").isNotBlank()) {
-            studyPreferences.edit().remove("state_v1").apply()
-        }
+        // onAccountChanged detaches the visible archived board transactionally in JS.
+        // Do not erase its frozen pre-migration recovery preferences here.
     }
 
     /** Native-only pairing entry point. The bearer can never cross into WebView JavaScript. */
@@ -1579,7 +1577,9 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         cancelAll("destroyed")
         repertoireBackups.close()
         executor.shutdownNow()
-        repertoireExecutor.shutdownNow()
+        // Accepted edits are not obsolete navigation reads. Let queued writes reach
+        // their durable transaction when the Activity is recreated or closed.
+        repertoireExecutor.shutdown()
         analysisExecutor.shutdownNow()
         restHttp.dispatcher.executorService.shutdown()
         restHttp.connectionPool.evictAll()

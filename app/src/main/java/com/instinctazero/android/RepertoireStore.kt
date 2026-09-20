@@ -23,12 +23,16 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
     private val positionCache = RepertoireLookupCache()
     private val markerCache = RepertoireLookupCache(512*1024,1024)
     private val activityCache = RepertoireActivityCache()
-    private fun clearCaches() { positionCache.clear();markerCache.clear();activityCache.clear() }
+    private var cacheGeneration=UnifiedRepertoireDatabase.generation.get()
+    private fun clearCaches() { positionCache.clear();markerCache.clear();activityCache.clear();cacheGeneration=UnifiedRepertoireDatabase.generation.get() }
+    private fun checkCaches() { if(cacheGeneration!=UnifiedRepertoireDatabase.generation.get())clearCaches() }
     private var undoRecord: JSONObject? = null
     private var persistedEntries: String? = null
+    private var persistedRevision: Long? = null
     private val editState = lazy {
-        val saved = if(unified.exists)unified.edits() else if(editsFile.baseFile.isFile || File(editsFile.baseFile.path+".bak").isFile)JSONObject(String(editsFile.readFully(), Charsets.UTF_8)) else JSONObject()
-        val record = if(unified.exists)unified.undo() else saved.remove("_undo") as? JSONObject
+        val snapshot=if(unified.exists)unified.editSnapshot() else null
+        val saved = snapshot?.edits ?: if(editsFile.baseFile.isFile || File(editsFile.baseFile.path+".bak").isFile)JSONObject(String(editsFile.readFully(), Charsets.UTF_8)) else JSONObject()
+        val record = if(snapshot!=null)snapshot.undo else saved.remove("_undo") as? JSONObject
         // Older versions can still read the repertoire keys. If one changed the edits without
         // updating the journal, do not present a stale undo after upgrading again.
         undoRecord = record?.takeIf { runCatching {
@@ -38,7 +42,8 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
                     change.getString("path").matches(Regex("[a-f0-9]{32}")) && change.has("before") && (change.isNull("before") || change.optJSONObject("before") != null)
                 } } && it.optString("after_hash") == fingerprint(saved)
         }.getOrDefault(false) }
-        persistedEntries=canonical(saved)
+        persistedEntries=saved.toString()
+        persistedRevision=snapshot?.revision
         saved
     }
     private val edits:JSONObject get()=editState.value
@@ -84,6 +89,12 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
             synchronized(this) {
                 if(unified.exists)unified.refresh(temporary,expected)
                 else unified.ensure(temporary,edits,undoRecord,expected)
+                // Refresh does not alter personal entries. Only advance our session's CAS
+                // token if its previous snapshot was still current (never bless stale edits).
+                if(editState.isInitialized()) {
+                    val snapshot=unified.editSnapshot()
+                    if(UnifiedRepertoireDatabase.equivalent(snapshot.edits,edits))persistedRevision=snapshot.revision
+                }
                 unifiedReady=true
                 clearCaches()
                 prefs.edit().putString("fingerprint", expected).apply()
@@ -95,7 +106,11 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
     private fun prepareUnified() {
         if(!unifiedReady) {
             if(unified.exists)unified.checkVersion()
-            else unified.ensure(file,edits,undoRecord,prefs.getString("fingerprint","").orEmpty())
+            else {
+                unified.ensure(file,edits,undoRecord,prefs.getString("fingerprint","").orEmpty())
+                val snapshot=unified.editSnapshot()
+                persistedRevision=if(UnifiedRepertoireDatabase.equivalent(snapshot.edits,edits))snapshot.revision else -1
+            }
             unifiedReady=true
         }
     }
@@ -152,8 +167,8 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
         val content = edits.toString()
         require(content.toByteArray(Charsets.UTF_8).size <= 4 * 1024 * 1024) { "Local edits have reached the 4 MiB limit" }
         check(unifiedReady)
-        unified.commit(edits,record,expectedEntries=persistedEntries)
-        persistedEntries=canonical(edits)
+        persistedRevision=unified.commit(edits,record,expectedRevision=persistedRevision,previousState=persistedEntries?.let(::JSONObject))
+        persistedEntries=content
     }
     @Synchronized fun undoInfo(): JSONObject? {
         val record=if(!editState.isInitialized() && unified.exists)unified.undo() else {edits;undoRecord}
@@ -278,6 +293,7 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
         }
     }
     @Synchronized fun markers(request: JSONObject,cancellation: CancellationSignal?=null): JSONObject {
+        checkCaches()
         val fen=position(request.getString("fen"));val selected=request.getJSONArray("selected");require(selected.length()<=16)
         val results=JSONArray()
         withLazySource { database ->
@@ -291,6 +307,7 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
         return JSONObject().put("results",results)
     }
     @Synchronized fun lookup(request: JSONObject, cancellation: CancellationSignal? = null): JSONObject {
+        checkCaches()
         cancellation?.throwIfCanceled()
         val moves = checkedMoves(request); val fen = position(request.getString("fen"))
         val history = positionHistory(request,moves)
@@ -404,7 +421,7 @@ internal class RepertoireStore(context: Context, checkpoint: (String) -> Unit = 
             val after = overrides(rep)
             val keys = (previousLocal.keys().asSequence().toList() + after.keys().asSequence().toList()).toSortedSet()
             val changes = JSONArray()
-            for (key in keys) if (canonical(previousLocal.opt(key)) != canonical(after.opt(key))) {
+            for (key in keys) if (!UnifiedRepertoireDatabase.equivalent(previousLocal.opt(key),after.opt(key))) {
                 changes.put(JSONObject().put("path", key).put("before", previousLocal.opt(key) ?: JSONObject.NULL))
             }
             if (changes.length() == 0) { restoreEdits(before); return } // A no-op must not consume the previous undo.
