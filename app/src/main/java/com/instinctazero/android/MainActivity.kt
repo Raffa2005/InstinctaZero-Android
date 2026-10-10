@@ -2075,8 +2075,8 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
 
 private fun String.toHttpUrlChecked(): HttpUrl {
     val uri = URI(this)
-    require(uri.scheme.equals("https", ignoreCase = true) && uri.host != null && uri.port in 1..65535 &&
+    require(uri.scheme.equals("https", ignoreCase = true) && uri.host != null && (uri.port == -1 || uri.port in 1..65535) &&
         uri.userInfo == null && (uri.rawPath.isNullOrEmpty() || uri.rawPath == "/") &&
         uri.rawQuery == null && uri.rawFragment == null) { "Invalid configured HTTPS gateway." }
-    return HttpUrl.Builder().scheme("https").host(requireNotNull(uri.host)).port(uri.port).build()
+    return HttpUrl.Builder().scheme("https").host(requireNotNull(uri.host)).port(if (uri.port == -1) 443 else uri.port).build()
 }

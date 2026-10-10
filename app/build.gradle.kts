@@ -11,8 +11,8 @@ android {
         applicationId = "com.instinctazero.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 39
-        versionName = "0.8.11"
+        versionCode = 40
+        versionName = "0.8.12"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -22,7 +22,7 @@ android {
 
     // This APK deliberately speaks to one dedicated, path-limited InstinctaZero gateway.
     // Keeping the origin fixed also makes the native URL allow-list a build-time invariant.
-    val leelaGatewayOrigin = "https://rafael-ms-7e34.tail273ae6.ts.net:8443"
+    val leelaGatewayOrigin = "https://instinctazero.rs-industries.org"
     defaultConfig {
         buildConfigField("String", "LEELA_GATEWAY_ORIGIN", "\"$leelaGatewayOrigin\"")
     }

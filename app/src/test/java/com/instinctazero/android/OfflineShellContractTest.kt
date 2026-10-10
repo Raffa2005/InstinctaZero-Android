@@ -125,7 +125,8 @@ class OfflineShellContractTest {
 
     @Test
     fun onlyPairingStudyAndCompletedGameRoutesOnTheConfiguredHttpsOriginMayUseNativeNetwork() {
-        val origin = "https://rafael-ms-7e34.tail273ae6.ts.net:8443"
+        val origin = "https://instinctazero.rs-industries.org"
+        assertEquals(origin, BuildConfig.LEELA_GATEWAY_ORIGIN)
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/pair/claim"))
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/session"))
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/account/select"))
@@ -135,7 +136,11 @@ class OfflineShellContractTest {
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games?limit=20"))
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games?limit=20&cursor=Abc_123-xyz"))
         assertTrue(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games/abcdEF12"))
-        assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("http://rafael-ms-7e34.tail273ae6.ts.net:8443/api/mobile/v1/study/analysis/stream"))
+        assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("http://instinctazero.rs-industries.org/api/mobile/v1/study/analysis/stream"))
+        assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin:8443/api/mobile/v1/study/analysis/stream"))
+        assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("https://instinctazero.rs-industries.org.evil.example/api/mobile/v1/session"))
+        assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("https://user@instinctazero.rs-industries.org/api/mobile/v1/session"))
+        assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("https://rafael-ms-7e34.tail273ae6.ts.net:8443/api/mobile/v1/study/analysis/stream"))
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("https://rafael-ms-7e34.tail273ae6.ts.net/api/mobile/v1/study/analysis/stream"))
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("https://rafael-ms-7e34.tail273ae6.ts.net:443/api/mobile/v1/study/analysis/stream"))
         assertFalse(AnalysisWebPolicy.isAllowedNativeGatewayUrl("$origin/api/mobile/v1/games?limit=100"))

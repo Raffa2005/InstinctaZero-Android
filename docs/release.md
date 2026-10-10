@@ -1,7 +1,9 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.8.11). Durable board saves and indexed repertoire additions are described
+(version 0.8.12). The Cloudflare gateway migration and its checks are described in
+[v0.8.12](release-v0.8.12.md). Install over the existing app: pairing and all local
+data remain intact. Durable board saves and indexed repertoire additions are described
 in [v0.8.11](release-v0.8.11.md). No server change or repertoire download is needed.
 The unified indexed library and its migration/recovery contract
 are described in [v0.8.10](release-v0.8.10.md). It needs no server change,
@@ -51,7 +53,7 @@ Create a local keystore outside version control, then supply its path and secret
 ```
 
 The app is compiled against the dedicated, path-limited InstinctaZero HTTPS
-gateway at `https://rafael-ms-7e34.tail273ae6.ts.net:8443`. This is a public
+gateway at `https://instinctazero.rs-industries.org` (standard HTTPS port 443). This is a public
 HTTPS endpoint; the phone does not need the Tailscale app, Tailscale DNS, a VPN
 connection, or any manual network setup. The native allow-list accepts only
 that exact HTTPS host and port and the pairing/analysis/book routes. Port 8765
@@ -64,7 +66,7 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 39 / 0.8.11 release values;
+- versionCode/versionName are the intended 40 / 0.8.12 release values;
 - confirm the signed artifact descends from merged PR #1, retains the production
   application ID and signing certificate, and passes the bounded-body/stream,
   lazy-connection, corpus/transposition and private-edit preservation regressions;
@@ -181,7 +183,7 @@ Before publishing, at minimum verify:
   imported games render immediately, and an archived analysis from the former
   account safely detaches instead of leaving the engine in a 404 error state;
 - Leela streams progressive lines/arrows and cancellation closes its request;
-- DNS-address and TLS-handshake failures advance to another Funnel ingress;
+- DNS-address and TLS-handshake failures advance to another resolved gateway address;
   read-only requests may retry, while pairing, account selection, archive sync,
   and analysis cannot replay after request transmission begins;
 - a local study, selected variation, cursor, orientation, and game context are
