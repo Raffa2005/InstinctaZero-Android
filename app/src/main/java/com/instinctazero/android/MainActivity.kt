@@ -1375,6 +1375,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         val arrowCount = requested.optInt("arrowCount", uiSettings().getInt("arrowCount")).coerceIn(1, 8)
         val arrowMode = requested.optString("arrowMode", uiSettings().getString("arrowMode"))
         require(arrowMode in setOf("best", "maneuver")) { "Invalid arrow mode." }
+        val smartInput = requested.optBoolean("smartInput", uiSettings().getBoolean("smartInput"))
         val leelaEnabled = requested.optBoolean("leelaEnabled", uiSettings().getBoolean("leelaEnabled"))
         val arrowsEnabled = requested.optBoolean("arrowsEnabled", uiSettings().getBoolean("arrowsEnabled"))
         val engineBackend = requested.optString("engineBackend", uiSettings().getString("engineBackend"))
@@ -1395,6 +1396,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
             .putInt("nodes", nodes)
             .putInt("arrowCount", arrowCount)
             .putString("arrowMode", arrowMode)
+            .putBoolean("smartInput", smartInput)
             .putBoolean("leelaEnabled", leelaEnabled)
             .putBoolean("arrowsEnabled", arrowsEnabled)
             .putString("engineBackend", engineBackend)
@@ -1961,6 +1963,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         .put("nodes", uiPreferences.getInt("nodes", 1000))
         .put("arrowCount", uiPreferences.getInt("arrowCount", 8).coerceIn(1, 8))
         .put("arrowMode", uiPreferences.getString("arrowMode", "best").takeIf { it in setOf("best", "maneuver") } ?: "best")
+        .put("smartInput", uiPreferences.getBoolean("smartInput", true))
         .put("leelaEnabled", uiPreferences.getBoolean("leelaEnabled", true))
         .put("arrowsEnabled", uiPreferences.getBoolean("arrowsEnabled", true))
         .put("engineBackend", uiPreferences.getString("engineBackend", "cpu"))

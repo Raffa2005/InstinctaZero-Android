@@ -1,5 +1,8 @@
 # InstinctaZero Android
 
+The Click Chess preview adds offline destination-tap move input. See
+[preview behavior, APK builds and validation](docs/click-chess-preview.md).
+
 For GitHub-only repertoire performance work, start with the
 [self-contained development handoff](docs/repertoire-optimization-handoff.md).
 It includes the source-index builder, synthetic data generator and offline tests.

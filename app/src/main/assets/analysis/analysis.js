@@ -17,11 +17,12 @@
   const NODE_OPTIONS = [100, 200, 400, 700, 1000, 2000, 4000, 7000, 10000, 20000, 40000, 70000, 100000];
   const BOOK_SPEEDS = ['bullet','blitz','rapid','classical','correspondence'];
   const BOOK_RATINGS = [1600,1800,2000,2200,2500];
-  const settings = { nodes: 1000, arrowCount: 8, arrowMode:'best', enabled: true, showArrows: true, backend:'cpu', bookSource:'lichess', bookSpeeds:[], bookRatings:[] };
+  const settings = { smartInput: true, nodes: 1000, arrowCount: 8, arrowMode:'best', enabled: true, showArrows: true, backend:'cpu', bookSource:'lichess', bookSpeeds:[], bookRatings:[] };
   let tab = 'engine', panelView = null, promotionPicker = null, nodeId = 0, restoring = false, activeNavigationStop = null, analysisActive = false, bookSettingsDirty = false, persistTimer = null, variationTarget = null;
   let studyContext = { gameId:null, initialFen:START_FEN, title:'Local analysis', subtitle:'Starting position' };
   const root = { id: 0, fen: START_FEN, san: null, move: null, number: 1, color: 'w', parent: null, children: [], selectedChild: null };
   let cursor = root;
+  let legalCache = null, clickChoice = null, clickInput = null;
   let treeRevision = 0, renderedTreeRevision = -1, savedRevision = 0, replaceSavedTree = true, loadFailed = false;
   const dirtyBranches = new Map(), nodeIndex = new Map([[0,root]]);
   function changedBranch(parent) {
@@ -53,7 +54,8 @@
 
   function color() { return chess.turn() === 'w' ? 'white' : 'black'; }
   function history() { const result = []; for (let n = cursor; n && n.move; n = n.parent) result.push(n.move.from + n.move.to + (n.move.promotion || '')); return result.reverse(); }
-  function legalDests() { const result = {}; chess.moves({ verbose: true }).forEach(move => (result[move.from] || (result[move.from] = [])).push(move.to)); return result; }
+  function legalMoves() { const fen=chess.fen(); if(!legalCache || legalCache.fen!==fen)legalCache={fen,moves:chess.moves({verbose:true})};return legalCache.moves; }
+  function legalDests() { const result = {}; legalMoves().forEach(move => (result[move.from] || (result[move.from] = [])).push(move.to)); return result; }
   function sync(lastMove) { ground.set({ fen: chess.fen(), turnColor: color(), dests: legalDests(), lastMove: lastMove || null }); }
   function mainlineChild(node) { return node && node.children ? node.children[0] || null : null; }
   function remember(move, number, mover) {
@@ -66,7 +68,8 @@
   function stopEngineTransport() { if(engine.watchdog)clearTimeout(engine.watchdog);engine.watchdog=null;if(engine.timer)clearTimeout(engine.timer);engine.timer=null;if(engine.requestId && native())native().cancelAnalysis(engine.requestId);engine.requestId=null; }
   function resetTransport() { stopEngineTransport(); cancelBookRequest(); if (engine.renderFrame != null) cancelAnimationFrame(engine.renderFrame); engine.renderFrame = null; engine.arrowsPending = false; }
   function clearEngine(nextStatus) { if(engine.watchdog)clearTimeout(engine.watchdog);engine.watchdog=null; if (engine.timer) clearTimeout(engine.timer); engine.timer = null; if (engine.requestId && native()) native().cancelAnalysis(engine.requestId); engine.requestId = null; engine.status = nextStatus || 'idle'; engine.lastGood = null; engine.lines = []; engine.stats = null; engine.progress = null; engine.error = ''; renderArrows([]); }
-  function commitMove(from, to, promotion) { if (loadFailed || gameLoading || editingPosition()) return;
+  function commitMove(from, to, promotion, keepClickChoice = false) { if (loadFailed || gameLoading || editingPosition()) return;
+    if(!keepClickChoice)clearClickChoice();
     const number = chess.moveNumber(), mover = chess.turn(), uci = from + to + (promotion || '');
     const projected = projectAnalysisToChild(engine.stats, uci, settings.nodes); let move;
     try { move = chess.move({ from, to, promotion }); } catch (_) { move = null; }
@@ -84,8 +87,42 @@
     picker.querySelectorAll('[data-promotion]').forEach(button => button.onclick = () => { const promotion = button.dataset.promotion; close(false); commitMove(from, to, promotion); });
     picker.querySelector('[data-cancel]').onclick = () => close(true); boardEl.appendChild(picker); promotionPicker = picker; picker.querySelector('[data-promotion]').focus();
   }
-  function onMove(from, to) { if (restoring || promotionPicker) { sync(null); return; } const options = chess.moves({ verbose:true }).filter(move => move.from === from && move.to === to); if (!options.length) { sync(null); return; } if (options.some(move => move.promotion)) choosePromotion(from, to, options); else commitMove(from, to); }
+  function onMove(from, to) { clearClickChoice(); if (restoring || promotionPicker) { sync(null); return; } const options = legalMoves().filter(move => move.from === from && move.to === to); if (!options.length) { sync(null); return; } if (options.some(move => move.promotion)) choosePromotion(from, to, options); else commitMove(from, to); }
   const ground = window.LegacyChessground(boardEl, { fen: chess.fen(), orientation:'white', turnColor:color(), coordinates:true, animation:{ enabled:true, duration:120 }, movable:{ color:'both', free:false, dests:legalDests(), showDests:true }, selectable:{ enabled:true }, draggable:{ enabled:true, magnified:false }, events:{ move:onMove } });
+
+  function clearClickChoice() { const previous=clickChoice;clickChoice=null;if(clickInput)clickInput.cancel();if(previous)heading(); }
+  function recentClickHistory() { const moves=[];for(let n=cursor;n && n.move && moves.length<2;n=n.parent)moves.push(n.move);return moves.reverse(); }
+  function destinationTap(to) {
+    const repeated=clickChoice && clickChoice.current===cursor && clickChoice.to===to;
+    if(!repeated) {
+      clearClickChoice();
+      const moves=legalMoves(), ranking=window.InstinctaClickChess.ranker.rank(chess.fen(),moves,to,recentClickHistory());
+      if(!ranking.length)return;
+      clickChoice={parent:cursor,current:null,to,ranking,moves,index:0,created:false};
+    } else clickChoice.index=(clickChoice.index+1)%clickChoice.ranking.length;
+    const choice=clickChoice, from=choice.ranking[choice.index].from;
+    const options=choice.moves.filter(move=>move.from===from && move.to===to);
+    // Origins are ranked, promotion pieces remain an explicit human choice.
+    if(options.some(move=>move.promotion)) { clearClickChoice();choosePromotion(from,to,options);return; }
+    if(repeated) {
+      const previous=cursor;
+      cursor=choice.parent;chess.load(cursor.fen);
+      // Only remove our just-created leaf. Never discard an existing variation,
+      // its children, or annotations when correcting a guessed origin.
+      if(choice.created && previous.children.length===0) {
+        cursor.children=cursor.children.filter(child=>child!==previous);
+        nodeIndex.delete(previous.id);dirtyBranches.delete(previous.id);changedBranch(cursor);
+      }
+    }
+    const existing=cursor.children.find(child=>child.move.from===from && child.move.to===to && !child.move.promotion);
+    ground.cancelMove();commitMove(from,to,undefined,true);
+    choice.current=cursor;choice.created=!existing;
+    if(choice.ranking.length<2)clearClickChoice();else heading();
+  }
+  if(window.InstinctaClickChess)clickInput=window.InstinctaClickChess.bindDestinationInput({element:boardEl,ground,
+    enabled:()=>settings.smartInput && !loadFailed && !restoring && !gameLoading && !editingPosition() && !promotionPicker && ground.state.movable.dests!==null,
+    canTap:to=>!!(clickChoice && clickChoice.current===cursor && clickChoice.to===to) || legalMoves().some(move=>move.to===to),
+    tap:destinationTap,clear:clearClickChoice});
 
   function refreshBoardBounds(runtime, element, redraw) {
     runtime = runtime || ground;
@@ -98,8 +135,8 @@
   }
   function clampInteger(value, minimum, maximum, fallback) { const parsed = Number.parseInt(String(value == null ? '' : value), 10); return Number.isFinite(parsed) ? Math.max(minimum, Math.min(maximum, parsed)) : fallback; }
   function orderedSelection(values, allowed) { const selected = new Set(Array.isArray(values) ? values.map(String) : []); return allowed.filter(value => selected.has(String(value))); }
-  function loadUiSettings() { if (!native() || !native().getUiSettings) return; try { const saved = JSON.parse(native().getUiSettings() || '{}'); settings.nodes = NODE_OPTIONS.includes(Number(saved.nodes)) ? Number(saved.nodes) : settings.nodes; settings.arrowCount = clampInteger(saved.arrowCount, 1, 8, settings.arrowCount); if (saved.arrowMode === 'best' || saved.arrowMode === 'maneuver') settings.arrowMode = saved.arrowMode; if (typeof saved.leelaEnabled === 'boolean') settings.enabled = saved.leelaEnabled; if (typeof saved.arrowsEnabled === 'boolean') settings.showArrows = saved.arrowsEnabled; if (saved.engineBackend === 'cpu' || saved.engineBackend === 'sycl') settings.backend = saved.engineBackend; if (saved.bookSource === 'masters' || saved.bookSource === 'lichess') settings.bookSource = saved.bookSource; settings.bookSpeeds = orderedSelection(saved.bookSpeeds, BOOK_SPEEDS); settings.bookRatings = orderedSelection(saved.bookRatings, BOOK_RATINGS); } catch (_) {} }
-  function saveUiSettings() { if (!native() || !native().saveUiSettings) return; native().saveUiSettings(JSON.stringify({ nodes: settings.nodes, arrowCount: settings.arrowCount, arrowMode:settings.arrowMode, leelaEnabled: settings.enabled, arrowsEnabled: settings.showArrows, engineBackend:settings.backend, appearance: 'brown', bookSource:settings.bookSource, bookSpeeds:settings.bookSpeeds, bookRatings:settings.bookRatings })); }
+  function loadUiSettings() { if (!native() || !native().getUiSettings) return; try { const saved = JSON.parse(native().getUiSettings() || '{}'); if(typeof saved.smartInput === 'boolean')settings.smartInput=saved.smartInput; settings.nodes = NODE_OPTIONS.includes(Number(saved.nodes)) ? Number(saved.nodes) : settings.nodes; settings.arrowCount = clampInteger(saved.arrowCount, 1, 8, settings.arrowCount); if (saved.arrowMode === 'best' || saved.arrowMode === 'maneuver') settings.arrowMode = saved.arrowMode; if (typeof saved.leelaEnabled === 'boolean') settings.enabled = saved.leelaEnabled; if (typeof saved.arrowsEnabled === 'boolean') settings.showArrows = saved.arrowsEnabled; if (saved.engineBackend === 'cpu' || saved.engineBackend === 'sycl') settings.backend = saved.engineBackend; if (saved.bookSource === 'masters' || saved.bookSource === 'lichess') settings.bookSource = saved.bookSource; settings.bookSpeeds = orderedSelection(saved.bookSpeeds, BOOK_SPEEDS); settings.bookRatings = orderedSelection(saved.bookRatings, BOOK_RATINGS); } catch (_) {} }
+  function saveUiSettings() { if (!native() || !native().saveUiSettings) return; native().saveUiSettings(JSON.stringify({ smartInput:settings.smartInput, nodes: settings.nodes, arrowCount: settings.arrowCount, arrowMode:settings.arrowMode, leelaEnabled: settings.enabled, arrowsEnabled: settings.showArrows, engineBackend:settings.backend, appearance: 'brown', bookSource:settings.bookSource, bookSpeeds:settings.bookSpeeds, bookRatings:settings.bookRatings })); }
   function studyRequest() { const request = { history: history(), nodes: settings.nodes, backend:settings.backend }; if (studyContext.gameId) request.game_id = studyContext.gameId; else if(studyContext.editedPosition)request.initial_fen = studyContext.initialFen; return request; }
   function explorerRequest() { const request = { history: history(), source:settings.bookSource }; if (studyContext.gameId) request.game_id = studyContext.gameId; else if(studyContext.editedPosition)request.initial_fen = studyContext.initialFen; if (settings.bookSource === 'lichess') { if (settings.bookSpeeds.length) request.speeds = settings.bookSpeeds.slice(); if (settings.bookRatings.length) request.ratings = settings.bookRatings.slice(); } return request; }
   function moveUci(node) { return node && node.move ? node.move.from + node.move.to + (node.move.promotion || '') : ''; }
@@ -123,7 +160,7 @@
     } catch (_) {saveNotice('Board not saved · keep it open and tap to retry');return false;}
   }
   function scheduleStudySave() { if (restoring) return; if (persistTimer) clearTimeout(persistTimer); persistTimer = setTimeout(saveStudyNow, 120); }
-  function resetRoot(fen, context) { root.fen = fen; root.children = []; root.selectedChild = null; delete root.analysisCache; nodeId = 0; cursor = root; studyContext = context; chess.load(fen); treeRevision++;nodeIndex.clear();nodeIndex.set(0,root);dirtyBranches.clear();replaceSavedTree=true;savedRevision=native()?.getStudyRevision?.(!!context.editedPosition) || 0; }
+  function resetRoot(fen, context) { clearClickChoice(); root.fen = fen; root.children = []; root.selectedChild = null; delete root.analysisCache; nodeId = 0; cursor = root; studyContext = context; chess.load(fen); treeRevision++;nodeIndex.clear();nodeIndex.set(0,root);dirtyBranches.clear();replaceSavedTree=true;savedRevision=native()?.getStudyRevision?.(!!context.editedPosition) || 0; }
   function rebuildTree(rawChildren, parent) {
     if(!Array.isArray(rawChildren))throw Error('Invalid saved tree');
     const stack=rawChildren.slice().reverse().map(raw=>({raw,parent}));
@@ -309,7 +346,7 @@
         '<div class="range-row"><span>Nodes</span><b data-node-readout>' + compactCount(settings.nodes) + '</b><input data-nodes type="range" min="0" max="' + (NODE_OPTIONS.length - 1) + '" step="1" value="' + nodeIndex + '" aria-label="Analysis nodes"></div>' +
         '<div class="range-row"><span>Arrows</span><b data-arrow-readout>' + settings.arrowCount + '</b><input data-arrow-count type="range" min="1" max="8" step="1" value="' + settings.arrowCount + '" aria-label="Arrow count"></div>' +
         '<div class="arrow-mode-row" role="group" aria-label="Move arrows">' + ['best','maneuver'].map(mode => '<button data-arrow-mode="' + mode + '" aria-pressed="' + (settings.arrowMode === mode) + '">' + (mode === 'best' ? 'Best moves' : 'Best + maneuver') + '</button>').join('') + '</div>' +
-        '<div class="switch-row">' + switchButton('leela', 'Leela', settings.enabled) + switchButton('arrows', 'Arrows', settings.showArrows) + '</div></div>';
+        '<div class="switch-row">' + switchButton('leela', 'Leela', settings.enabled) + switchButton('arrows', 'Arrows', settings.showArrows) + '</div><div class="switch-row">' + switchButton('smartInput','Tap destination',settings.smartInput) + '</div><p class="panel-hint">Tap a destination to move. Tap it again to switch pieces. Select a piece first for an explicit move.</p></div>';
     }
     if (panelView === 'bookSettings') return '<div class="panel-view book-settings">' +
       '<div class="source-row"><button data-source="masters" aria-pressed="' + (settings.bookSource === 'masters') + '" class="' + (settings.bookSource === 'masters' ? 'selected' : '') + '">Masters</button><button data-source="lichess" aria-pressed="' + (settings.bookSource === 'lichess') + '" class="' + (settings.bookSource === 'lichess' ? 'selected' : '') + '">Lichess</button></div>' +
@@ -318,7 +355,7 @@
     if (panelView === 'variationActions') return '<div class="panel-view"><div class="panel-readout"><span>Variation</span><b>' + safe(variationTarget && variationTarget.san || '') + '</b></div><div class="panel-buttons panel-buttons-stack"><button data-promote-variation>Promote to main line</button><button data-delete-variation>Delete variation</button><button data-cancel-variation>Cancel</button></div></div>';
     return '<div class="panel-view"><div class="panel-buttons panel-buttons-stack"><button data-editor>Board editor</button>' + (studyContext.editedPosition ? '<button data-source-board>Return to saved board</button>' : '') + '<button data-reset>New / reset</button><button data-delete' + (cursor.parent ? '' : ' disabled') + '>Delete current branch</button></div></div>';
   }
-  function heading() { if (gameLoading) { title.textContent = 'Loading game…'; document.querySelector('[data-study-title]').textContent = privacy.title(gameLoading.title,true); document.querySelector('.game-title small').textContent = 'Loading game…'; return; }  const best = engine.lines && engine.lines[0] || engine.stats && engine.stats.inherited_eval; const evalText = settings.enabled && best ? whiteEvalText(best) : null; title.textContent = evalText && evalText !== '—' ? evalText + (engine.status==='retrying'?' · retrying':engine.status==='error'?' · interrupted':' · Leela') : settings.enabled ? 'Leela · ' + (engine.status === 'running' || engine.status === 'starting' ? 'analyzing' : engine.status) : ({moves:'Moves',info:'Study information',engine:'Leela off',chart:'',book:'Opening book',repertoire:'Repertoires'})[tab]; document.querySelector('[data-study-title]').textContent = repertoirePanel && repertoirePanel.isLibrary() ? 'Repertoires' : privacy.title(studyContext.title,!!studyContext.gameId); document.querySelector('[data-panel-tab]').hidden = !panelView; document.querySelector('[data-panel-tab]').classList.toggle('selected', !!panelView);  const marker = document.querySelector('[data-tab="repertoire"]'), summary = repertoirePanel ? privacy.text(repertoirePanel.summary()) : ''; if (marker) { marker.setAttribute('title', summary || 'Repertoires'); marker.classList.toggle('rep-covered', !!summary && !summary.startsWith('Outside') && !summary.includes('deviation')); marker.classList.toggle('rep-deviated', summary.startsWith('Outside') || summary.includes('deviation')); } if (repertoirePanel && repertoirePanel.isLibrary()) document.querySelector('.game-title small').textContent = 'Private library · on this phone'; else if (summary) { const subtitle = document.querySelector('.game-title small'); subtitle.textContent = (cursor.san || privacy.subtitle(studyContext.subtitle)) + ' · ' + summary; } }
+  function heading() { if (gameLoading) { title.textContent = 'Loading game…'; document.querySelector('[data-study-title]').textContent = privacy.title(gameLoading.title,true); document.querySelector('.game-title small').textContent = 'Loading game…'; return; }  const best = engine.lines && engine.lines[0] || engine.stats && engine.stats.inherited_eval; const evalText = settings.enabled && best ? whiteEvalText(best) : null; title.textContent = evalText && evalText !== '—' ? evalText + (engine.status==='retrying'?' · retrying':engine.status==='error'?' · interrupted':' · Leela') : settings.enabled ? 'Leela · ' + (engine.status === 'running' || engine.status === 'starting' ? 'analyzing' : engine.status) : ({moves:'Moves',info:'Study information',engine:'Leela off',chart:'',book:'Opening book',repertoire:'Repertoires'})[tab]; document.querySelector('[data-study-title]').textContent = repertoirePanel && repertoirePanel.isLibrary() ? 'Repertoires' : privacy.title(studyContext.title,!!studyContext.gameId); document.querySelector('[data-panel-tab]').hidden = !panelView; document.querySelector('[data-panel-tab]').classList.toggle('selected', !!panelView);  const marker = document.querySelector('[data-tab="repertoire"]'), summary = repertoirePanel ? privacy.text(repertoirePanel.summary()) : ''; if (marker) { marker.setAttribute('title', summary || 'Repertoires'); marker.classList.toggle('rep-covered', !!summary && !summary.startsWith('Outside') && !summary.includes('deviation')); marker.classList.toggle('rep-deviated', summary.startsWith('Outside') || summary.includes('deviation')); } if (repertoirePanel && repertoirePanel.isLibrary()) document.querySelector('.game-title small').textContent = 'Private library · on this phone'; else if (summary) { const subtitle = document.querySelector('.game-title small'); subtitle.textContent = (cursor.san || privacy.subtitle(studyContext.subtitle)) + ' · ' + summary; } if(clickChoice && clickChoice.current===cursor && clickChoice.ranking.length>1)document.querySelector('.game-title small').textContent=cursor.san+' · tap '+clickChoice.to+' again to switch pieces'; else if(!summary && !(repertoirePanel && repertoirePanel.isLibrary()))document.querySelector('.game-title small').textContent=privacy.subtitle(studyContext.subtitle); }
   function closePanelView() { const refreshBook = panelView === 'bookSettings' && bookSettingsDirty; panelView = null; variationTarget = null; if (refreshBook) { bookSettingsDirty = false; requestBook(); } renderPanel(); scheduleStudySave(); }
   function clearAnalysisCaches(node) { delete node.analysisCache; node.children.forEach(clearAnalysisCaches); }
   function persistBookSettings() { saveUiSettings(); cancelBookRequest(); book.data = null; bookSettingsDirty = true; }
@@ -336,7 +373,7 @@
         panel.querySelectorAll('[data-arrow-mode]').forEach(item => item.setAttribute('aria-pressed',item.dataset.arrowMode === settings.arrowMode));
         saveUiSettings(); renderArrows(engine.lines);
       });
-      panel.querySelectorAll('[data-switch]').forEach(button => button.onclick = () => { const key = button.dataset.switch; if (key === 'leela') settings.enabled = !settings.enabled; else settings.showArrows = !settings.showArrows; button.classList.toggle('on', key === 'leela' ? settings.enabled : settings.showArrows); button.setAttribute('aria-checked', key === 'leela' ? settings.enabled : settings.showArrows); saveUiSettings(); renderArrows(engine.lines); if (key === 'leela') { if (settings.enabled) { restoreCachedAnalysis(); scheduleAnalysis(); } else clearEngine('off'); } });
+      panel.querySelectorAll('[data-switch]').forEach(button => button.onclick = () => { const key = button.dataset.switch; if(key==='smartInput'){settings.smartInput=!settings.smartInput;clearClickChoice();button.classList.toggle('on',settings.smartInput);button.setAttribute('aria-checked',settings.smartInput);saveUiSettings();return;} if (key === 'leela') settings.enabled = !settings.enabled; else settings.showArrows = !settings.showArrows; button.classList.toggle('on', key === 'leela' ? settings.enabled : settings.showArrows); button.setAttribute('aria-checked', key === 'leela' ? settings.enabled : settings.showArrows); saveUiSettings(); renderArrows(engine.lines); if (key === 'leela') { if (settings.enabled) { restoreCachedAnalysis(); scheduleAnalysis(); } else clearEngine('off'); } });
     } else if (panelView === 'bookSettings') {
       panel.querySelectorAll('[data-source]').forEach(button => button.onclick = () => { const source = button.dataset.source; if (source === settings.bookSource) return; settings.bookSource = source; persistBookSettings(); renderPanel(); });
       panel.querySelectorAll('[data-filter]').forEach(button => button.onclick = () => { const raw = button.dataset.filter, rating = BOOK_RATINGS.includes(Number(raw)), values = rating ? settings.bookRatings : settings.bookSpeeds, value = rating ? Number(raw) : raw, index = values.indexOf(value); if (index >= 0) values.splice(index, 1); else values.push(value); const allowed = rating ? BOOK_RATINGS : BOOK_SPEEDS; values.splice(0, values.length, ...orderedSelection(values, allowed)); persistBookSettings(); renderPanel(); });
@@ -357,7 +394,7 @@
     return notation;
   }
   function returnToMainline() { const intersection = navigationIntersection(); if (intersection) restore(intersection); }
-  function restore(next) { if (gameLoading || editingPosition()) return;  if (!next) return; const previous = cursor; if (next.parent === previous) inheritAnalysisToChild(previous, next); cursor = next; restoring = true; chess.load(cursor.fen); sync(null); restoring = false; saveStudyNow(); onPositionChanged(); }
+  function restore(next) { clearClickChoice(); if (gameLoading || editingPosition()) return;  if (!next) return; const previous = cursor; if (next.parent === previous) inheritAnalysisToChild(previous, next); cursor = next; restoring = true; chess.load(cursor.fen); sync(null); restoring = false; saveStudyNow(); onPositionChanged(); }
   function playUci(uci) { if (!uci || uci.length < 4) return; commitMove(uci.slice(0,2), uci.slice(2,4), uci.length > 4 ? uci[4] : undefined); }
   function flipBoard() { ground.toggleOrientation(); wrap.classList.toggle('orientation-white'); wrap.classList.toggle('orientation-black'); renderArrows(engine.lines); if (repertoirePanel) repertoirePanel.updateMarker(); scheduleStudySave(); }
   function squarePoint(square) { const f = square.charCodeAt(0) - 97, r = Number(square[1]) - 1, white = !wrap.classList.contains('orientation-black'); return [(white ? f : 7 - f) * 64 + 32, (white ? 7 - r : r) * 64 + 32]; }
@@ -466,6 +503,7 @@
     else { saveStudyNow();onPositionChanged(); }
   }
   function openBoardEditor(useCurrent = false) {
+    clearClickChoice();
     if(editingPosition())return;
     if(!saveStudyNow())return;
     stopGameLoad();stopActiveNavigation();resetTransport();panelView=null;
@@ -535,7 +573,7 @@
   window.InstinctaZero.onAccountChanged = function () { if (studyContext.gameId || gameLoading) resetStudy(); };
   window.InstinctaZero.loadArchivedGame = function (payloadJson) { let payload; try { payload = typeof payloadJson === 'string' ? JSON.parse(payloadJson) : payloadJson; } catch (_) { return false; } return installArchivedGame(payload); };
   window.InstinctaZero.persistStudy = saveStudyNow;
-  window.InstinctaZero.setAnalysisActive = function (active) { const next = !!active; if (next === analysisActive) return; analysisActive = next; if(repertoirePanel)repertoirePanel.setActive(next && !gameLoading && !editingPosition()); if (!analysisActive) { resetTransport(); if (engine.status === 'starting' || engine.status === 'running') engine.status = 'idle'; renderActivePanel(); return; } if(gameLoading || editingPosition())return; restoreCachedAnalysis(); scheduleAnalysis(); if (tab === 'book') requestBook(); };
+  window.InstinctaZero.setAnalysisActive = function (active) { clearClickChoice(); const next = !!active; if (next === analysisActive) return; analysisActive = next; if(repertoirePanel)repertoirePanel.setActive(next && !gameLoading && !editingPosition()); if (!analysisActive) { resetTransport(); if (engine.status === 'starting' || engine.status === 'running') engine.status = 'idle'; renderActivePanel(); return; } if(gameLoading || editingPosition())return; restoreCachedAnalysis(); scheduleAnalysis(); if (tab === 'book') requestBook(); };
   window.InstinctaZero.handleAndroidBack = function () { if(editingPosition()) { positionEditor.close(); return true; } if(gameLoading) { stopGameLoad();if(repertoirePanel)repertoirePanel.setActive(analysisActive,false);onPositionChanged();return true; } if (promotionPicker) { promotionPicker.querySelector('[data-cancel]').click(); return true; } if (panelView) { closePanelView(); return true; } if (tab === 'repertoire' && repertoirePanel && repertoirePanel.back()) return true; return false; };
 
   function animatePanel() { if (panel.animate && !matchMedia('(prefers-reduced-motion: reduce)').matches) panel.animate([{opacity:.5,transform:'translateY(4px)'},{opacity:1,transform:'translateY(0)'}], {duration:120}); }
@@ -545,7 +583,7 @@
   document.querySelectorAll('.tabs [data-tab]').forEach(button => button.onclick = () => setTab(button.dataset.tab));
   document.querySelector('[data-panel-tab]').onclick = closePanelView;
   document.addEventListener('keydown', event => { if (event.key !== 'Escape') return; if (promotionPicker) promotionPicker.querySelector('[data-cancel]').click(); else if (panelView) closePanelView(); });
-  document.addEventListener('visibilitychange', () => { if (document.hidden) { stopActiveNavigation(); saveStudyNow(); resetTransport(); } else if (analysisActive && settings.enabled) scheduleAnalysis(); }); window.addEventListener('blur', stopActiveNavigation); window.addEventListener('pagehide', () => { stopActiveNavigation(); saveStudyNow(); resetTransport(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { clearClickChoice();stopActiveNavigation(); saveStudyNow(); resetTransport(); } else if (analysisActive && settings.enabled) scheduleAnalysis(); }); window.addEventListener('blur', stopActiveNavigation); window.addEventListener('pagehide', () => { clearClickChoice();stopActiveNavigation(); saveStudyNow(); resetTransport(); });
   document.querySelector('.back').onclick = () => { if (window.InstinctaZero.handleAndroidBack()) return; if (native() && native().leaveAnalysis) native().leaveAnalysis(); };
   document.querySelectorAll('.actions button').forEach(button => { const action = button.dataset.action; if (action === 'flip') button.onclick = flipBoard; else if (action === 'mainline') button.onclick = returnToMainline; else if (action === 'prev' || action === 'next') bindRepeatingNavigation(button, () => action === 'prev' ? cursor.parent : mainlineChild(cursor)); else button.onclick = () => { const target = action === 'settings' ? (tab === 'book' ? 'bookSettings' : tab === 'repertoire' ? 'repertoireSettings' : 'settings') : 'study'; if (panelView === target) closePanelView(); else openPanelView(target); }; });
   // An overlay only: never change Chessground's pieces, hit targets, or arrow geometry.

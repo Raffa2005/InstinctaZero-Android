@@ -47,6 +47,12 @@ android {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
         }
+        create("clickPreview") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".clickpreview"
+            versionNameSuffix = "-click-chess-preview"
+            matchingFallbacks += listOf("debug")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true

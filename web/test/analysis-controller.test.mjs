@@ -495,7 +495,7 @@ test('navigation buttons blur, stop globally, and repeat quickly until the tree 
   assert.equal(button.onpointerleave, undefined);
   assert.equal(typeof button.onlostpointercapture, 'function');
   assert.match(controller, /window\.addEventListener\('blur', stopActiveNavigation\)/);
-  assert.match(controller, /document\.hidden\) \{ stopActiveNavigation\(\); saveStudyNow\(\); resetTransport\(\); \}/);
+  assert.match(controller, /document\.hidden\) \{ clearClickChoice\(\);stopActiveNavigation\(\); saveStudyNow\(\); resetTransport\(\); \}/);
   assert.match(style, /touch-action:manipulation/);
   assert.match(style, /-webkit-touch-callout:none/);
   assert.match(style, /user-select:none/);

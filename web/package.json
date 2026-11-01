@@ -6,12 +6,14 @@
   "scripts": {
     "build:legacy-chessground": "node build-legacy-chessground.mjs",
     "build:chess-rules": "node build-chess-rules.mjs",
-    "build": "npm run build:legacy-chessground && npm run build:chess-rules",
+    "build": "npm run build:legacy-chessground && npm run build:chess-rules && npm run build:click-chess",
     "check:legacy-chessground": "tsc --project ../web-src/legacy-chessground/tsconfig.json --noEmit && node build-legacy-chessground.mjs --check",
     "check:chess-rules": "node build-chess-rules.mjs --check",
-    "check": "npm run check:legacy-chessground && npm run check:chess-rules && npm run test:analysis-controller",
+    "check": "npm run check:legacy-chessground && npm run check:chess-rules && npm run test:analysis-controller && npm run check:click-chess",
     "test:analysis-controller": "node --test test/analysis-controller.test.mjs test/repertoire-cache.test.mjs test/position-editor.test.mjs test/display-privacy.test.mjs test/maneuver-arrows.test.mjs",
-    "test:repertoire-ui": "node test/repertoire-ui.mjs"
+    "test:repertoire-ui": "node test/repertoire-ui.mjs",
+    "build:click-chess": "node build-click-chess.mjs",
+    "check:click-chess": "node build-click-chess.mjs --check && node --test test/click-chess.test.mjs"
   },
   "devDependencies": {
     "esbuild": "0.25.0",
