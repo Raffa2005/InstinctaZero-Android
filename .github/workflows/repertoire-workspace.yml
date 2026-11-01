@@ -169,7 +169,7 @@ jobs:
 
           Tap a destination to enter a move. Tap it again to cycle legal origins;
           selecting a piece first or dragging still chooses that piece explicitly.
-          Promotions retain their piece picker. Disable this in Settings → Tap destination.
+          Promotions retain their piece picker. Disable this in Settings → One tap.
 
           This signed development preview installs as **InstinctaZero Click**
           (`com.instinctazero.android.clickpreview`), alongside the production app.

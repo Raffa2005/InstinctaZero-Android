@@ -37,13 +37,17 @@ try { for(const [width,height] of [[360,640],[390,780],[412,844]]) {
   const url=`http://127.0.0.1:${server.address().port}`;
   await page.goto(url);
   const load=async(fen=startFen,{black=false,tree=[],cursor=[]}={})=>{
-    await page.evaluate(state=>localStorage.setItem('study',JSON.stringify(state)),{v:1,initialFen:fen,tree,cursor,black,tab:'moves',title:'Local analysis',subtitle:'Starting position'});
+    // The old page saves on pagehide. Disable only its mock write before replacing
+    // the fixture, otherwise a revision-zero old board can overwrite the new one.
+    await page.evaluate(state=>{window.__failSave=true;localStorage.setItem('study',JSON.stringify(state));},{v:1,initialFen:fen,tree,cursor,black,tab:'moves',title:'Local analysis',subtitle:'Starting position'});
     await page.reload();await page.waitForFunction(()=>!document.documentElement.classList.contains('board-assets-loading'));
     await page.evaluate(()=>{
       window.InstinctaZero.setAnalysisActive(true);window.__ranks=[];window.__rankTimes=[];
       const model=window.InstinctaClickChess.ranker,rank=model.rank.bind(model);
       model.rank=(...args)=>{const t=performance.now(),rows=rank(...args);window.__rankTimes.push(performance.now()-t);window.__ranks.push({fen:args[0],history:args[3],rows});return rows;};
     });
+    assert.equal(await page.evaluate(()=>window.InstinctaZero.persistStudy()),true);
+    assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('study')).cursor),cursor,'fixture cursor actually restored');
   };
   const stored=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('study')));
   const point=async square=>page.evaluate(square=>{
@@ -70,6 +74,10 @@ try { for(const [width,height] of [[360,640],[390,780],[412,844]]) {
   await load(startFen,{tree:[{u:'b1c3',c:[{u:'e7e5',c:[]}]},{u:'c2c3',c:[]}]});
   await tap('c3');await tap('c3');assert.equal((await stored()).nodes.length,3);
   assert.ok((await stored()).nodes.some(n=>n.u==='e7e5'));
+  await load('3R4/7k/8/8/8/2B2N2/8/K2R4 w - - 0 1');await tap('d4');
+  ranking=await page.evaluate(()=>window.__ranks[0].rows);assert.equal(ranking.length,4);
+  for(let i=1;i<=4;i++){await tap('d4');assert.deepEqual((await stored()).cursor,[ranking[i%4].from+'d4']);assert.equal((await stored()).nodes.length,1);}
+  assert.equal(await page.evaluate(()=>window.__ranks.length),1);
   // Explicit selection and dragging always win over the model.
   await load();await tap('c2');await tap('c3');await page.waitForTimeout(30);
   assert.deepEqual((await stored()).cursor,['c2c3']);assert.equal(await page.evaluate(()=>window.__ranks.length),0);
@@ -104,7 +112,7 @@ try { for(const [width,height] of [[360,640],[390,780],[412,844]]) {
   await page.evaluate(()=>window.__failSave=false);await page.locator('#study-save-error').click();assert.equal((await stored()).cursor.length,1);
   // Preference round trip disables only destination input, retaining old gestures.
   await load();await page.getByRole('button',{name:'Settings',exact:true}).click();
-  await page.getByRole('switch',{name:'Tap destination',exact:true}).click();await page.reload();await page.waitForFunction(()=>!!window.InstinctaZero);
+  await page.getByRole('switch',{name:'One tap',exact:true}).click();await page.reload();await page.waitForFunction(()=>!!window.InstinctaZero);
   await tap('c3');assert.deepEqual((await stored()).cursor,[]);
   await tap('b1');await tap('c3');await page.waitForTimeout(30);assert.deepEqual((await stored()).cursor,['b1c3']);
   await page.evaluate(()=>localStorage.removeItem('settings'));await load();

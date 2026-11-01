@@ -6,7 +6,7 @@ cycle alternatives from the **original position**; the header explains when this
 is available. Choosing another square or using a control ends that correction.
 For an immediate recapture on that same square, select the capturing piece first.
 Normal piece-then-destination input and dragging retain explicit origin priority.
-Settings → Tap destination switches the feature off and persists across restart.
+Settings → One tap switches the feature off and persists across restart.
 
 Promotion piece choice still opens the existing picker, including all four
 underpromotion choices. A promotion ends the origin-cycling session; select its
