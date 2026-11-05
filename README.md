@@ -1,7 +1,8 @@
 # InstinctaZero Android
 
-The Click Chess preview adds offline destination-tap move input. See
-[preview behavior, APK builds and validation](docs/click-chess-preview.md).
+Version **0.8.13** adds offline destination-tap move input. Drag a guessed piece
+back to undo, then tap its destination again to try the next legal origin.
+See [input behavior, APK builds and validation](docs/click-chess-preview.md).
 
 For GitHub-only repertoire performance work, start with the
 [self-contained development handoff](docs/repertoire-optimization-handoff.md).

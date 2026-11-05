@@ -2,7 +2,7 @@ name: Repertoire workspace
 
 on:
   push:
-    branches: [main, feat/click-chess-input]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -48,17 +48,17 @@ jobs:
       - name: Native tests, debug APK, and lint with generated source fixture
         env:
           REPERTOIRE_PORTABLE_INDEX: ${{ github.workspace }}/.repertoire-work/fixture/annotations/repertoire.sqlite
-        run: ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2048m -Dfile.encoding=UTF-8' :app:testDebugUnitTest :app:assembleDebug :app:assembleClickPreview :app:lintDebug
-      - name: Verify preview APK identity and signature
+        run: ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2048m -Dfile.encoding=UTF-8' :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
+      - name: Verify CI APK identity and signature
         run: |
-          apk=app/build/outputs/apk/clickPreview/app-clickPreview.apk
+          apk=app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$apk"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | head -n 2
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | grep -F "name='com.instinctazero.android.clickpreview'"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | grep -F "name='com.instinctazero.android.debug'"
       - uses: actions/upload-artifact@v4
         with:
-          name: click-chess-preview-apk
-          path: app/build/outputs/apk/clickPreview/app-clickPreview.apk
+          name: ci-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
       - name: Native test summary
         if: always()
@@ -106,11 +106,11 @@ jobs:
           npm run check 2>&1 | tee "$RUNNER_TEMP/browser-checks.log"
       - uses: actions/download-artifact@v4
         with:
-          name: click-chess-preview-apk
+          name: ci-debug-apk
           path: apk
       - name: Test the assets actually packaged in the signed APK
         run: |
-          unzip -q apk/app-clickPreview.apk 'assets/analysis/*' -d "$RUNNER_TEMP/apk-assets"
+          unzip -q apk/app-debug.apk 'assets/analysis/*' -d "$RUNNER_TEMP/apk-assets"
           echo "PHONE_PREVIEW_ASSETS=$RUNNER_TEMP/apk-assets/assets/analysis" >> "$GITHUB_ENV"
           diff -r app/src/main/assets/analysis "$RUNNER_TEMP/apk-assets/assets/analysis"
       - name: Install Chromium
@@ -123,7 +123,7 @@ jobs:
           # Other UI scripts require private native-corpus exports; do not silently
           # treat absent exports as passing tests or contact the private gateway.
           failed=0
-          for scenario in click-chess game-load maneuver-arrows position-editor privacy repertoire-authoring repertoire; do
+          for scenario in click-chess large-study game-load maneuver-arrows position-editor privacy repertoire-authoring repertoire; do
             echo "::group::$scenario"
             if PHONE_PREVIEW_OUTPUT="$RUNNER_TEMP/browser-reports/$scenario" node "test/$scenario-ui.mjs" 2>&1 | tee "$RUNNER_TEMP/$scenario-ui.log"; then
               echo "- $scenario: passed" >> "$GITHUB_STEP_SUMMARY"
@@ -143,42 +143,3 @@ jobs:
             ${{ runner.temp }}/*-ui.log
             ${{ runner.temp }}/browser-reports
           retention-days: 7
-
-  publish-click-preview:
-    needs: [portable-tests, browser-tests]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/click-chess-input'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: click-chess-preview-apk
-          path: apk
-      - name: Publish verified preview APK
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        shell: bash
-        run: |
-          tag="click-chess-preview-${GITHUB_RUN_NUMBER}"
-          cp apk/app-clickPreview.apk InstinctaZero-Click-Chess-preview.apk
-          sha256sum InstinctaZero-Click-Chess-preview.apk > SHA256SUMS.txt
-          cat > notes.md <<'NOTES'
-          Offline destination-tap input powered by the tiny click-chess model.
-
-          Tap a destination to enter a move. Tap it again to cycle legal origins;
-          selecting a piece first or dragging still chooses that piece explicitly.
-          Promotions retain their piece picker. Disable this in Settings → One tap.
-
-          This signed development preview installs as **InstinctaZero Click**
-          (`com.instinctazero.android.clickpreview`), alongside the production app.
-          It has separate local data and pairing. It is not a production-key-signed update.
-          No private repertoire, token, signing key or training corpus is bundled.
-
-          Native unit tests, lint, model parity checks and touch-browser regressions
-          passed before publication. Browser scenarios used the assets extracted from
-          this APK. Physical-device installation and private-PC pairing were not tested.
-          NOTES
-          printf '\nSource commit: `%s`\n' "$GITHUB_SHA" >> notes.md
-          gh release create "$tag" InstinctaZero-Click-Chess-preview.apk SHA256SUMS.txt --target "$GITHUB_SHA" --title 'InstinctaZero Click Chess preview' --notes-file notes.md --prerelease --latest=false

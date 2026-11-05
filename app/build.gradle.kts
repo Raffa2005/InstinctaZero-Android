@@ -11,8 +11,8 @@ android {
         applicationId = "com.instinctazero.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 40
-        versionName = "0.8.12"
+        versionCode = 41
+        versionName = "0.8.13"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -46,12 +46,6 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
-        }
-        create("clickPreview") {
-            initWith(getByName("debug"))
-            applicationIdSuffix = ".clickpreview"
-            versionNameSuffix = "-click-chess-preview"
-            matchingFallbacks += listOf("debug")
         }
         release {
             isMinifyEnabled = true

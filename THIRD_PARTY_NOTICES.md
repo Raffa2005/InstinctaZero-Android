@@ -1,5 +1,14 @@
 # Third-party notices
 
+## Click Chess
+
+Offline origin ranking uses the trained model and dependency-free JavaScript
+runtime from [Raffa2005/click-chess](https://github.com/Raffa2005/click-chess).
+Both are MIT-licensed; the full notice ships in
+`app/src/main/assets/analysis/click-chess-LICENSE.txt`.
+Pinned source/model identities and parity fixtures are documented in
+`web-src/click-chess/PROVENANCE.md`. The app adapter is GPL-3.0-or-later.
+
 ## Chesslib and Apache Commons Lang
 
 Native one-ply repertoire re-entry uses Chesslib 1.3.7 by bhlangonijr

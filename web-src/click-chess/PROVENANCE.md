@@ -3,6 +3,8 @@
 `ranker.mjs` and `origin-ranker.bin` are unmodified MIT-licensed files from
 [Raffa2005/click-chess](https://github.com/Raffa2005/click-chess/tree/73453406b550a1c1026401d1c2db9a3c01e65397),
 commit `73453406b550a1c1026401d1c2db9a3c01e65397`.
+Both files were verified byte-identical to upstream main
+`12408dbdf16fbca7fc7dc42d9840ffa2830e3f24` on 2026-11-05.
 The complete license ships in `assets/analysis/click-chess-LICENSE.txt`.
 
 The selected default model has 17,345 parameters (18,619 binary bytes), uses
@@ -12,7 +14,7 @@ candidate. Training used public CC0 Lichess games. No training corpus is include
 
 Pinned SHA-256 checks in `web/build-click-chess.mjs` cover the binary and upstream
 runtime. `entry.mjs` is the GPL-3.0-or-later app adapter. Esbuild embeds the weights
-in the offline script; the existing `connect-src 'none'` policy is unchanged.
+in the minified offline script; the existing `connect-src 'none'` policy is unchanged.
 No model download, engine call, network request, or WebView permission is added.
 
 `web/test/click-chess-fixtures.json` derives from the same revision's 305 public

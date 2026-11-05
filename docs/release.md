@@ -1,7 +1,11 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.8.12). The Cloudflare gateway migration and its checks are described in
+(version 0.8.13 / code 41). The offline click-chess input and drag-back correction
+are described in [input behavior and validation](click-chess-preview.md).
+Ship the minified, production-key-signed `release` APK, not the former development
+preview (which installed separately and had unshrunk dependencies).
+The Cloudflare gateway migration and its checks are described in
 [v0.8.12](release-v0.8.12.md). Install over the existing app: pairing and all local
 data remain intact. Durable board saves and indexed repertoire additions are described
 in [v0.8.11](release-v0.8.11.md). No server change or repertoire download is needed.
@@ -29,7 +33,7 @@ custom-root PC API handoff. The v0.8.1 update cancels obsolete game/repertoire r
 activation during game loading, batches history/edited ancestry checks, and imports
 games in short UI slices. The grouped menus, comment editing and automatic extension
 targeting remain unchanged. No repertoire redownload or data migration is needed.
-Before producing a release APK, rebuild and verify the two
+Before producing a release APK, rebuild and verify the
 checked-in browser assets from their retained sources:
 
 ```bash

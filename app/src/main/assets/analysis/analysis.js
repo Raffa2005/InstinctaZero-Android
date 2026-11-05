@@ -78,13 +78,13 @@
     if (projected && (!child.analysisCache || child.analysisCache.inherited)) child.analysisCache = projected;
     sync([from, to]); onPositionChanged();
   }
-  function choosePromotion(from, to, options) {
+  function choosePromotion(from, to, options, apply = promotion => commitMove(from, to, promotion)) {
     if (promotionPicker) return;
     const names = { q:'Queen', r:'Rook', b:'Bishop', n:'Knight' }, choices = new Set(options.map(move => move.promotion));
     const picker = document.createElement('div'); picker.className = 'promotion-picker'; picker.setAttribute('role','dialog'); picker.setAttribute('aria-modal','true'); picker.setAttribute('aria-label','Choose promotion piece');
     picker.innerHTML = ['q','r','b','n'].filter(piece => choices.has(piece)).map(piece => '<button type="button" data-promotion="' + piece + '" aria-label="Promote to ' + names[piece] + '">' + piece.toUpperCase() + '</button>').join('') + '<button type="button" data-cancel aria-label="Cancel promotion">×</button>';
-    const close = revert => { picker.remove(); promotionPicker = null; if (revert) { ground.cancelMove(); sync(null); } };
-    picker.querySelectorAll('[data-promotion]').forEach(button => button.onclick = () => { const promotion = button.dataset.promotion; close(false); commitMove(from, to, promotion); });
+    const close = revert => { picker.remove(); promotionPicker = null; if (revert) { clearClickChoice(); ground.cancelMove(); sync(null); } };
+    picker.querySelectorAll('[data-promotion]').forEach(button => button.onclick = () => { const promotion = button.dataset.promotion; close(false); apply(promotion); });
     picker.querySelector('[data-cancel]').onclick = () => close(true); boardEl.appendChild(picker); promotionPicker = picker; picker.querySelector('[data-promotion]').focus();
   }
   function onMove(from, to) { clearClickChoice(); if (restoring || promotionPicker) { sync(null); return; } const options = legalMoves().filter(move => move.from === from && move.to === to); if (!options.length) { sync(null); return; } if (options.some(move => move.promotion)) choosePromotion(from, to, options); else commitMove(from, to); }
@@ -93,36 +93,50 @@
   function clearClickChoice() { const previous=clickChoice;clickChoice=null;if(clickInput)clickInput.cancel();if(previous)heading(); }
   function recentClickHistory() { const moves=[];for(let n=cursor;n && n.move && moves.length<2;n=n.parent)moves.push(n.move);return moves.reverse(); }
   function destinationTap(to) {
-    const repeated=clickChoice && clickChoice.current===cursor && clickChoice.to===to;
-    if(!repeated) {
+    // A candidate advances only when its piece has been dragged back. A tap in
+    // the resulting position is a fresh legal move (including a recapture).
+    const resumed=clickChoice && !clickChoice.current && clickChoice.parent===cursor && clickChoice.to===to;
+    if(!resumed) {
+      if(!legalMoves().some(move=>move.to===to))return;
       clearClickChoice();
       const moves=legalMoves(), ranking=window.InstinctaClickChess.ranker.rank(chess.fen(),moves,to,recentClickHistory());
       if(!ranking.length)return;
-      clickChoice={parent:cursor,current:null,to,ranking,moves,index:0,created:false};
-    } else clickChoice.index=(clickChoice.index+1)%clickChoice.ranking.length;
+      clickChoice={parent:cursor,current:null,to,ranking,moves,index:0};
+    }
     const choice=clickChoice, from=choice.ranking[choice.index].from;
     const options=choice.moves.filter(move=>move.from===from && move.to===to);
     // Origins are ranked, promotion pieces remain an explicit human choice.
-    if(options.some(move=>move.promotion)) { clearClickChoice();choosePromotion(from,to,options);return; }
-    if(repeated) {
-      const previous=cursor;
-      cursor=choice.parent;chess.load(cursor.fen);
-      // Only remove our just-created leaf. Never discard an existing variation,
-      // its children, or annotations when correcting a guessed origin.
-      if(choice.created && previous.children.length===0) {
-        cursor.children=cursor.children.filter(child=>child!==previous);
-        nodeIndex.delete(previous.id);dirtyBranches.delete(previous.id);changedBranch(cursor);
-      }
+    const apply=promotion=>{
+      if(clickChoice!==choice || cursor!==choice.parent)return;
+      ground.cancelMove();commitMove(from,to,promotion,true);
+      if(cursor.parent!==choice.parent){clearClickChoice();return;}
+      choice.current=cursor;heading();
+    };
+    if(options.some(move=>move.promotion))choosePromotion(from,to,options,apply);else apply();
+  }
+  function clickCorrection() {
+    return clickChoice && clickChoice.current===cursor ? cursor.move : null;
+  }
+  function undoDestinationGuess(from, to) {
+    const choice=clickChoice, move=clickCorrection();
+    if(!move || from!==move.to || to!==move.from)return false;
+    const previous=cursor;
+    cursor=choice.parent;chess.load(cursor.fen);
+    // Restore the full parent FEN and study path, not a reverse piece move:
+    // captures, en passant, castling rights/rook, promotion and history survive.
+    // Only a leaf is disposable. An existing subtree stays exactly where it was.
+    if(previous.children.length===0) {
+      cursor.children=cursor.children.filter(child=>child!==previous);
+      nodeIndex.delete(previous.id);dirtyBranches.delete(previous.id);changedBranch(cursor);
     }
-    const existing=cursor.children.find(child=>child.move.from===from && child.move.to===to && !child.move.promotion);
-    ground.cancelMove();commitMove(from,to,undefined,true);
-    choice.current=cursor;choice.created=!existing;
-    if(choice.ranking.length<2)clearClickChoice();else heading();
+    cursor.selectedChild=mainlineChild(cursor);
+    choice.current=null;choice.index=(choice.index+1)%choice.ranking.length;
+    ground.cancelMove();sync(null);saveStudyNow();onPositionChanged();return true;
   }
   if(window.InstinctaClickChess)clickInput=window.InstinctaClickChess.bindDestinationInput({element:boardEl,ground,
     enabled:()=>settings.smartInput && !loadFailed && !restoring && !gameLoading && !editingPosition() && !promotionPicker && ground.state.movable.dests!==null,
-    canTap:to=>!!(clickChoice && clickChoice.current===cursor && clickChoice.to===to) || legalMoves().some(move=>move.to===to),
-    tap:destinationTap,clear:clearClickChoice});
+    canTap:to=>legalMoves().some(move=>move.to===to),
+    tap:destinationTap,correction:clickCorrection,undo:undoDestinationGuess,clear:clearClickChoice});
 
   function refreshBoardBounds(runtime, element, redraw) {
     runtime = runtime || ground;
@@ -355,7 +369,7 @@
     if (panelView === 'variationActions') return '<div class="panel-view"><div class="panel-readout"><span>Variation</span><b>' + safe(variationTarget && variationTarget.san || '') + '</b></div><div class="panel-buttons panel-buttons-stack"><button data-promote-variation>Promote to main line</button><button data-delete-variation>Delete variation</button><button data-cancel-variation>Cancel</button></div></div>';
     return '<div class="panel-view"><div class="panel-buttons panel-buttons-stack"><button data-editor>Board editor</button>' + (studyContext.editedPosition ? '<button data-source-board>Return to saved board</button>' : '') + '<button data-reset>New / reset</button><button data-delete' + (cursor.parent ? '' : ' disabled') + '>Delete current branch</button></div></div>';
   }
-  function heading() { if (gameLoading) { title.textContent = 'Loading game…'; document.querySelector('[data-study-title]').textContent = privacy.title(gameLoading.title,true); document.querySelector('.game-title small').textContent = 'Loading game…'; return; }  const best = engine.lines && engine.lines[0] || engine.stats && engine.stats.inherited_eval; const evalText = settings.enabled && best ? whiteEvalText(best) : null; title.textContent = evalText && evalText !== '—' ? evalText + (engine.status==='retrying'?' · retrying':engine.status==='error'?' · interrupted':' · Leela') : settings.enabled ? 'Leela · ' + (engine.status === 'running' || engine.status === 'starting' ? 'analyzing' : engine.status) : ({moves:'Moves',info:'Study information',engine:'Leela off',chart:'',book:'Opening book',repertoire:'Repertoires'})[tab]; document.querySelector('[data-study-title]').textContent = repertoirePanel && repertoirePanel.isLibrary() ? 'Repertoires' : privacy.title(studyContext.title,!!studyContext.gameId); document.querySelector('[data-panel-tab]').hidden = !panelView; document.querySelector('[data-panel-tab]').classList.toggle('selected', !!panelView);  const marker = document.querySelector('[data-tab="repertoire"]'), summary = repertoirePanel ? privacy.text(repertoirePanel.summary()) : ''; if (marker) { marker.setAttribute('title', summary || 'Repertoires'); marker.classList.toggle('rep-covered', !!summary && !summary.startsWith('Outside') && !summary.includes('deviation')); marker.classList.toggle('rep-deviated', summary.startsWith('Outside') || summary.includes('deviation')); } if (repertoirePanel && repertoirePanel.isLibrary()) document.querySelector('.game-title small').textContent = 'Private library · on this phone'; else if (summary) { const subtitle = document.querySelector('.game-title small'); subtitle.textContent = (cursor.san || privacy.subtitle(studyContext.subtitle)) + ' · ' + summary; } if(clickChoice && clickChoice.current===cursor && clickChoice.ranking.length>1)document.querySelector('.game-title small').textContent=cursor.san+' · tap '+clickChoice.to+' again to switch pieces'; else if(!summary && !(repertoirePanel && repertoirePanel.isLibrary()))document.querySelector('.game-title small').textContent=privacy.subtitle(studyContext.subtitle); }
+  function heading() { if (gameLoading) { title.textContent = 'Loading game…'; document.querySelector('[data-study-title]').textContent = privacy.title(gameLoading.title,true); document.querySelector('.game-title small').textContent = 'Loading game…'; return; }  const best = engine.lines && engine.lines[0] || engine.stats && engine.stats.inherited_eval; const evalText = settings.enabled && best ? whiteEvalText(best) : null; title.textContent = evalText && evalText !== '—' ? evalText + (engine.status==='retrying'?' · retrying':engine.status==='error'?' · interrupted':' · Leela') : settings.enabled ? 'Leela · ' + (engine.status === 'running' || engine.status === 'starting' ? 'analyzing' : engine.status) : ({moves:'Moves',info:'Study information',engine:'Leela off',chart:'',book:'Opening book',repertoire:'Repertoires'})[tab]; document.querySelector('[data-study-title]').textContent = repertoirePanel && repertoirePanel.isLibrary() ? 'Repertoires' : privacy.title(studyContext.title,!!studyContext.gameId); document.querySelector('[data-panel-tab]').hidden = !panelView; document.querySelector('[data-panel-tab]').classList.toggle('selected', !!panelView);  const marker = document.querySelector('[data-tab="repertoire"]'), summary = repertoirePanel ? privacy.text(repertoirePanel.summary()) : ''; if (marker) { marker.setAttribute('title', summary || 'Repertoires'); marker.classList.toggle('rep-covered', !!summary && !summary.startsWith('Outside') && !summary.includes('deviation')); marker.classList.toggle('rep-deviated', summary.startsWith('Outside') || summary.includes('deviation')); } if (repertoirePanel && repertoirePanel.isLibrary()) document.querySelector('.game-title small').textContent = 'Private library · on this phone'; else if (summary) { const subtitle = document.querySelector('.game-title small'); subtitle.textContent = (cursor.san || privacy.subtitle(studyContext.subtitle)) + ' · ' + summary; } if(!summary && clickChoice && clickChoice.current===cursor)document.querySelector('.game-title small').textContent=cursor.san+' · drag back to '+cursor.move.from+' to undo'; else if(!summary && clickChoice && !clickChoice.current && clickChoice.parent===cursor)document.querySelector('.game-title small').textContent='Tap '+clickChoice.to+' for '+(clickChoice.ranking.length>1?'the next piece':'the move'); else if(!summary && !(repertoirePanel && repertoirePanel.isLibrary()))document.querySelector('.game-title small').textContent=privacy.subtitle(studyContext.subtitle); }
   function closePanelView() { const refreshBook = panelView === 'bookSettings' && bookSettingsDirty; panelView = null; variationTarget = null; if (refreshBook) { bookSettingsDirty = false; requestBook(); } renderPanel(); scheduleStudySave(); }
   function clearAnalysisCaches(node) { delete node.analysisCache; node.children.forEach(clearAnalysisCaches); }
   function persistBookSettings() { saveUiSettings(); cancelBookRequest(); book.data = null; bookSettingsDirty = true; }
