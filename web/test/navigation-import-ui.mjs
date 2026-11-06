@@ -66,6 +66,10 @@ try{for(const [width,height] of [[360,640],[390,780],[412,844]]) {
  await page.locator('.back').tap();await page.locator('[data-game="1"]').waitFor();await page.screenshot({path:`${output}/import-${width}.png`});
  await page.evaluate(()=>{window.__b.clipboard='7k/8/8/8/8/8/8/K7 w - - 0 1';});await page.locator('[data-paste]').tap();await page.getByRole('button',{name:'Open temporary position',exact:true}).tap();
  await tap('b2');assert.deepEqual(await stored(),beforeImport);assert.equal(await page.locator('[data-workspace]').count(),5);
+ await page.evaluate(()=>window.InstinctaZero.onNativeGameText({name:'comment.pgn',text:'1.e4 {Anchor note} *'}));
+ await page.locator('[data-game="0"]').tap();await page.waitForFunction(()=>document.querySelector('#game-import').hidden);
+ await page.getByRole('button',{name:'Next move',exact:true}).tap();await tap('e5');
+ assert.match(await page.locator('.imported-comment').evaluate(el=>el.previousElementSibling.textContent),/e4/,'incremental extension keeps the comment attached to its move');
  // Privacy applies to every temporary title, imported comment and explorer game row.
  await page.evaluate(()=>{window.__b.privacy=true;window.InstinctaZero.refreshDisplayPrivacy()});
  assert.doesNotMatch(await page.locator('body').innerText(),/PrivateAccount/);

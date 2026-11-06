@@ -34,7 +34,8 @@
     if(renderedTreeRevision===previous && !panelView && tab==='moves' && parent.children.length===1) {
       const button=panel.querySelector('[data-node="'+parent.id+'"]'), child=parent.children[0];
       if(button && !panel.querySelector('[data-node="'+child.id+'"]')) {
-        button.insertAdjacentHTML('afterend',moveMarkup(child,false));bindMoveNode(button.nextElementSibling);renderedTreeRevision=treeRevision;
+        const anchor=button.nextElementSibling?.classList.contains('imported-comment')?button.nextElementSibling:button;
+        anchor.insertAdjacentHTML('afterend',moveMarkup(child,false));bindMoveNode(anchor.nextElementSibling);renderedTreeRevision=treeRevision;
       }
     }
   }

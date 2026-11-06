@@ -117,6 +117,7 @@ class MainActivity : ComponentActivity() {
     }
     private val saveDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("application/x-chess-pgn")) { uri ->
         val text=exportText;exportText=null
+        if(uri!=null && text==null)documentStatus("Export interrupted by app restart. The destination may be empty; original files are unchanged.")
         if(uri!=null && text!=null)documentExecutor.execute {
             val ok=runCatching {contentResolver.openOutputStream(uri)?.use {it.write(text.toByteArray(Charsets.UTF_8));it.flush()} ?: error("File unavailable")}.isSuccess
             runOnUiThread {documentStatus(if(ok)"PGN exported." else "PGN export failed. Try another location.")}
