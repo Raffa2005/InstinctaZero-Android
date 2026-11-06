@@ -23,7 +23,7 @@ try{for(const [width,height] of [[360,640],[390,780],[412,844]]){
   const note='SecretOwner prepared this line. https://lichess.org/@/SecretOwner\n[White "HiddenHandle"]\n[Black "RivalName"]';
   window.InstinctaZeroNative={getDisplayPrivacy:()=>{if(window.__test.fail)throw Error('offline');return JSON.stringify({enabled:window.__test.privacy,names:['SecretOwner','SecondAccount']})},
    getUiSettings:()=>'{"leelaEnabled":true}',saveUiSettings:()=>{},cancelAnalysis:()=>{},cancelRepertoireLookup:()=>{},
-   getStudyState:()=>window.__test.saved==='{}'?JSON.stringify({v:1,initialFen:new window.InstinctaZeroChessRules.Chess().fen(),gameId:'Legacy01',title:'RivalName – SecretOwner',subtitle:'Completed game',tab:'repertoire',black:true,tree:[{u:'e2e4',c:[]}],cursor:['e2e4']}):window.__test.saved,saveStudyState:raw=>{window.__test.saved=raw;localStorage.setItem('study',raw)},
+   getStudyState:()=>window.__test.saved,saveStudyState:raw=>{window.__test.saved=raw;localStorage.setItem('study',raw)},
    getRepertoireSettings:()=>'{"analysis":["rep"],"_selected":["rep"]}',saveRepertoireSettings:()=>{},
    startAnalysis:raw=>{const id='engine'+ ++seq;window.__test.engine=id;window.__test.requests.push(JSON.parse(raw));return id},
    requestExplorer:()=>{const id='book'+ ++seq;setTimeout(()=>window.InstinctaZero.onNativeExplorer(id,{event:'error',message:'HiddenHandle https://lichess.org/SecretOwner'}),0);return id},

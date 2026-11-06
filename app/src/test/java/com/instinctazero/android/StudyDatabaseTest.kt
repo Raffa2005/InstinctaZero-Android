@@ -23,15 +23,6 @@ class StudyDatabaseTest {
         .put("initialFen",RepertoireStore.START_POSITION+" 0 1").put("cursor",JSONArray())
     private fun patch(revision:Long,vararg branches:JSONObject)=JSONObject().put("revision",revision).put("meta",meta()).put("branches",JSONArray(branches.toList())).toString()
     private fun branch(parent:Int,vararg children:Pair<Int,String>)=JSONObject().put("parent",parent).put("children",JSONArray(children.map {JSONObject().put("id",it.first).put("u",it.second)}))
-    @Test fun temporaryGamePayloadsCannotReplaceDurableAnalysisEvenAfterReopen() {
-        val dir=directory();val prefs=prefs(dir);val store=StudyDatabase(dir,prefs)
-        assertTrue(JSONObject(store.save(patch(0,branch(0,1 to "e2e4")))).getBoolean("saved"))
-        val before=store.current()
-        val transient=JSONObject(patch(1,branch(0,2 to "d2d4"))).put("meta",meta().put("temporary",true)).put("replace",true)
-        assertFalse(JSONObject(store.save(transient.toString())).getBoolean("saved"))
-        assertFalse(store.saveLegacy(meta().put("v",1).put("temporary",true).put("tree",JSONArray()).toString()))
-        assertEquals(before,StudyDatabase(dir,prefs).current())
-    }
     @Test fun importsEveryLegacyNodeBeyondBothFormerLimitsAndKeepsRecoveryCopy() {
         val dir=directory();val prefs=prefs(dir)
         // Wide is deliberate: >512 total nodes without >512 ply on any one route.

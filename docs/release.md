@@ -1,59 +1,40 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.8.14 / code 42). This update adds engine-informed destination input,
-independent temporary games, explorer games, bottom sections and experimental PGN/FEN import.
-
-## v0.8.14 navigation and import
-
-- Destination input uses matching current or cached engine visits, policy and line
-  evidence before the unchanged offline trained ranker. The last 24 matching engine
-  positions are retained. Previous move, as well as drag-back, corrects a guessed
-  move and arms the next candidate. Other navigation clears that correction state.
-- Analysis keeps its durable SQLite board. Archive, explorer and imported games
-  have independent in-memory tabs, histories and orientations; they never write
-  the saved board. Eight temporary tabs may be open; close one to open another.
-  Closing the app discards temporary tabs and their unsaved edits. Export PGN
-  explicitly before closing to keep them. Existing saved boards, including legacy
-  game-context boards, remain readable. No migration, clearing or re-pairing.
-- Screen/system Back from an archive game returns to Games. Explorer games return
-  to their source board's Book tab. Imported games return to their file selector.
-  Move-history Previous is a distinct action. Bottom sections are Analysis, Games,
-  Books and Account; Broadcasts is not implemented.
-- Open PGN / FEN uses Android's document picker or explicit clipboard paste, with
-  a manual text field fallback. Multi-game files are indexed once and games parsed
-  on demand in short slices. UTF-8/UTF-16 files up to 8 MiB, 20,000 moves per preview,
-  standard chess only. Limits are reported, never silently truncated. FEN opens a
-  temporary position only after confirmation; the separate saved Board editor
-  remains available. Temporary original input stays in memory for original export.
-- English, German, French, Spanish/Italian and Russian piece notation, figurines,
-  coordinate moves, glued move numbers and zero-castling are accepted when legality
-  disambiguates. The language selector resolves ambiguous symbols. Repairs are
-  shown; unresolved branches stop and require explicit acceptance of a partial
-  preview. Variations, comments and NAGs are retained. Edited exports normalize
-  notation; original exports retain the imported text. Privacy aliases are display
-  only, and export in privacy mode requires an explicit real-name warning.
-- The PC adds only authenticated `POST /study/explorer/game`, within the existing
-  gateway. It accepts a fixed source and eight-character ID, retrieves a bounded
-  completed public PGN from a fixed HTTPS origin, using the existing PC-owned
-  Lichess token just like book statistics. Tokens never enter the WebView;
-  redirects are refused. It retains the fair-play gate and writes no archive data.
-  No engine tuning, model, network configuration or repertoire changes.
-
-Run `npm run check`, `navigation-import-ui.mjs`, and all existing portable phone
-scenarios against the final APK's extracted assets. Native `GameDocumentsTest`,
-`StudyDatabaseTest` (API 26/35), menu/portrait/privacy/lifecycle tests and release
-lint cover decoding, bounds, rejected temporary saves and platform integration.
-PC tests: `tests.test_mobile_api` and `tests.test_mobile_explorer_game`. Browser
-previews use 360×640, 390×780 and 412×844 with touch and 4× CPU throttling; they are
-not physical Android/WebView or storage benchmarks. Never use the USB tether phone.
-
-## Earlier releases and common release checks
-
-The offline click-chess input and drag-back correction
+(version 0.8.15 / code 43), restoring v0.8.13 behavior exactly. The offline click-chess input and drag-back correction
 are described in [input behavior and validation](click-chess-preview.md).
 Ship the minified, production-key-signed `release` APK, not the former development
 preview (which installed separately and had unshrunk dependencies).
+
+## v0.8.15 restoration
+
+All production app sources and browser assets match `012c253` (v0.8.13).
+Only the version identifiers, release notes and rollback verification differ.
+The rejected v0.8.14 work remains recoverable in its Git commits and release tag.
+Install this higher-code update over v0.8.14; do not uninstall or clear storage.
+It retains the production application ID and signing key. The saved-board schema,
+pairing preferences, repertoire stores and game data formats are unchanged; no
+migration or reset runs. Offline ranking and drag-back cycling, the previous menu,
+mainline navigation and portrait lock are restored. Previous move again performs
+ordinary navigation, not the rejected guess-correction shortcut.
+
+Before installing, export any wanted edits in **v0.8.14 temporary game tabs**.
+Those tabs were session-only and an app update closes their process. They cannot
+be recovered by the restored UI unless exported first. Saved Analysis, existing
+PGN files, games, books and pairing are not cleared.
+
+Verify the restored code can read databases actually written by v0.8.14, then save
+and reopen an isolated copy without altering its tree, cursor, unrelated files or
+preferences. `ClickInputPersistenceTest` supports this with the previous release's
+synthetic traces/database folder and `CLICK_CHESS_PROCESS_PHASE=read`; never point
+it at live user data. Run all eight baseline phone-sized suites against extracted
+signed APK assets, plus native tests/lint and unchanged-model parity checks.
+Confirm versionCode43 > 42, identical certificate/package and public APK bytes.
+These checks are not a physical Android package-install test; do not use the USB
+tethering phone. The extra authenticated explorer-game server endpoint is inert
+for this restored client, so no backend restart or configuration change is needed.
+
+## Earlier releases and common release checks
 The Cloudflare gateway migration and its checks are described in
 [v0.8.12](release-v0.8.12.md). Install over the existing app: pairing and all local
 data remain intact. Durable board saves and indexed repertoire additions are described
@@ -119,7 +100,7 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 42 / 0.8.14 release values;
+- versionCode/versionName are the intended 43 / 0.8.15 release values;
 - confirm the signed artifact descends from merged PR #1, retains the production
   application ID and signing certificate, and passes the bounded-body/stream,
   lazy-connection, corpus/transposition and private-edit preservation regressions;

@@ -32,7 +32,7 @@ test('notation is an inline mainline and introduces structure only for real sibl
   ]);
 
   assert.doesNotMatch(controller, /style\s*=/i);
-  const source = functionSource(controller, 'moveComment', 'movesPanel');
+  const source = functionSource(controller, 'moveMarkup', 'movesPanel');
   const root = { children: [] };
   const e4 = { id:1, color:'w', number:1, san:'e4', children:[] };
   const e5 = { id:2, color:'b', number:1, san:'e5', children:[] };
@@ -202,7 +202,7 @@ test('rapid navigation and interrupted analysis settle only on the current reque
   const engine={attempts:0,lines:[]},settings={enabled:true,nodes:1000},cursor={},document={hidden:false},window={InstinctaZero:{}};
   const native=()=>({cancelAnalysis:id=>cancelled.push(id),startAnalysis:raw=>{const id='s'+ ++requestId;requests.push({id,...JSON.parse(raw)});return id;}});
   const f=new Function('engine','settings','cursor','document','window','native','setTimeout','clearTimeout','studyRequest','coherentAnalysisSnapshot','applyAnalysisSnapshot','renderActivePanel','renderArrows','state','queueAnalysisRender',
-    `let analysisActive=true,gameLoading=false,repertoirePanel=null,studyContext={},book={};const rememberEvidence=data=>{cursor.analysisCache=data;},editingPosition=()=>state.editing,cancelBookRequest=()=>{},resetStudy=()=>{};const chess={moves:()=>['legal']};${transport}${recovery}${callback};return {scheduleAnalysis,recoverAnalysis,stopEngineTransport};`
+    `let analysisActive=true,gameLoading=false,repertoirePanel=null,studyContext={},book={};const editingPosition=()=>state.editing,cancelBookRequest=()=>{},resetStudy=()=>{};const chess={moves:()=>['legal']};${transport}${recovery}${callback};return {scheduleAnalysis,recoverAnalysis,stopEngineTransport};`
   )(engine,settings,cursor,document,window,native,(fn,ms)=>{const id=++timerId;timers.set(id,{fn,ms});return id;},id=>timers.delete(id),()=>({history:state.history}),data=>data.valid===false?null:data,(snapshot,status)=>{engine.lines=snapshot.lines;engine.status=status;},()=>{},()=>{},state,()=>{});
   const tick=ms=>{for(const [id,timer] of [...timers])if(timer.ms===ms){timers.delete(id);timer.fn();}};
   const emit=(id,event,data={})=>window.InstinctaZero.onNativeAnalysis(id,{event,data});
@@ -364,7 +364,7 @@ test('book percentages normalize counts and inconsistent reported percentages', 
   assert.deepEqual(normalize({ games:100, white_pct:20, draw_pct:30, black_pct:30 }), [25, 37.5, 37.5]);
   assert.deepEqual(normalize({ games:0 }), [0, 0, 0]);
   assert.match(controller, /No explorer moves for this position/);
-  assert.match(controller, /moves\s*\+\s*summary/);
+  assert.match(controller, /moves \+ summary/);
   const resultSource = controller.slice(controller.indexOf('function resultPercentages'), controller.indexOf('  function bookPanel'));
   const resultBar = new Function('finiteMetric', 'safe', `${resultSource}; return resultBar;`)(value => Number.isFinite(Number(value)) ? Number(value) : null, String);
   const markup = resultBar({ games:100, white:32, draws:44, black:24 }, 'fixture');
@@ -417,7 +417,7 @@ test('played PV is projected into a nodes-and-backend-keyed child cache until a 
   assert.match(controller, /if \(next\.parent === previous\) inheritAnalysisToChild\(previous, next\)/);
 
   const snapshotSource = controller.slice(controller.indexOf('function joinedPositiveLines'), controller.indexOf('  function applyAnalysisSnapshot'));
-  const coherent = new Function('finiteMetric', 'settings', 'cursor', `${snapshotSource}; return coherentAnalysisSnapshot;`)(finiteMetric, {backend:'cpu'}, {fen:'test-position'});
+  const coherent = new Function('finiteMetric', 'settings', `${snapshotSource}; return coherentAnalysisSnapshot;`)(finiteMetric, {backend:'cpu'});
   const packet = {
     search_phase:'ready',
     lines:[{pv:['c7c5']},{pv:['e7e5']},{pv:['e7e6']}],
@@ -448,7 +448,7 @@ test('all positive-visit engine lines remain visible and the prior/visit bar is 
   const [controller, style] = await Promise.all([readFile(controllerUrl, 'utf8'), readFile(styleUrl, 'utf8')]);
   const finiteMetric = value => value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
   const snapshotSource = controller.slice(controller.indexOf('function joinedPositiveLines'), controller.indexOf('  function applyAnalysisSnapshot'));
-  const coherent = new Function('finiteMetric', 'settings', 'cursor', `${snapshotSource}; return coherentAnalysisSnapshot;`)(finiteMetric, {backend:'cpu'}, {fen:'test-position'});
+  const coherent = new Function('finiteMetric', 'settings', `${snapshotSource}; return coherentAnalysisSnapshot;`)(finiteMetric, {backend:'cpu'});
   const lines = Array.from({length:11}, (_, index) => ({ pv:[`move${index}`] }));
   const move_stats = lines.map((line, index) => ({ uci:line.pv[0], visits:index === 10 ? 0 : index + 1 }));
   const joined = coherent({ search_phase:'ready', lines, move_stats }, 1000);
@@ -532,7 +532,7 @@ test('active full-panel forms are not rebuilt by streamed engine updates', async
   const repertoire = new Function('panelView', 'renderPanel', 'heading', 'tab', `${source}; return renderActivePanel;`)(null, () => { renders += 1; }, () => { headings += 1; }, 'repertoire');
   repertoire();
   assert.equal(renders, 1, 'engine updates must not replace a repertoire control during a tap');
-  assert.match(controller.slice(controller.indexOf('onNativeAnalysis ='),controller.indexOf('onNativeExplorer =')), /queueAnalysisRender/);
+  assert.match(controller.slice(controller.indexOf('onNativeAnalysis'),controller.indexOf('onNativeExplorer')), /queueAnalysisRender/);
   assert.match(controller, /settings\.showArrows = !settings\.showArrows/);
   assert.match(controller, /renderArrows\(engine\.lines\)/);
 });
@@ -648,8 +648,7 @@ test('stored completed games extend study requests only by trusted game id', asy
 
 test('account changes and missing stored games safely detach archived context', async () => {
   const controller = await readFile(controllerUrl, 'utf8');
-  assert.match(controller, /onAccountChanged = function \(\) \{ stopGameLoad\(\);studyContext\.gameId=null/);
-  assert.doesNotMatch(controller.slice(controller.indexOf('window.InstinctaZero.onAccountChanged ='),controller.indexOf('window.InstinctaZero.loadArchivedGame =')), /resetStudy\(/);
+  assert.match(controller, /onAccountChanged = function \(\) \{ if \(studyContext\.gameId \|\| gameLoading\) resetStudy\(\); \}/);
   assert.match(controller, /studyContext\.gameId && Number\(payload\.code \|\| data\.code\) === 404/);
 });
 
@@ -665,7 +664,7 @@ test('stream bursts paint once per frame without rebuilding unrelated panels', a
   const window = {InstinctaZero:{}}, document = {hidden:false};
   const ui = new Function('engine','cursor','window','document','requestAnimationFrame','cancelAnimationFrame','renderPanel','renderArrows','heading', `
     let analysisActive=true, gameLoading=false, panelView=null, tab='engine';
-    const rememberEvidence=data=>{cursor.analysisCache=data;},editingPosition=()=>false, native=()=>null, cancelBookRequest=()=>{}, watchAnalysis=()=>{}, recoverAnalysis=()=>{},
+    const editingPosition=()=>false, native=()=>null, cancelBookRequest=()=>{}, watchAnalysis=()=>{}, recoverAnalysis=()=>{},
       studyContext={}, settings={nodes:1000}, coherentAnalysisSnapshot=data=>data, chess={moves:()=>['e4']};
     ${transport}${scheduler}${snapshot}${callback}
     return { resetTransport, hide:()=>{analysisActive=false;resetTransport();}, setTab:value=>{tab=value;}, menu:()=>{panelView='settings';} };

@@ -112,8 +112,7 @@ try { for(const [width,height] of [[360,640],[390,780],[412,844]]) {
   await load(startFen,{black:true,tree:[{u:'e2e4',c:[{u:'e7e5',c:[]}]}],cursor:['e2e4','e7e5']});
   await tap('f3');assert.deepEqual(await page.evaluate(()=>window.__ranks[0].history),[{from:'e2',to:'e4',promotion:null},{from:'e7',to:'e5',promotion:null}]);
   await page.getByRole('button',{name:'Previous move',exact:true}).click();await tap('f3');
-  assert.equal(await page.evaluate(()=>window.__ranks.length),1,'Previous corrects the guess without reranking');
-  assert.equal((await stored()).cursor.at(-1),await page.evaluate(()=>window.__ranks[0].rows[1].from+'f3'));
+  assert.equal(await page.evaluate(()=>window.__ranks.length),2,'navigation invalidates correction');
   // Black-side ranks, capture, castling, pinned en passant and underpromotion.
   await load(startFen.replace(' w ',' b '),{black:true});await tap('c6');await undo();await tap('c6');
   assert.equal((await stored()).cursor.length,1);assert.equal((await stored()).nodes.length,1);

@@ -20,12 +20,11 @@
   const settings = { smartInput: true, nodes: 1000, arrowCount: 8, arrowMode:'best', enabled: true, showArrows: true, backend:'cpu', bookSource:'lichess', bookSpeeds:[], bookRatings:[] };
   let tab = 'engine', panelView = null, promotionPicker = null, nodeId = 0, restoring = false, activeNavigationStop = null, analysisActive = false, bookSettingsDirty = false, persistTimer = null, variationTarget = null;
   let studyContext = { gameId:null, initialFen:START_FEN, title:'Local analysis', subtitle:'Starting position' };
-  let root = { id: 0, fen: START_FEN, san: null, move: null, number: 1, color: 'w', parent: null, children: [], selectedChild: null };
+  const root = { id: 0, fen: START_FEN, san: null, move: null, number: 1, color: 'w', parent: null, children: [], selectedChild: null };
   let cursor = root;
   let legalCache = null, clickChoice = null, clickInput = null;
   let treeRevision = 0, renderedTreeRevision = -1, savedRevision = 0, replaceSavedTree = true, loadFailed = false;
-  let dirtyBranches = new Map(), nodeIndex = new Map([[0,root]]);
-  const positionEvidence=new Map();
+  const dirtyBranches = new Map(), nodeIndex = new Map([[0,root]]);
   function changedBranch(parent) {
     const previous=treeRevision++;
     dirtyBranches.set(parent.id,parent); for(const child of parent.children)nodeIndex.set(child.id,child);
@@ -34,8 +33,7 @@
     if(renderedTreeRevision===previous && !panelView && tab==='moves' && parent.children.length===1) {
       const button=panel.querySelector('[data-node="'+parent.id+'"]'), child=parent.children[0];
       if(button && !panel.querySelector('[data-node="'+child.id+'"]')) {
-        const anchor=button.nextElementSibling?.classList.contains('imported-comment')?button.nextElementSibling:button;
-        anchor.insertAdjacentHTML('afterend',moveMarkup(child,false));bindMoveNode(anchor.nextElementSibling);renderedTreeRevision=treeRevision;
+        button.insertAdjacentHTML('afterend',moveMarkup(child,false));bindMoveNode(button.nextElementSibling);renderedTreeRevision=treeRevision;
       }
     }
   }
@@ -46,17 +44,11 @@
     notice.textContent=message;notice.onclick=()=>{if(loadFailed)location.reload();else saveStudyNow();};
   }
   let repertoirePanel = null;
-  let positionEditor = null, importer = null;
-  const editingPosition = () => (!!positionEditor && positionEditor.isOpen()) || (!!importer && importer.isOpen());
+  let positionEditor = null;
+  const editingPosition = () => !!positionEditor && positionEditor.isOpen();
   let gameLoadId = 0, gameLoading = null;
   const engine = { requestId: null, timer: null, watchdog:null, attempts:0, received:false, status: 'idle', lastGood: null, lines: [], stats: null, progress: null, error: '' };
   const book = { requestId: null, loading: false, data: null, error: '' };
-  let workspaceId='analysis', workspaceSequence=0;
-  const workspaces=new Map();
-  const workspaceBar=document.createElement('nav');workspaceBar.className='game-workspaces';
-  workspaceBar.setAttribute('aria-label','Open boards');document.querySelector('.top').after(workspaceBar);
-  let explorerGameRequest=null,explorerGameSource=null;
-  let exportOriginal=false;
   const boardAssets = ['brown.svg','pieces/wK.svg','pieces/wQ.svg','pieces/wR.svg','pieces/wB.svg','pieces/wN.svg','pieces/wP.svg','pieces/bK.svg','pieces/bQ.svg','pieces/bR.svg','pieces/bB.svg','pieces/bN.svg','pieces/bP.svg'];
   Promise.all(boardAssets.map(source => new Promise(resolve => { const image = new Image(); image.onload = image.onerror = resolve; image.src = source; }))).then(() => { document.documentElement.classList.remove('board-assets-loading'); refreshBoardBounds(); });
 
@@ -83,7 +75,7 @@
     try { move = chess.move({ from, to, promotion }); } catch (_) { move = null; }
     if (!move) { sync(null); return; }
     const child = remember(move, number, mover);
-    if (projected && (!child.analysisCache || child.analysisCache.inherited)) child.analysisCache = Object.assign(projected,{input_fen:child.fen});
+    if (projected && (!child.analysisCache || child.analysisCache.inherited)) child.analysisCache = projected;
     sync([from, to]); onPositionChanged();
   }
   function choosePromotion(from, to, options, apply = promotion => commitMove(from, to, promotion)) {
@@ -100,22 +92,14 @@
 
   function clearClickChoice() { const previous=clickChoice;clickChoice=null;if(clickInput)clickInput.cancel();if(previous)heading(); }
   function recentClickHistory() { const moves=[];for(let n=cursor;n && n.move && moves.length<2;n=n.parent)moves.push(n.move);return moves.reverse(); }
-  function rankDestination(moves,to) {
-    const cached=cursor.analysisCache, key=window.InstinctaEngineInput?.key(chess.fen());
-    for(const data of [engine.stats,cached,positionEvidence.get(key)]) {
-      if(data?.mobile_backend && data.mobile_backend!==settings.backend)continue;
-      const result=window.InstinctaEngineInput?.rank(chess.fen(),moves,to,data);if(result)return result;
-    }
-    return window.InstinctaClickChess.ranker.rank(chess.fen(),moves,to,recentClickHistory());
-  }
   function destinationTap(to) {
-    // A candidate advances only after drag-back or Previous correction. A tap in
+    // A candidate advances only when its piece has been dragged back. A tap in
     // the resulting position is a fresh legal move (including a recapture).
     const resumed=clickChoice && !clickChoice.current && clickChoice.parent===cursor && clickChoice.to===to;
     if(!resumed) {
       if(!legalMoves().some(move=>move.to===to))return;
       clearClickChoice();
-      const moves=legalMoves(), ranking=rankDestination(moves,to);
+      const moves=legalMoves(), ranking=window.InstinctaClickChess.ranker.rank(chess.fen(),moves,to,recentClickHistory());
       if(!ranking.length)return;
       clickChoice={parent:cursor,current:null,to,ranking,moves,index:0};
     }
@@ -152,8 +136,7 @@
   if(window.InstinctaClickChess)clickInput=window.InstinctaClickChess.bindDestinationInput({element:boardEl,ground,
     enabled:()=>settings.smartInput && !loadFailed && !restoring && !gameLoading && !editingPosition() && !promotionPicker && ground.state.movable.dests!==null,
     canTap:to=>legalMoves().some(move=>move.to===to),
-    tap:destinationTap,correction:clickCorrection,undo:undoDestinationGuess,clear:clearClickChoice,
-    keepOutside:target=>!!target.closest?.('[data-action="prev"]')});
+    tap:destinationTap,correction:clickCorrection,undo:undoDestinationGuess,clear:clearClickChoice});
 
   function refreshBoardBounds(runtime, element, redraw) {
     runtime = runtime || ground;
@@ -168,15 +151,14 @@
   function orderedSelection(values, allowed) { const selected = new Set(Array.isArray(values) ? values.map(String) : []); return allowed.filter(value => selected.has(String(value))); }
   function loadUiSettings() { if (!native() || !native().getUiSettings) return; try { const saved = JSON.parse(native().getUiSettings() || '{}'); if(typeof saved.smartInput === 'boolean')settings.smartInput=saved.smartInput; settings.nodes = NODE_OPTIONS.includes(Number(saved.nodes)) ? Number(saved.nodes) : settings.nodes; settings.arrowCount = clampInteger(saved.arrowCount, 1, 8, settings.arrowCount); if (saved.arrowMode === 'best' || saved.arrowMode === 'maneuver') settings.arrowMode = saved.arrowMode; if (typeof saved.leelaEnabled === 'boolean') settings.enabled = saved.leelaEnabled; if (typeof saved.arrowsEnabled === 'boolean') settings.showArrows = saved.arrowsEnabled; if (saved.engineBackend === 'cpu' || saved.engineBackend === 'sycl') settings.backend = saved.engineBackend; if (saved.bookSource === 'masters' || saved.bookSource === 'lichess') settings.bookSource = saved.bookSource; settings.bookSpeeds = orderedSelection(saved.bookSpeeds, BOOK_SPEEDS); settings.bookRatings = orderedSelection(saved.bookRatings, BOOK_RATINGS); } catch (_) {} }
   function saveUiSettings() { if (!native() || !native().saveUiSettings) return; native().saveUiSettings(JSON.stringify({ smartInput:settings.smartInput, nodes: settings.nodes, arrowCount: settings.arrowCount, arrowMode:settings.arrowMode, leelaEnabled: settings.enabled, arrowsEnabled: settings.showArrows, engineBackend:settings.backend, appearance: 'brown', bookSource:settings.bookSource, bookSpeeds:settings.bookSpeeds, bookRatings:settings.bookRatings })); }
-  function studyRequest() { const request = { history: history(), nodes: settings.nodes, backend:settings.backend }; if (studyContext.gameId) request.game_id = studyContext.gameId; else if(studyContext.initialFen && (studyContext.editedPosition || studyContext.temporary || studyContext.initialFen!==START_FEN))request.initial_fen = studyContext.initialFen; return request; }
-  function explorerRequest() { const request = { history: history(), source:settings.bookSource }; if (studyContext.gameId) request.game_id = studyContext.gameId; else if(studyContext.initialFen && (studyContext.editedPosition || studyContext.temporary || studyContext.initialFen!==START_FEN))request.initial_fen = studyContext.initialFen; if (settings.bookSource === 'lichess') { if (settings.bookSpeeds.length) request.speeds = settings.bookSpeeds.slice(); if (settings.bookRatings.length) request.ratings = settings.bookRatings.slice(); } return request; }
+  function studyRequest() { const request = { history: history(), nodes: settings.nodes, backend:settings.backend }; if (studyContext.gameId) request.game_id = studyContext.gameId; else if(studyContext.editedPosition)request.initial_fen = studyContext.initialFen; return request; }
+  function explorerRequest() { const request = { history: history(), source:settings.bookSource }; if (studyContext.gameId) request.game_id = studyContext.gameId; else if(studyContext.editedPosition)request.initial_fen = studyContext.initialFen; if (settings.bookSource === 'lichess') { if (settings.bookSpeeds.length) request.speeds = settings.bookSpeeds.slice(); if (settings.bookRatings.length) request.ratings = settings.bookRatings.slice(); } return request; }
   function moveUci(node) { return node && node.move ? node.move.from + node.move.to + (node.move.promotion || '') : ''; }
   function wireNode(node) { const result={u:moveUci(node),x:0,c:[]}, pending=[[node,result]];while(pending.length){const [parent,wire]=pending.pop();for(const child of parent.children){const next={u:moveUci(child),x:0,c:[]};wire.c.push(next);pending.push([child,next]);}}return result; }
   function studyState() { return { v:1, gameId:studyContext.gameId, editedPosition:!!studyContext.editedPosition, initialFen:studyContext.initialFen, title:studyContext.title, subtitle:studyContext.subtitle, cursor:history(), tree:root.children.map(wireNode), selected:0, tab, black:wrap.classList.contains('orientation-black'), expanded:false }; }
   function saveStudyNow() {
     if (persistTimer) clearTimeout(persistTimer); persistTimer = null;
     if(loadFailed || restoring)return false;
-    if(workspaceId!=='analysis')return true;
     if(!native())return true;
     try {
       if(native().saveStudyDelta) {
@@ -227,109 +209,45 @@
   function stopGameLoad() { ++gameLoadId; gameLoading = null; wrap.classList.remove('game-loading'); }
   async function installArchivedGame(payload) {
     privacy.refresh();
-    const game=payload?.game || payload;
-    if(!game || !/^[A-Za-z0-9]{8,16}$/.test(String(game.id || '')) || !Array.isArray(game.moves))return false;
+    const game = payload && payload.game ? payload.game : payload;
+    if (!game || !/^[A-Za-z0-9]{8,16}$/.test(String(game.id || '')) || !Array.isArray(game.moves)) return false;
     if(loadFailed || !saveStudyNow())return false;
-    const id=++gameLoadId;
-    stopActiveNavigation();resetTransport();panelView=null;
-    gameLoading={title:archivedTitle(game)};wrap.classList.add('game-loading');
-    repertoirePanel?.beginGame();renderPanel();
+    const id = ++gameLoadId;
+    stopActiveNavigation(); resetTransport(); panelView = null;
+    gameLoading = {title:archivedTitle(game)}; wrap.classList.add('game-loading');
+    if (repertoirePanel) repertoirePanel.beginGame(); renderPanel();
     try {
-      let parsed;
-      if(game.pgn) {
-        parsed=await window.InstinctaPgn.parse(game.pgn,Chess,'en',()=>id!==gameLoadId);
-        if(parsed.issues.length)throw Error('Stored game cannot be read completely.');
-      } else {
-        const probe=new Chess(game.initial_fen || START_FEN),temporary={id:0,fen:probe.fen(),children:[],parent:null};
-        let parent=temporary,count=0,slice=performance.now();
-        for(const item of game.moves) {
-          if(id!==gameLoadId)return false;
-          const uci=String(item?.uci || '');if(!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(uci))throw Error('Invalid archived move');
-          const number=probe.moveNumber(),move=probe.move({from:uci.slice(0,2),to:uci.slice(2,4),promotion:uci[4]});
-          const child={id:++count,fen:probe.fen(),san:move.san,move:{from:move.from,to:move.to,promotion:move.promotion || null},number,color:move.color,parent,children:[],comment:item.comment || ''};
-          parent.children.push(child);parent.selectedChild=child;parent=child;
-          if(performance.now()-slice>=6){await new Promise(resolve=>setTimeout(resolve,0));slice=performance.now();}
-        }
-        parsed={root:temporary,headers:{White:game.white?.name || 'White',Black:game.black?.name || 'Black',Result:game.result || '*'},original:''};
+      // Build off-screen without changing the saved board. Yield long games in small
+      // slices; a newer game or Back invalidates this import before it can commit.
+      const probe = new Chess(game.initial_fen || START_FEN), initialFen = probe.fen();
+      const temporary = {children:[]}; let parent = temporary, count = 0, slice = performance.now();
+      for (const item of game.moves) {
+        if (id !== gameLoadId) return false;
+        const uci = String(item && item.uci || '');
+        if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(uci)) throw new Error('Invalid archived move');
+        const number = probe.moveNumber(), mover = probe.turn();
+        const move = probe.move({from:uci.slice(0,2),to:uci.slice(2,4),promotion:uci[4]});
+        const child = {id:++count,fen:probe.fen(),san:move.san,move:{from:move.from,to:move.to,promotion:move.promotion || null},number,color:mover,parent,children:[],selectedChild:null};
+        parent.children.push(child); parent.selectedChild = child; parent = child;
+        if (performance.now() - slice >= 6) { await new Promise(resolve => setTimeout(resolve,0)); slice = performance.now(); }
       }
-      if(id!==gameLoadId)return false;
-      const pending=gameLoading;
-      stopGameLoad();
-      const ok=openTemporary(parsed,{kind:'games'},archivedTitle(game),{gameId:String(game.id),black:game.mobile_orientation==='black',end:true});
-      if(ok && pending.tab)setTab(pending.tab);
-      if(ok && pending.repertoireId)repertoirePanel?.openLibrary(pending.repertoireId);
-      return ok;
-    } catch(_) {
-      if(id===gameLoadId){stopGameLoad();repertoirePanel?.setActive(analysisActive,false);onPositionChanged();saveNotice('Game could not be opened. Saved Analysis is unchanged.');}
+      if (id !== gameLoadId) return false;
+      restoring = true;
+      resetRoot(initialFen,{gameId:String(game.id),initialFen,title:archivedTitle(game),subtitle:String(game.result || 'Completed game')});
+      root.children = temporary.children; root.children.forEach(child => child.parent = root);
+      root.selectedChild = mainlineChild(root); nodeId = count; cursor = parent === temporary ? root : parent; chess.load(cursor.fen);
+      const black = game.mobile_orientation === 'black';
+      wrap.classList.toggle('orientation-black',black); wrap.classList.toggle('orientation-white',!black);
+      if (black !== (ground.state.orientation === 'black')) ground.toggleOrientation();
+      const openedRepertoire = gameLoading.repertoireId;
+      tab = gameLoading.tab || 'moves'; document.querySelectorAll('.tabs [data-tab]').forEach(item => item.classList.toggle('selected',item.dataset.tab === tab));
+      stopGameLoad(); sync(null); restoring = false; saveStudyNow();
+      if (repertoirePanel) repertoirePanel.setActive(analysisActive,false);
+      onPositionChanged(); if(openedRepertoire && repertoirePanel)repertoirePanel.openLibrary(openedRepertoire); return true;
+    } catch (_) {
+      if (id === gameLoadId) { stopGameLoad(); restoring = false; if(repertoirePanel)repertoirePanel.setActive(analysisActive,false); onPositionChanged(); }
       return false;
     }
-  }
-  // References, not serialized copies: switching a tab is independent of tree size.
-  // Temporary tabs never enter the native durable board store.
-
-  function captureWorkspace() {
-    return {root,cursor,nodeId,treeRevision,savedRevision,replaceSavedTree,loadFailed,dirtyBranches,nodeIndex,studyContext,tab,
-      black:ground.state.orientation==='black',scroll:panel.scrollTop,bookData:book.data,bookFen:book.positionKey};
-  }
-  function renderWorkspaceTabs() {
-    workspaceBar.hidden=workspaces.size<2;
-    workspaceBar.innerHTML=[...workspaces].map(([id,state])=>'<span class="workspace-item'+(id===workspaceId?' selected':'')+'"><button data-workspace="'+id+'" aria-pressed="'+(id===workspaceId)+'">'+safe(id==='analysis'?'Analysis':privacy.title(state.studyContext.title,true))+'</button>'+(id==='analysis'?'':'<button class="workspace-close" data-close-workspace="'+id+'" aria-label="Close temporary game">×</button>')+'</span>').join('');
-    workspaceBar.querySelectorAll('[data-workspace]').forEach(b=>b.onclick=()=>switchWorkspace(b.dataset.workspace));
-    workspaceBar.querySelector('.selected')?.scrollIntoView?.({block:'nearest',inline:'nearest'});
-    workspaceBar.querySelectorAll('[data-close-workspace]').forEach(b=>b.onclick=()=>{const id=b.dataset.closeWorkspace;if(workspaceId===id && !switchWorkspace('analysis'))return;workspaces.delete(id);renderWorkspaceTabs();refreshBoardBounds();});
-  }
-  function switchWorkspace(id) {
-    if(id===workspaceId)return true;
-    const state=workspaces.get(id);if(!state || !saveStudyNow())return false;
-    stopGameLoad();stopActiveNavigation();resetTransport();clearClickChoice();importer?.hide();
-    workspaces.set(workspaceId,captureWorkspace());
-    workspaceId=id;({root,cursor,nodeId,treeRevision,savedRevision,replaceSavedTree,loadFailed,dirtyBranches,nodeIndex,studyContext,tab}=state);
-    renderedTreeRevision=-1;panelView=null;variationTarget=null;repertoireContextCache=null;legalCache=null;
-    book.data=state.bookData;book.positionKey=state.bookFen;book.error='';book.loading=false;
-    chess.load(cursor.fen);setOrientation(state.black);sync(null);
-    repertoirePanel?.beginGame();repertoirePanel?.setActive(analysisActive,false);
-    renderWorkspaceTabs();document.querySelectorAll('.tabs [data-tab]').forEach(b=>b.classList.toggle('selected',b.dataset.tab===tab));onPositionChanged();panel.scrollTop=state.scroll;refreshBoardBounds();return true;
-  }
-  function setOrientation(black) {
-    wrap.classList.toggle('orientation-black',!!black);wrap.classList.toggle('orientation-white',!black);
-    if(!!black!==(ground.state.orientation==='black'))ground.toggleOrientation();
-  }
-  function openTemporary(parsed,source,name,options={}) {
-    if(workspaces.size>=9){saveNotice('Eight temporary games are open. Close a tab before opening another.');return false;}
-    if(!saveStudyNow())return false;
-    stopGameLoad();stopActiveNavigation();resetTransport();clearClickChoice();importer?.hide();
-    workspaces.set(workspaceId,captureWorkspace());workspaceId='game-'+ ++workspaceSequence;
-    root=parsed.root;cursor=root;nodeId=0;nodeIndex=new Map();dirtyBranches=new Map();
-    const pending=[root];while(pending.length){const n=pending.pop();nodeIndex.set(n.id,n);nodeId=Math.max(nodeId,n.id);pending.push(...n.children);}
-    if(options.end)while(mainlineChild(cursor))cursor=mainlineChild(cursor);
-    const headers=parsed.headers || {};
-    studyContext={temporary:true,gameId:options.gameId || null,initialFen:root.fen,title:headers.White || headers.Black?(headers.White || 'White')+' – '+(headers.Black || 'Black'):(name || 'Imported position'),subtitle:'Temporary · export to keep edits',headers,original:parsed.original,source};
-    treeRevision++;renderedTreeRevision=-1;savedRevision=0;replaceSavedTree=true;loadFailed=false;restoring=false;legalCache=null;repertoireContextCache=null;panelView=null;variationTarget=null;
-    book.data=null;book.positionKey=null;book.error='';tab='moves';chess.load(cursor.fen);setOrientation(!!options.black);sync(null);
-    workspaces.set(workspaceId,captureWorkspace());repertoirePanel?.beginGame();repertoirePanel?.setActive(analysisActive,false);
-    saveNotice('');renderWorkspaceTabs();document.querySelectorAll('.tabs [data-tab]').forEach(b=>b.classList.toggle('selected',b.dataset.tab===tab));onPositionChanged();refreshBoardBounds();return true;
-  }
-  function returnFromGame() {
-    const source=studyContext.source || {kind:'games'};
-    if(source.kind==='explorer' && workspaces.has(source.workspace)){switchWorkspace(source.workspace);setTab('book');panel.scrollTop=source.scroll || 0;}
-    else if(source.kind==='import'){openImport();importer.restore(source.document);}
-    else native()?.leaveGame?.('games');
-  }
-  function openImport() {
-    if(!saveStudyNow())return false;stopGameLoad();clearClickChoice();resetTransport();if(explorerGameRequest){native()?.cancelAnalysis?.(explorerGameRequest);explorerGameRequest=null;}repertoirePanel?.setActive(false);
-    importer.show();return true;
-  }
-  function exportCurrent(original=false,confirmed=false) {
-    const text=original?studyContext.original:window.InstinctaPgn.exportPgn(root,studyContext.headers || {});
-    if(privacy.enabled && !confirmed){exportOriginal=original;openPanelView('exportPrivacy');return;}
-    closePanelView();
-    native()?.exportPgn?.(text,original?'original-game.pgn':'analysis-game.pgn');
-  }
-  function openExplorerGame(id) {
-    if(explorerGameRequest)native()?.cancelAnalysis?.(explorerGameRequest);
-    explorerGameSource={kind:'explorer',workspace:workspaceId,node:cursor.id,fen:cursor.fen,scroll:panel.scrollTop};
-    try {explorerGameRequest=native()?.requestExplorerGame?.(JSON.stringify({id,source:settings.bookSource}));if(!explorerGameRequest)throw Error();saveNotice('Opening explorer game…');}
-    catch(_){saveNotice('Explorer game unavailable. Check the PC connection.');}
   }
   function renderActivePanel() { if (panelView || tab === 'repertoire') heading(); else renderPanel(); }
   // Process every stream message immediately, but paint only the latest state per
@@ -368,8 +286,7 @@
       try{engine.requestId=native().startAnalysis(JSON.stringify(studyRequest()));watchAnalysis();}catch(_){recoverAnalysis();}
     },retry?Math.min(5000,1000*2**(engine.attempts-1)):120);
   }
-  function bookPositionKey(){return cursor.fen+'|'+JSON.stringify([settings.bookSource,settings.bookSpeeds,settings.bookRatings]);}
-  function requestBook() { if (gameLoading || editingPosition()) return;  if (!analysisActive || tab !== 'book' || !native()) { cancelBookRequest(); renderActivePanel(); return; } if(book.data && book.positionKey===bookPositionKey() && !bookSettingsDirty){renderActivePanel();return;} cancelBookRequest(); bookSettingsDirty = false; book.positionKey=bookPositionKey();book.loading = true; book.error = ''; renderActivePanel(); try { book.requestId = native().requestExplorer(JSON.stringify(explorerRequest())); } catch (_) { book.loading = false; book.error = 'Connection unavailable'; renderActivePanel(); } }
+  function requestBook() { if (gameLoading || editingPosition()) return;  if (!analysisActive || tab !== 'book' || !native()) { cancelBookRequest(); renderActivePanel(); return; } cancelBookRequest(); bookSettingsDirty = false; book.loading = true; book.error = ''; renderActivePanel(); try { book.requestId = native().requestExplorer(JSON.stringify(explorerRequest())); } catch (_) { book.loading = false; book.error = 'Connection unavailable'; renderActivePanel(); } }
   function projectAnalysisToChild(data, move, targetNodes) {
     const selectedMove = String(move || '');
     if (!data || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(selectedMove)) return null;
@@ -399,19 +316,13 @@
   function inheritAnalysisToChild(parent, child) {
     if (!parent || !child || child.parent !== parent) return;
     const projected = projectAnalysisToChild(parent.analysisCache || engine.stats, moveUci(child), settings.nodes);
-    if (projected && (!child.analysisCache || child.analysisCache.inherited)) child.analysisCache = Object.assign(projected,{input_fen:child.fen});
+    if (projected && (!child.analysisCache || child.analysisCache.inherited)) child.analysisCache = projected;
   }
   function joinedPositiveLines(data) { const stats = Array.isArray(data && data.move_stats) ? data.move_stats.filter(stat => finiteMetric(stat && stat.visits) > 0) : []; const byMove = new Map(stats.map(stat => [stat.uci, stat])); return { lines:(Array.isArray(data && data.lines) ? data.lines : []).filter(line => line && Array.isArray(line.pv) && byMove.has(line.pv[0])), stats }; }
-  function coherentAnalysisSnapshot(data, targetNodes) { if (!data || !Array.isArray(data.lines) || data.search_phase === 'provisional') return null; const joined = joinedPositiveLines(data), authoritative = data.search_phase === 'ready' || data.search_phase === 'final'; if (!joined.lines.length && !authoritative) return null; return Object.assign({}, data, { input_fen:cursor.fen, inherited:false, mobile_backend:settings.backend, target_nodes:targetNodes == null ? data.target_nodes : targetNodes, lines:joined.lines, root_move_stats:data.root_move_stats || data.move_stats || [], move_stats:joined.stats }); }
-  function rememberEvidence(snapshot) {
-    const key=window.InstinctaEngineInput.key(cursor.fen);
-    positionEvidence.delete(key);positionEvidence.set(key,snapshot);
-    while(positionEvidence.size>24)positionEvidence.delete(positionEvidence.keys().next().value);
-    cursor.analysisCache=snapshot;
-  }
+  function coherentAnalysisSnapshot(data, targetNodes) { if (!data || !Array.isArray(data.lines) || data.search_phase === 'provisional') return null; const joined = joinedPositiveLines(data), authoritative = data.search_phase === 'ready' || data.search_phase === 'final'; if (!joined.lines.length && !authoritative) return null; return Object.assign({}, data, { inherited:false, mobile_backend:settings.backend, target_nodes:targetNodes == null ? data.target_nodes : targetNodes, lines:joined.lines, move_stats:joined.stats }); }
   function applyAnalysisSnapshot(snapshot, status, redraw = true) { engine.lastGood = snapshot; engine.lines = snapshot && Array.isArray(snapshot.lines) ? snapshot.lines : []; engine.stats = snapshot || null; engine.progress = snapshot && snapshot.progress || null; engine.status = status || 'cached'; engine.error = ''; if (redraw) renderArrows(engine.lines); }
   function restoreCachedAnalysis() { const cached = cursor.analysisCache, target = finiteMetric(cached && cached.target_nodes); if (cached && target === settings.nodes && cached.mobile_backend === settings.backend) applyAnalysisSnapshot(cached, cached.inherited ? 'inherited' : 'cached'); else { engine.status = 'idle'; engine.lastGood = null; engine.lines = []; engine.stats = null; engine.progress = null; engine.error = ''; renderArrows([]); } }
-  function onPositionChanged() { if(explorerGameRequest && (explorerGameSource.workspace!==workspaceId || explorerGameSource.node!==cursor.id || explorerGameSource.fen!==cursor.fen)){native()?.cancelAnalysis?.(explorerGameRequest);explorerGameRequest=null;saveNotice('');} if (gameLoading || editingPosition()) return; if (repertoirePanel) repertoirePanel.refresh(); resetTransport(); restoreCachedAnalysis(); scheduleAnalysis(); if (tab === 'book') requestBook(); renderActivePanel(); }
+  function onPositionChanged() { if (gameLoading || editingPosition()) return; if (repertoirePanel) repertoirePanel.refresh(); resetTransport(); restoreCachedAnalysis(); scheduleAnalysis(); if (tab === 'book') requestBook(); renderActivePanel(); }
   function finiteMetric(value) { if (value === null || value === undefined || value === '') return null; const number = Number(value); return Number.isFinite(number) ? number : null; }
   function compactCount(value) { const number = Math.max(0, finiteMetric(value) || 0); if (number >= 1000000) return (number / 1000000).toFixed(number >= 10000000 ? 0 : 1).replace(/\.0$/, '') + 'M'; if (number >= 1000) return (number / 1000).toFixed(number >= 100000 ? 0 : 1).replace(/\.0$/, '') + 'K'; return String(Math.round(number)); }
   function whiteEvalText(line) { if (line && line.white_score != null && line.white_score !== 'n/a') return String(line.white_score); const mate = finiteMetric(line && line.white_mate); if (mate !== null) return '#' + mate; const cp = finiteMetric(line && line.white_cp); return cp === null ? '—' : (cp / 100 >= 0 ? '+' : '') + (cp / 100).toFixed(2); }
@@ -425,8 +336,7 @@
     const notice=engine.lines.length && engine.error ? '<div class="empty" role="status">'+safe(privacy.error(engine.error,'Leela unavailable. Retry analysis.'))+'</div>' : '';
     return notice + '<div class="stats"><span><b>visits:</b> ' + safe(visits) + '/' + safe(progress.target || settings.nodes) + '</span><span><b>nodes:</b> ' + safe(stats.total_nodes || stats.nodes || visits) + '</span><span><b>n/s:</b> ' + safe(stats.nps || progress.nps || 0) + '</span><span><b>time:</b> ' + safe(stats.elapsed_ms != null ? Math.round(stats.elapsed_ms / 1000) + 's' : '—') + '</span></div>' + rows + (engine.status==='error' || engine.status==='disconnected' ? '<button class="rep-button" data-engine-retry>Retry Leela</button>' : '');
   }
-  function moveComment(child) { return child.comment ? '<span class="imported-comment">'+safe(privacy.text(child.comment))+'</span>' : ''; }
-  function moveMarkup(child, variationRoot) { const number = child.color === 'w' ? child.number + '.' : variationRoot ? child.number + '...' : ''; return '<button class="move ' + (child === cursor ? 'current' : '') + '" data-node="' + child.id + '">' + (number ? '<span class="no">' + number + '</span>' : '') + safe(child.san) + (child.nags?.length ? '<small> '+safe(child.nags.join(' '))+'</small>' : '') + '</button>' + moveComment(child); }
+  function moveMarkup(child, variationRoot) { const number = child.color === 'w' ? child.number + '.' : variationRoot ? child.number + '...' : ''; return '<button class="move ' + (child === cursor ? 'current' : '') + '" data-node="' + child.id + '">' + (number ? '<span class="no">' + number + '</span>' : '') + safe(child.san) + '</button>'; }
   function renderMoves(node) {
     const parts=[],stack=[node];
     while(stack.length){const next=stack.pop();if(typeof next==='string'){parts.push(next);continue;}if(!next.children.length)continue;
@@ -434,15 +344,14 @@
       else {parts.push('<div class="variations">');stack.push('</div>');for(let i=next.children.length-1;i>=0;i--){const child=next.children[i];stack.push('</div>',child,'<div class="variation">'+moveMarkup(child,true));}}
     }return parts.join('');
   }
-  function movesPanel() { return root.children.length ? '<div class="moves">' + moveComment(root) + renderMoves(root) + '</div>' : '<div class="empty">Tap or drag a legal move to begin a local line.</div>'; }
+  function movesPanel() { return root.children.length ? '<div class="moves">' + renderMoves(root) + '</div>' : '<div class="empty">Tap or drag a legal move to begin a local line.</div>'; }
   function resultPercentages(result) { const games = finiteMetric(result.games) || (finiteMetric(result.white) || 0) + (finiteMetric(result.draws) || 0) + (finiteMetric(result.black) || 0); const requested = [finiteMetric(result.white_pct), finiteMetric(result.draw_pct), finiteMetric(result.black_pct)]; const counts = [finiteMetric(result.white) || 0, finiteMetric(result.draws) || 0, finiteMetric(result.black) || 0]; const values = requested.every(value => value !== null) ? requested : counts.map(value => games > 0 ? 100 * value / games : 0); const total = values.reduce((sum, value) => sum + Math.max(0, value), 0); return total > 0 ? values.map(value => Math.max(0, value) * 100 / total) : [0, 0, 0]; }
   function resultBar(result, index) { const values = resultPercentages(result); const white = values[0], draw = values[1], black = values[2], whiteEnd = white, drawEnd = white + draw; const label = Math.round(white) + '% white, ' + Math.round(draw) + '% draws, ' + Math.round(black) + '% black'; const percent = value => Math.max(0, Math.min(100, value)) + '%'; const text = (value, x, className) => value < 13 ? '' : '<text' + (className ? ' class="' + className + '"' : '') + ' x="' + percent(x) + '" y="14">' + Math.round(value) + '%</text>'; return '<svg class="result-bar" role="img" aria-label="' + safe(label) + '"><defs><clipPath id="book-bar-' + index + '"><rect width="100%" height="20" rx="10"/></clipPath></defs><g clip-path="url(#book-bar-' + index + ')"><rect class="result-white" width="' + percent(white) + '" height="20"/><rect class="result-draw" x="' + percent(whiteEnd) + '" width="' + percent(draw) + '" height="20"/><rect class="result-black" x="' + percent(drawEnd) + '" width="' + percent(black) + '" height="20"/></g><rect class="result-outline" x="0.25%" y="0.5" width="99.5%" height="19" rx="9.5"/>' + text(white, white / 2, 'on-white') + text(draw, white + draw / 2, '') + text(black, drawEnd + black / 2, '') + '</svg>'; }
-  function bookPanel() { if (book.loading) return '<div class="empty">Opening book…</div>'; if (book.error) return '<div class="empty">' + safe(privacy.error(book.error,'Opening book unavailable. Check the PC connection or retry.')) + '</div>'; if (!book.data) return '<div class="empty">Opening book is ready when connected.</div>'; const total = book.data.totals || {}; const totalGames = finiteMetric(total.games) || 0; const sourceMoves = Array.isArray(book.data.moves) ? book.data.moves : [];  const summary = '<div class="book-move book-summary"><b>Σ</b><span class="book-share">100%</span><span class="book-games">' + safe(compactCount(totalGames)) + '</span>' + resultBar(total, 'total') + '</div>'; const moves = sourceMoves.map((move, index) => { const games = finiteMetric(move.games) || 0; const reportedShare = finiteMetric(move.share_pct); const share = reportedShare === null ? (totalGames > 0 ? Math.max(0, Math.min(100, games / totalGames * 100)) : 0) : Math.max(0, Math.min(100, reportedShare)); return '<button class="book-move" data-uci="' + safe(move.uci) + '"><b>' + safe(move.san || move.uci) + '</b><span class="book-share">' + Math.round(share) + '%</span><span class="book-games">' + safe(compactCount(games)) + '</span>' + resultBar(move, index) + '</button>'; }).join(''); const games=(book.data.top_games || []).map(g=>'<button data-explorer-game="'+safe(g.id)+'"><b>'+safe(privacy.title((g.white?.name || 'White')+' – '+(g.black?.name || 'Black'),true))+'</b><small>'+safe([g.white?.rating,g.black?.rating].filter(Boolean).join(' / '))+' · '+safe(g.winner==='white'?'1–0':g.winner==='black'?'0–1':'½–½')+' · '+safe(g.year || g.month || '')+'</small></button>').join('');return (sourceMoves.length?'<div class="book-moves">'+moves+summary+'</div>':'<div class="empty">No explorer moves for this position.</div>')+(games?'<section class="explorer-games"><h3>Games in this position</h3>'+games+'</section>':''); }
+  function bookPanel() { if (book.loading) return '<div class="empty">Opening book…</div>'; if (book.error) return '<div class="empty">' + safe(privacy.error(book.error,'Opening book unavailable. Check the PC connection or retry.')) + '</div>'; if (!book.data) return '<div class="empty">Opening book is ready when connected.</div>'; const total = book.data.totals || {}; const totalGames = finiteMetric(total.games) || 0; const sourceMoves = Array.isArray(book.data.moves) ? book.data.moves : []; if (!totalGames || !sourceMoves.length) return '<div class="empty">No explorer moves for this position.</div>'; const summary = '<div class="book-move book-summary"><b>Σ</b><span class="book-share">100%</span><span class="book-games">' + safe(compactCount(totalGames)) + '</span>' + resultBar(total, 'total') + '</div>'; const moves = sourceMoves.map((move, index) => { const games = finiteMetric(move.games) || 0; const reportedShare = finiteMetric(move.share_pct); const share = reportedShare === null ? (totalGames > 0 ? Math.max(0, Math.min(100, games / totalGames * 100)) : 0) : Math.max(0, Math.min(100, reportedShare)); return '<button class="book-move" data-uci="' + safe(move.uci) + '"><b>' + safe(move.san || move.uci) + '</b><span class="book-share">' + Math.round(share) + '%</span><span class="book-games">' + safe(compactCount(games)) + '</span>' + resultBar(move, index) + '</button>'; }).join(''); return '<div class="book-moves">' + moves + summary + '</div>'; }
   function switchButton(name, label, enabled) { return '<button class="touch-switch' + (enabled ? ' on' : '') + '" data-switch="' + name + '" role="switch" aria-checked="' + enabled + '"><span>' + label + '</span><i aria-hidden="true"></i></button>'; }
   function filterSummary(values) { return values.length ? values.join(' · ') : 'All'; }
   function chip(value, label, selected) { return '<button class="filter-chip' + (selected ? ' selected' : '') + '" data-filter="' + safe(value) + '" aria-pressed="' + selected + '">' + safe(label) + '</button>'; }
   function panelViewHtml() {
-    if(panelView==='exportPrivacy')return '<div class="panel-view"><p>Export contains original player names and metadata, not privacy aliases.</p><div class="panel-buttons"><button data-export-confirm>Export with real names</button><button data-export-cancel>Cancel</button></div></div>';
     if (panelView === 'repertoireSettings') return repertoirePanel ? privacy.html(repertoirePanel.settingsHtml()) : '';
     if (panelView === 'settings') {
       const nodeIndex = Math.max(0, NODE_OPTIONS.indexOf(settings.nodes));
@@ -458,18 +367,13 @@
       (settings.bookSource === 'lichess' ? '<div class="filter-title">Speed <small>' + safe(filterSummary(settings.bookSpeeds)) + '</small></div><div class="filter-grid filter-five">' + BOOK_SPEEDS.map(value => chip(value, value === 'correspondence' ? 'Corr.' : value[0].toUpperCase() + value.slice(1), settings.bookSpeeds.includes(value))).join('') + '</div><div class="filter-title">Rating <small>' + safe(filterSummary(settings.bookRatings)) + '</small></div><div class="filter-grid filter-five">' + BOOK_RATINGS.map(value => chip(value, value, settings.bookRatings.includes(value))).join('') + '</div>' : '<p class="panel-hint">Masters database · all games</p>') + '</div>';
     if (panelView === 'confirmDelete') return '<div class="panel-view"><p>Delete the current branch?</p><div class="panel-buttons"><button data-confirm-delete>Delete</button><button data-cancel-delete>Keep</button></div></div>';
     if (panelView === 'variationActions') return '<div class="panel-view"><div class="panel-readout"><span>Variation</span><b>' + safe(variationTarget && variationTarget.san || '') + '</b></div><div class="panel-buttons panel-buttons-stack"><button data-promote-variation>Promote to main line</button><button data-delete-variation>Delete variation</button><button data-cancel-variation>Cancel</button></div></div>';
-    return '<div class="panel-view study-actions"><div class="panel-buttons panel-buttons-stack"><button data-editor>Board editor</button>' + (studyContext.editedPosition ? '<button data-source-board>Return to saved board</button>' : '') + '<button data-import>Open / paste PGN or FEN</button><button data-export>Export current PGN</button>' + (studyContext.original ? '<button data-export-original>Export original PGN</button>' : '') + '<button data-reset>New / reset</button><button data-delete' + (cursor.parent ? '' : ' disabled') + '>Delete current branch</button></div></div>';
+    return '<div class="panel-view"><div class="panel-buttons panel-buttons-stack"><button data-editor>Board editor</button>' + (studyContext.editedPosition ? '<button data-source-board>Return to saved board</button>' : '') + '<button data-reset>New / reset</button><button data-delete' + (cursor.parent ? '' : ' disabled') + '>Delete current branch</button></div></div>';
   }
-  function heading() { if (gameLoading) { title.textContent = 'Loading game…'; document.querySelector('[data-study-title]').textContent = privacy.title(gameLoading.title,true); document.querySelector('.game-title small').textContent = 'Loading game…'; return; }  const best = engine.lines && engine.lines[0] || engine.stats && engine.stats.inherited_eval; const evalText = settings.enabled && best ? whiteEvalText(best) : null; title.textContent = evalText && evalText !== '—' ? evalText + (engine.status==='retrying'?' · retrying':engine.status==='error'?' · interrupted':' · Leela') : settings.enabled ? 'Leela · ' + (engine.status === 'running' || engine.status === 'starting' ? 'analyzing' : engine.status) : ({moves:'Moves',info:'Study information',engine:'Leela off',chart:'',book:'Opening book',repertoire:'Repertoires'})[tab]; document.querySelector('[data-study-title]').textContent = repertoirePanel && repertoirePanel.isLibrary() ? 'Repertoires' : privacy.title(studyContext.title,!!studyContext.gameId || !!studyContext.temporary); document.querySelector('[data-panel-tab]').hidden = !panelView; document.querySelector('[data-panel-tab]').classList.toggle('selected', !!panelView);  const marker = document.querySelector('[data-tab="repertoire"]'), summary = repertoirePanel ? privacy.text(repertoirePanel.summary()) : ''; if (marker) { marker.setAttribute('title', summary || 'Repertoires'); marker.classList.toggle('rep-covered', !!summary && !summary.startsWith('Outside') && !summary.includes('deviation')); marker.classList.toggle('rep-deviated', summary.startsWith('Outside') || summary.includes('deviation')); } if (repertoirePanel && repertoirePanel.isLibrary()) document.querySelector('.game-title small').textContent = 'Private library · on this phone'; else if (summary) { const subtitle = document.querySelector('.game-title small'); subtitle.textContent = (cursor.san || privacy.subtitle(studyContext.subtitle)) + ' · ' + summary; } if(!summary && clickChoice && clickChoice.current===cursor)document.querySelector('.game-title small').textContent=cursor.san+' · drag back to '+cursor.move.from+' to undo'; else if(!summary && clickChoice && !clickChoice.current && clickChoice.parent===cursor)document.querySelector('.game-title small').textContent='Tap '+clickChoice.to+' for '+(clickChoice.ranking.length>1?'the next piece':'the move'); else if(!summary && !(repertoirePanel && repertoirePanel.isLibrary()))document.querySelector('.game-title small').textContent=privacy.subtitle(studyContext.subtitle); }
+  function heading() { if (gameLoading) { title.textContent = 'Loading game…'; document.querySelector('[data-study-title]').textContent = privacy.title(gameLoading.title,true); document.querySelector('.game-title small').textContent = 'Loading game…'; return; }  const best = engine.lines && engine.lines[0] || engine.stats && engine.stats.inherited_eval; const evalText = settings.enabled && best ? whiteEvalText(best) : null; title.textContent = evalText && evalText !== '—' ? evalText + (engine.status==='retrying'?' · retrying':engine.status==='error'?' · interrupted':' · Leela') : settings.enabled ? 'Leela · ' + (engine.status === 'running' || engine.status === 'starting' ? 'analyzing' : engine.status) : ({moves:'Moves',info:'Study information',engine:'Leela off',chart:'',book:'Opening book',repertoire:'Repertoires'})[tab]; document.querySelector('[data-study-title]').textContent = repertoirePanel && repertoirePanel.isLibrary() ? 'Repertoires' : privacy.title(studyContext.title,!!studyContext.gameId); document.querySelector('[data-panel-tab]').hidden = !panelView; document.querySelector('[data-panel-tab]').classList.toggle('selected', !!panelView);  const marker = document.querySelector('[data-tab="repertoire"]'), summary = repertoirePanel ? privacy.text(repertoirePanel.summary()) : ''; if (marker) { marker.setAttribute('title', summary || 'Repertoires'); marker.classList.toggle('rep-covered', !!summary && !summary.startsWith('Outside') && !summary.includes('deviation')); marker.classList.toggle('rep-deviated', summary.startsWith('Outside') || summary.includes('deviation')); } if (repertoirePanel && repertoirePanel.isLibrary()) document.querySelector('.game-title small').textContent = 'Private library · on this phone'; else if (summary) { const subtitle = document.querySelector('.game-title small'); subtitle.textContent = (cursor.san || privacy.subtitle(studyContext.subtitle)) + ' · ' + summary; } if(!summary && clickChoice && clickChoice.current===cursor)document.querySelector('.game-title small').textContent=cursor.san+' · drag back to '+cursor.move.from+' to undo'; else if(!summary && clickChoice && !clickChoice.current && clickChoice.parent===cursor)document.querySelector('.game-title small').textContent='Tap '+clickChoice.to+' for '+(clickChoice.ranking.length>1?'the next piece':'the move'); else if(!summary && !(repertoirePanel && repertoirePanel.isLibrary()))document.querySelector('.game-title small').textContent=privacy.subtitle(studyContext.subtitle); }
   function closePanelView() { const refreshBook = panelView === 'bookSettings' && bookSettingsDirty; panelView = null; variationTarget = null; if (refreshBook) { bookSettingsDirty = false; requestBook(); } renderPanel(); scheduleStudySave(); }
   function clearAnalysisCaches(node) { delete node.analysisCache; node.children.forEach(clearAnalysisCaches); }
   function persistBookSettings() { saveUiSettings(); cancelBookRequest(); book.data = null; bookSettingsDirty = true; }
   function bindPanelView() {
-    panel.querySelector('[data-export-confirm]')?.addEventListener('click',()=>exportCurrent(exportOriginal,true));
-    panel.querySelector('[data-export-cancel]')?.addEventListener('click',closePanelView);
-    panel.querySelector('[data-import]')?.addEventListener('click',openImport);
-    panel.querySelector('[data-export]')?.addEventListener('click',()=>exportCurrent(false));
-    panel.querySelector('[data-export-original]')?.addEventListener('click',()=>exportCurrent(true));
     if (panelView === 'repertoireSettings') { if (repertoirePanel) repertoirePanel.bind(panel); return; }
     if (panelView === 'settings') {
       const nodes = panel.querySelector('[data-nodes]'), arrowsControl = panel.querySelector('[data-arrow-count]');
@@ -493,7 +397,7 @@
   }
   function bindMoveNode(button) { let held = false, timer = null; const stop = () => { if (timer) clearTimeout(timer); timer = null; }; button.onpointerdown = event => { if (event.pointerType === 'mouse' && event.button !== 0) return; stop(); held = false; const target = findNode(Number(button.dataset.node)); if (!target || !target.parent || target.parent.children.length < 2) return; timer = setTimeout(() => { held = true; variationTarget = target; openPanelView('variationActions'); }, 480); }; button.onpointerup = button.onpointercancel = button.onpointerleave = stop; button.oncontextmenu = event => event.preventDefault(); button.onclick = event => { if (held) { event.preventDefault(); held = false; return; } restore(findNode(Number(button.dataset.node))); }; }
   function navigationControls() { const prev=document.querySelector('[data-action="prev"]'),next=document.querySelector('[data-action="next"]'),mainline=document.querySelector('[data-action="mainline"]');prev.disabled=!cursor.parent;next.disabled=!mainlineChild(cursor);mainline.disabled=!navigationIntersection();mainline.setAttribute('aria-label',tab==='repertoire'?'Return to intersection':'Return to mainline'); }
-  function renderPanel() { if(!gameLoading && !panelView && tab==='moves' && renderedTreeRevision===treeRevision && panel.querySelector('.moves')) { panel.querySelector('.move.current')?.classList.remove('current');panel.querySelector('[data-node="'+cursor.id+'"]')?.classList.add('current');document.querySelector('.game-title small').textContent=(cursor.san || privacy.subtitle(studyContext.subtitle))+' · '+(chess.turn()==='w'?'White to move':'Black to move');heading();navigationControls();return; } if (gameLoading) { panel.innerHTML = '<div class="empty" role="status">Loading game…</div>'; heading(); for(const name of ['prev','next','mainline']) document.querySelector('[data-action="'+name+'"]').disabled = true; return; }  if (panelView === 'repertoireSettings' && repertoirePanel && repertoirePanel.hasEditorFocus()) { heading(); return; } const preserveEngine = !panelView && tab === 'engine' ? { scrollTop: panel.scrollTop, focusedPv: document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.pv : null } : null; const info = '<div class="empty"><b>Turn:</b> ' + (chess.turn() === 'w' ? 'White' : 'Black') + '<br><b>FEN:</b> ' + safe(chess.fen()) + '<br><b>Leela:</b> ' + safe(engine.status) + '<br>Paired PC credentials remain in the native shell.</div>'; document.querySelector('.game-title small').textContent = (cursor.san || privacy.subtitle(studyContext.subtitle)) + ' · ' + (engine.status === 'disconnected' ? 'PC disconnected' : chess.turn() === 'w' ? 'White to move' : 'Black to move'); panel.innerHTML = panelView ? panelViewHtml() : tab === 'engine' ? enginePanel() : tab === 'moves' ? movesPanel() : tab === 'book' ? bookPanel() : tab === 'repertoire' ? (repertoirePanel ? privacy.html(repertoirePanel.html()) : '') : tab === 'info' ? info : '<div class="chart-blank" aria-label="Chart intentionally empty"></div>'; heading(); const retry=panel.querySelector('[data-engine-retry]');if(retry)retry.onclick=()=>scheduleAnalysis(); if (panelView) bindPanelView(); if (!panelView && tab === 'repertoire' && repertoirePanel) repertoirePanel.bind(panel); if(!panelView && tab==='moves')renderedTreeRevision=treeRevision;panel.querySelectorAll('[data-node]').forEach(bindMoveNode); panel.querySelectorAll('[data-uci]').forEach(button => button.onclick = () => playUci(button.dataset.uci)); panel.querySelectorAll('[data-explorer-game]').forEach(button=>button.onclick=()=>openExplorerGame(button.dataset.explorerGame)); panel.querySelectorAll('[data-pv]').forEach(button => button.onclick = () => playUci(button.dataset.pvUci)); if (preserveEngine) { panel.scrollTop = preserveEngine.scrollTop; if (preserveEngine.focusedPv != null) { const focused = panel.querySelector('[data-pv="' + preserveEngine.focusedPv + '"]'); if (focused) { focused.focus({ preventScroll:true }); panel.scrollTop = preserveEngine.scrollTop; } } } const prev = document.querySelector('[data-action="prev"]'), next = document.querySelector('[data-action="next"]'), mainline = document.querySelector('[data-action="mainline"]'); prev.disabled = !cursor.parent; next.disabled = !mainlineChild(cursor); mainline.disabled = !navigationIntersection(); mainline.setAttribute('aria-label',tab==='repertoire'?'Return to intersection':'Return to mainline'); }
+  function renderPanel() { if(!gameLoading && !panelView && tab==='moves' && renderedTreeRevision===treeRevision && panel.querySelector('.moves')) { panel.querySelector('.move.current')?.classList.remove('current');panel.querySelector('[data-node="'+cursor.id+'"]')?.classList.add('current');document.querySelector('.game-title small').textContent=(cursor.san || privacy.subtitle(studyContext.subtitle))+' · '+(chess.turn()==='w'?'White to move':'Black to move');heading();navigationControls();return; } if (gameLoading) { panel.innerHTML = '<div class="empty" role="status">Loading game…</div>'; heading(); for(const name of ['prev','next','mainline']) document.querySelector('[data-action="'+name+'"]').disabled = true; return; }  if (panelView === 'repertoireSettings' && repertoirePanel && repertoirePanel.hasEditorFocus()) { heading(); return; } const preserveEngine = !panelView && tab === 'engine' ? { scrollTop: panel.scrollTop, focusedPv: document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.pv : null } : null; const info = '<div class="empty"><b>Turn:</b> ' + (chess.turn() === 'w' ? 'White' : 'Black') + '<br><b>FEN:</b> ' + safe(chess.fen()) + '<br><b>Leela:</b> ' + safe(engine.status) + '<br>Paired PC credentials remain in the native shell.</div>'; document.querySelector('.game-title small').textContent = (cursor.san || privacy.subtitle(studyContext.subtitle)) + ' · ' + (engine.status === 'disconnected' ? 'PC disconnected' : chess.turn() === 'w' ? 'White to move' : 'Black to move'); panel.innerHTML = panelView ? panelViewHtml() : tab === 'engine' ? enginePanel() : tab === 'moves' ? movesPanel() : tab === 'book' ? bookPanel() : tab === 'repertoire' ? (repertoirePanel ? privacy.html(repertoirePanel.html()) : '') : tab === 'info' ? info : '<div class="chart-blank" aria-label="Chart intentionally empty"></div>'; heading(); const retry=panel.querySelector('[data-engine-retry]');if(retry)retry.onclick=()=>scheduleAnalysis(); if (panelView) bindPanelView(); if (!panelView && tab === 'repertoire' && repertoirePanel) repertoirePanel.bind(panel); if(!panelView && tab==='moves')renderedTreeRevision=treeRevision;panel.querySelectorAll('[data-node]').forEach(bindMoveNode); panel.querySelectorAll('[data-uci]').forEach(button => button.onclick = () => playUci(button.dataset.uci)); panel.querySelectorAll('[data-pv]').forEach(button => button.onclick = () => playUci(button.dataset.pvUci)); if (preserveEngine) { panel.scrollTop = preserveEngine.scrollTop; if (preserveEngine.focusedPv != null) { const focused = panel.querySelector('[data-pv="' + preserveEngine.focusedPv + '"]'); if (focused) { focused.focus({ preventScroll:true }); panel.scrollTop = preserveEngine.scrollTop; } } } const prev = document.querySelector('[data-action="prev"]'), next = document.querySelector('[data-action="next"]'), mainline = document.querySelector('[data-action="mainline"]'); prev.disabled = !cursor.parent; next.disabled = !mainlineChild(cursor); mainline.disabled = !navigationIntersection(); mainline.setAttribute('aria-label',tab==='repertoire'?'Return to intersection':'Return to mainline'); }
   function findNode(id) { if(nodeIndex.has(id))return nodeIndex.get(id);const pending=[root];while(pending.length){const n=pending.pop();nodeIndex.set(n.id,n);pending.push(...n.children);}return nodeIndex.get(id) || null; }
   function forgetBranch(node) { const pending=[node];while(pending.length){const n=pending.pop();nodeIndex.delete(n.id);dirtyBranches.delete(n.id);pending.push(...n.children);} }
   function mainlineIntersection(node) { for (let branch = node; branch && branch.parent; branch = branch.parent) if (mainlineChild(branch.parent) !== branch) return branch.parent; return null; }
@@ -601,7 +505,7 @@
   function deleteCurrentBranch() { if (!cursor.parent) return; const parent = cursor.parent; parent.children = parent.children.filter(child => child !== cursor); forgetBranch(cursor);changedBranch(parent);parent.selectedChild = mainlineChild(parent); restore(parent); }
   function promoteVariation() { const target = variationTarget, parent = target && target.parent; if (!parent) return closePanelView(); const index = parent.children.indexOf(target); if (index > 0) { parent.children.splice(index, 1); parent.children.unshift(target); changedBranch(parent); } parent.selectedChild = target; variationTarget = null; panelView = null; saveStudyNow(); renderPanel(); }
   function deleteVariation() { const target = variationTarget, parent = target && target.parent; if (!parent) return closePanelView(); const containsCursor = (() => { for (let node = cursor; node; node = node.parent) if (node === target) return true; return false; })(); parent.children = parent.children.filter(child => child !== target); forgetBranch(target);changedBranch(parent);parent.selectedChild = mainlineChild(parent); variationTarget = null; panelView = null; if (containsCursor) restore(parent); else { saveStudyNow(); renderPanel(); } }
-  function resetStudy() { if(!saveStudyNow())return; const editedPosition = !!studyContext.editedPosition; stopGameLoad(); if(repertoirePanel)repertoirePanel.setActive(analysisActive,false); restoring = true; resetTransport(); resetRoot(START_FEN, { temporary:workspaceId!=='analysis',source:studyContext.source, gameId:null, editedPosition, initialFen:START_FEN, title:editedPosition?'Edited position':'Local analysis', subtitle:'Starting position' }); wrap.classList.remove('orientation-black'); wrap.classList.add('orientation-white'); if (ground.state.orientation === 'black') ground.toggleOrientation(); sync(null); restoring = false; saveStudyNow(); onPositionChanged(); }
+  function resetStudy() { if(!saveStudyNow())return; const editedPosition = !!studyContext.editedPosition; stopGameLoad(); if(repertoirePanel)repertoirePanel.setActive(analysisActive,false); restoring = true; resetTransport(); resetRoot(START_FEN, { gameId:null, editedPosition, initialFen:START_FEN, title:editedPosition?'Edited position':'Local analysis', subtitle:'Starting position' }); wrap.classList.remove('orientation-black'); wrap.classList.add('orientation-white'); if (ground.state.orientation === 'black') ground.toggleOrientation(); sync(null); restoring = false; saveStudyNow(); onPositionChanged(); }
   function showMenu() { openPanelView('study'); }
 
   function returnToSavedBoard() {
@@ -625,7 +529,7 @@
       close:(fen,black)=>{
         document.getElementById('app').hidden=false;
         if(fen) {
-          restoring=true;resetRoot(fen,{temporary:workspaceId!=='analysis',source:studyContext.source,gameId:null,editedPosition:workspaceId==='analysis',initialFen:fen,title:'Edited position',subtitle:'Custom setup'});
+          restoring=true;resetRoot(fen,{gameId:null,editedPosition:true,initialFen:fen,title:'Edited position',subtitle:'Custom setup'});
           wrap.classList.toggle('orientation-black',black);wrap.classList.toggle('orientation-white',!black);
           if(black !== (ground.state.orientation==='black'))ground.toggleOrientation();
           tab='engine';document.querySelectorAll('.tabs [data-tab]').forEach(b=>b.classList.toggle('selected',b.dataset.tab===tab));
@@ -641,36 +545,23 @@
 
   window.InstinctaZero = window.InstinctaZero || {};
   window.InstinctaZero.openBoardEditor = openBoardEditor;
-  window.InstinctaZero.showPersistentAnalysis = () => {importer?.hide();if(workspaceId!=='analysis')switchWorkspace('analysis');};
-  window.InstinctaZero.openGameImport = openImport;
-  window.InstinctaZero.onNativeGameText = raw => {try{const data=typeof raw==='string'?JSON.parse(raw):raw;openImport();if(data.error)importer.error(data.error);else importer.load(data.text,data.name);}catch(_){saveNotice('File could not be read.');}};
-  window.InstinctaZero.onNativeDocumentStatus = message => saveNotice(message);
-  window.InstinctaZero.onNativeExplorerGame = async (id,raw) => {
-    if(id!==explorerGameRequest)return;
-    explorerGameRequest=null;const source=explorerGameSource;
-    try{const data=typeof raw==='string'?JSON.parse(raw):raw;if(data.event==='error' || !data.pgn)throw Error();
-      const parsed=await window.InstinctaPgn.parse(data.pgn,Chess,'en',()=>workspaceId!==source.workspace || (cursor.id!==source.node || cursor.fen!==source.fen));
-      if(workspaceId!==source.workspace || (cursor.id!==source.node || cursor.fen!==source.fen))return;
-      if(parsed.issues.length)throw Error();openTemporary(parsed,source,'Explorer game');
-    }catch(_){saveNotice('Explorer game could not be opened completely. Analysis is unchanged.');}
-  };
   window.InstinctaZero.onNativeAnalysis = function (id, payloadJson) {
     if(id!==engine.requestId)return;let payload;
     try{payload=typeof payloadJson==='string'?JSON.parse(payloadJson):payloadJson;}catch(_){return;}
     const data=payload.data || payload;
     if(payload.event==='stream-ended'){recoverAnalysis();return;}
     if(payload.event==='engine-error' || payload.event==='error' || data.error){
-      if(studyContext.gameId && Number(payload.code || data.code) === 404){studyContext.gameId=null;scheduleAnalysis();return;}
+      if(studyContext.gameId && Number(payload.code || data.code) === 404){resetStudy();return;}
       if(payload.retryable===true || data.retryable===true){recoverAnalysis();return;}
       stopEngineTransport();engine.error=data.error || payload.message || 'Engine unavailable';engine.status='error';queueAnalysisRender();return;
     }
     if(payload.event==='done'){
-      if(data.final_snapshot){const snapshot=coherentAnalysisSnapshot(data.final_snapshot,settings.nodes);if(snapshot && (snapshot.lines.length || snapshot.root_move_stats?.length)){rememberEvidence(snapshot);applyAnalysisSnapshot(snapshot,'done',false);engine.received=true;queueAnalysisRender(true);}}
+      if(data.final_snapshot){const snapshot=coherentAnalysisSnapshot(data.final_snapshot,settings.nodes);if(snapshot && snapshot.lines.length){cursor.analysisCache=snapshot;applyAnalysisSnapshot(snapshot,'done',false);engine.received=true;queueAnalysisRender(true);}}
       if(data.cancelled || (!engine.received && chess.moves().length)){recoverAnalysis();return;}
       stopEngineTransport();engine.status='done';queueAnalysisRender();return;
     }
     watchAnalysis();
-    if(data.lines){const snapshot=coherentAnalysisSnapshot(data,settings.nodes);if(snapshot && (snapshot.lines.length || snapshot.root_move_stats?.length)){rememberEvidence(snapshot);applyAnalysisSnapshot(snapshot,'running',false);engine.received=true;queueAnalysisRender(true);}else if(data.progress){engine.progress=data.progress;queueAnalysisRender();}}
+    if(data.lines){const snapshot=coherentAnalysisSnapshot(data,settings.nodes);if(snapshot && snapshot.lines.length){cursor.analysisCache=snapshot;applyAnalysisSnapshot(snapshot,'running',false);engine.received=true;queueAnalysisRender(true);}else if(data.progress){engine.progress=data.progress;queueAnalysisRender();}}
     else if(data.progress){engine.progress=data.progress;queueAnalysisRender();}
   };
   window.InstinctaZero.onNativeExplorer = function (id, payloadJson) {
@@ -692,23 +583,23 @@
     renderActivePanel();
   };
   window.InstinctaZero.onNativeConnectionState = function () { window.InstinctaZero.refreshDisplayPrivacy(); if (!analysisActive) return; if (settings.enabled) scheduleAnalysis(); if (tab === 'book') requestBook(); };
-  window.InstinctaZero.refreshDisplayPrivacy = function () { if(privacy.refresh()){repertoirePanel?.privacyChanged?.();renderWorkspaceTabs();importer?.refresh();renderPanel();} };
-  window.InstinctaZero.onAccountChanged = function () { stopGameLoad();studyContext.gameId=null;for(const state of workspaces.values())state.studyContext.gameId=null;onPositionChanged(); };
+  window.InstinctaZero.refreshDisplayPrivacy = function () { if(privacy.refresh()){repertoirePanel?.privacyChanged?.();renderPanel();} };
+  window.InstinctaZero.onAccountChanged = function () { if (studyContext.gameId || gameLoading) resetStudy(); };
   window.InstinctaZero.loadArchivedGame = function (payloadJson) { let payload; try { payload = typeof payloadJson === 'string' ? JSON.parse(payloadJson) : payloadJson; } catch (_) { return false; } return installArchivedGame(payload); };
   window.InstinctaZero.persistStudy = saveStudyNow;
   window.InstinctaZero.setAnalysisActive = function (active) { clearClickChoice(); const next = !!active; if (next === analysisActive) return; analysisActive = next; if(repertoirePanel)repertoirePanel.setActive(next && !gameLoading && !editingPosition()); if (!analysisActive) { resetTransport(); if (engine.status === 'starting' || engine.status === 'running') engine.status = 'idle'; renderActivePanel(); return; } if(gameLoading || editingPosition())return; restoreCachedAnalysis(); scheduleAnalysis(); if (tab === 'book') requestBook(); };
-  window.InstinctaZero.handleAndroidBack = function () { if(importer?.isOpen()){importer.hide();native()?.leaveGame?.('games');return true;} if(positionEditor?.isOpen()) { positionEditor.close(); return true; } if(gameLoading) { stopGameLoad();if(repertoirePanel)repertoirePanel.setActive(analysisActive,false);onPositionChanged();return true; } if (promotionPicker) { promotionPicker.querySelector('[data-cancel]').click(); return true; } if (panelView) { closePanelView(); return true; } if (tab === 'repertoire' && repertoirePanel && repertoirePanel.back()) return true; if(workspaceId!=='analysis'){returnFromGame();return true;} return false; };
+  window.InstinctaZero.handleAndroidBack = function () { if(editingPosition()) { positionEditor.close(); return true; } if(gameLoading) { stopGameLoad();if(repertoirePanel)repertoirePanel.setActive(analysisActive,false);onPositionChanged();return true; } if (promotionPicker) { promotionPicker.querySelector('[data-cancel]').click(); return true; } if (panelView) { closePanelView(); return true; } if (tab === 'repertoire' && repertoirePanel && repertoirePanel.back()) return true; return false; };
 
   function animatePanel() { if (panel.animate && !matchMedia('(prefers-reduced-motion: reduce)').matches) panel.animate([{opacity:.5,transform:'translateY(4px)'},{opacity:1,transform:'translateY(0)'}], {duration:120}); }
   function setTab(next) { if (gameLoading) { if(['info','moves','engine','chart','book','repertoire'].includes(next))gameLoading.tab = next;return; }  if (repertoirePanel && repertoirePanel.isLibrary() && next !== 'repertoire') repertoirePanel.back(); if (!['info','moves','engine','chart','book','repertoire'].includes(next)) return; if (tab === 'book' && next !== 'book') cancelBookRequest(); const refreshBook = panelView === 'bookSettings' && bookSettingsDirty; panelView = null; variationTarget = null; tab = next; animatePanel(); document.querySelectorAll('.tabs [data-tab]').forEach(item => item.classList.toggle('selected', item.dataset.tab === tab)); renderPanel(); scheduleStudySave(); if (tab === 'repertoire' && repertoirePanel) repertoirePanel.refresh(); if (tab === 'book' || refreshBook) { bookSettingsDirty = false; if (tab === 'book') requestBook(); } }
   function stopActiveNavigation() { if (activeNavigationStop) activeNavigationStop(); }
-  function bindRepeatingNavigation(button, target, previous = false) { let delay = null, repeat = null, active = false; const stop = () => { active = false; if (delay !== null) clearTimeout(delay); if (repeat !== null) clearInterval(repeat); delay = repeat = null; if (activeNavigationStop === stop) activeNavigationStop = null; button.blur(); }; const go = () => { const next = target(); if (!next) { stop(); return false; } if(previous && clickCorrection()){const move=clickCorrection();undoDestinationGuess(move.to,move.from);}else restore(next); button.blur(); return true; }; button.onpointerdown = event => { if (button.disabled) return; event.preventDefault(); stopActiveNavigation(); activeNavigationStop = stop; active = true; if (button.setPointerCapture) { try { button.setPointerCapture(event.pointerId); } catch (_) {} } if (!go()) return; delay = setTimeout(() => { if (active) repeat = setInterval(go, 60); }, 150); }; button.onpointerup = button.onpointercancel = button.onlostpointercapture = stop; button.onclick = event => {event.preventDefault();if(event.detail===0)go();}; }
+  function bindRepeatingNavigation(button, target) { let delay = null, repeat = null, active = false; const stop = () => { active = false; if (delay !== null) clearTimeout(delay); if (repeat !== null) clearInterval(repeat); delay = repeat = null; if (activeNavigationStop === stop) activeNavigationStop = null; button.blur(); }; const go = () => { const next = target(); if (!next) { stop(); return false; } restore(next); button.blur(); return true; }; button.onpointerdown = event => { if (button.disabled) return; event.preventDefault(); stopActiveNavigation(); activeNavigationStop = stop; active = true; if (button.setPointerCapture) { try { button.setPointerCapture(event.pointerId); } catch (_) {} } if (!go()) return; delay = setTimeout(() => { if (active) repeat = setInterval(go, 60); }, 150); }; button.onpointerup = button.onpointercancel = button.onlostpointercapture = stop; button.onclick = event => event.preventDefault(); }
   document.querySelectorAll('.tabs [data-tab]').forEach(button => button.onclick = () => setTab(button.dataset.tab));
   document.querySelector('[data-panel-tab]').onclick = closePanelView;
   document.addEventListener('keydown', event => { if (event.key !== 'Escape') return; if (promotionPicker) promotionPicker.querySelector('[data-cancel]').click(); else if (panelView) closePanelView(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) { clearClickChoice();stopActiveNavigation(); saveStudyNow(); resetTransport(); } else if (analysisActive && settings.enabled) scheduleAnalysis(); }); window.addEventListener('blur', stopActiveNavigation); window.addEventListener('pagehide', () => { clearClickChoice();stopActiveNavigation(); saveStudyNow(); resetTransport(); });
   document.querySelector('.back').onclick = () => { if (window.InstinctaZero.handleAndroidBack()) return; if (native() && native().leaveAnalysis) native().leaveAnalysis(); };
-  document.querySelectorAll('.actions button').forEach(button => { const action = button.dataset.action; if (action === 'flip') button.onclick = flipBoard; else if (action === 'mainline') button.onclick = returnToMainline; else if (action === 'prev' || action === 'next') bindRepeatingNavigation(button, () => action === 'prev' ? cursor.parent : mainlineChild(cursor), action === 'prev'); else button.onclick = () => { const target = action === 'settings' ? (tab === 'book' ? 'bookSettings' : tab === 'repertoire' ? 'repertoireSettings' : 'settings') : 'study'; if (panelView === target) closePanelView(); else openPanelView(target); }; });
+  document.querySelectorAll('.actions button').forEach(button => { const action = button.dataset.action; if (action === 'flip') button.onclick = flipBoard; else if (action === 'mainline') button.onclick = returnToMainline; else if (action === 'prev' || action === 'next') bindRepeatingNavigation(button, () => action === 'prev' ? cursor.parent : mainlineChild(cursor)); else button.onclick = () => { const target = action === 'settings' ? (tab === 'book' ? 'bookSettings' : tab === 'repertoire' ? 'repertoireSettings' : 'settings') : 'study'; if (panelView === target) closePanelView(); else openPanelView(target); }; });
   // An overlay only: never change Chessground's pieces, hit targets, or arrow geometry.
   const repertoireMarker = document.createElement('div');
   repertoireMarker.className = 'repertoire-book-marker';
@@ -749,6 +640,5 @@
     settings:() => openPanelView('repertoireSettings'), closeSettings:closePanelView
   }) : null;
   window.InstinctaZero.openRepertoires = id => { window.InstinctaZero.setAnalysisActive(true); if(gameLoading) { gameLoading.tab = 'repertoire';gameLoading.repertoireId = id;return; } if(repertoirePanel)repertoirePanel.openLibrary(id); };
-  importer=window.createGameImporter({Chess,privacy,native,open:openTemporary,close:()=>native()?.leaveGame?.('games')});
-  loadUiSettings(); loadStudyState();workspaces.set('analysis',captureWorkspace());renderWorkspaceTabs(); document.querySelectorAll('.tabs [data-tab]').forEach(item => item.classList.toggle('selected', item.dataset.tab === tab)); renderPanel(); refreshBoardBounds();
+  loadUiSettings(); loadStudyState(); document.querySelectorAll('.tabs [data-tab]').forEach(item => item.classList.toggle('selected', item.dataset.tab === tab)); renderPanel(); refreshBoardBounds();
 }());

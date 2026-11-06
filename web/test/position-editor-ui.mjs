@@ -14,7 +14,7 @@ try{for(const [width,height] of [[360,640],[390,780],[412,844]]){
  await page.addInitScript(()=>{
   let seq=0;window.__test={requests:[],clipboard:'4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 17'};
   window.InstinctaZeroNative={getUiSettings:()=>'{"leelaEnabled":true}',saveUiSettings:()=>{},cancelAnalysis:()=>{},cancelRepertoireLookup:()=>{},
-   getStudyState:()=>localStorage.getItem(localStorage.getItem('positionActive')==='true'?'position':'source')||JSON.stringify({v:1,initialFen:new window.InstinctaZeroChessRules.Chess().fen(),gameId:'Editor01',title:'Original game – Black',subtitle:'Completed game',tab:'moves',tree:[{u:'e2e4',c:[{u:'e7e5',c:[]}]}],cursor:['e2e4','e7e5']}),
+   getStudyState:()=>localStorage.getItem(localStorage.getItem('positionActive')==='true'?'position':'source')||'{}',
    getSourceStudyState:()=>localStorage.getItem('source')||'{}',
    saveStudyState:raw=>{const position=!!JSON.parse(raw).editedPosition;localStorage.setItem(position?'position':'source',raw);localStorage.setItem('positionActive',String(position));return true},
    getEditorDraft:()=>localStorage.getItem('draft')||'{}',saveEditorDraft:raw=>{localStorage.setItem('draft',raw);return true},
@@ -33,8 +33,7 @@ try{for(const [width,height] of [[360,640],[390,780],[412,844]]){
  const draft=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('draft')).fen);
  const pieces=()=>page.evaluate(()=>window.InstinctaZeroPosition.parse(JSON.parse(localStorage.getItem('draft')).fen).pieces);
  const choose=async piece=>{const button=page.getByRole('button',{name:piece,exact:true});if(await button.getAttribute('aria-pressed')!=='true')await button.tap();};
- // Existing saved Analysis remains durable, including legacy game metadata.
- // Newly opened archive games now have separate temporary tabs.
+ await page.evaluate(()=>window.InstinctaZero.loadArchivedGame({id:'Editor01',moves:[{uci:'e2e4'},{uci:'e7e5'}],white:{name:'Original game'},black:{name:'Black'}}));
  await page.evaluate(()=>window.InstinctaZero.setAnalysisActive(true));
  await page.getByRole('button',{name:'More',exact:true}).tap();await page.getByRole('button',{name:'Board editor',exact:true}).tap();
  const original=await page.evaluate(()=>localStorage.getItem('source'));

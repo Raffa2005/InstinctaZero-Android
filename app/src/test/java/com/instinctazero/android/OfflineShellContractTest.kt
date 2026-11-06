@@ -16,8 +16,8 @@ class OfflineShellContractTest {
     @Test
     fun pendingNewGameDoesNotActivateOldBoardAndLateHttpDeliveryIsRevoked() {
         val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
-        assertTrue(activity.contains("if (webPageLoaded && pendingArchivedGame == null && !pendingBoardEditor && !pendingImportMenu) setAnalysisActive(true)"))
-        assertTrue(activity.contains("setAnalysisActive(navigation.screen == ShellScreen.ANALYSIS && pendingArchivedGame == null && !pendingBoardEditor && !pendingImportMenu)"))
+        assertTrue(activity.contains("if (webPageLoaded && pendingArchivedGame == null && !pendingBoardEditor) setAnalysisActive(true)"))
+        assertTrue(activity.contains("setAnalysisActive(navigation.screen == ShellScreen.ANALYSIS && pendingArchivedGame == null && !pendingBoardEditor)"))
         assertTrue(activity.contains("archivedGameRequest.getAndSet(pending)?.cancel()"))
         assertTrue(activity.contains("archivedGameRequest.getAndSet(null)?.cancel()"))
         val worker = activity.substringAfter("private fun loadArchivedGameOnWorker").substringBefore("private fun executeJson")
