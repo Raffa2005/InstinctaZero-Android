@@ -66,11 +66,11 @@ test('destination gestures preserve selection, cancel movement/multitouch and ma
 async function controller(fen=new Chess().fen()) {
   const source=await readFile(new URL('../../app/src/main/assets/analysis/analysis.js',import.meta.url),'utf8');
   const take=(name,end)=>source.slice(source.indexOf('  function '+name),source.indexOf(end,source.indexOf('  function '+name)+1));
-  const functions=['color','history','legalMoves','legalDests','sync','mainlineChild','remember','commitMove','clearClickChoice','recentClickHistory','destinationTap','clickCorrection'].map(name=>take(name,'\n  function ')).join('\n')+take('undoDestinationGuess','\n  if(window.InstinctaClickChess)');
+  const functions=['color','history','legalMoves','legalDests','sync','mainlineChild','remember','commitMove','clearClickChoice','recentClickHistory','rankDestination','destinationTap','clickCorrection'].map(name=>take(name,'\n  function ')).join('\n')+take('undoDestinationGuess','\n  if(window.InstinctaClickChess)');
   const make=new Function('Chess','model','fen',`
     const chess=new Chess(fen),root={id:0,fen:chess.fen(),children:[],parent:null};
     let cursor=root,legalCache=null,clickChoice=null,clickInput=null,nodeId=0;
-    const dirtyBranches=new Map(),nodeIndex=new Map([[0,root]]),settings={nodes:1000},engine={},saves=[];
+    const positionEvidence=new Map(),dirtyBranches=new Map(),nodeIndex=new Map([[0,root]]),settings={nodes:1000},engine={},saves=[];
     const ranks=[];let promotion=null;const window={InstinctaClickChess:{ranker:{rank:(...args)=>{ranks.push(args);return model.rank(...args);}}}};
     const ground={set:()=>{},cancelMove:()=>{}},loadFailed=false,gameLoading=false,editingPosition=()=>false,
       heading=()=>{},onPositionChanged=()=>{},projectAnalysisToChild=()=>null,

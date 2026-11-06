@@ -4,7 +4,7 @@ export const ranker = OriginRanker.fromBinary(modelBytes);
 
 // The app supplies legal moves and owns its study tree. Keep upstream Chessground
 // untouched: intercept destination-only gestures before its piece/drag handlers.
-export function bindDestinationInput({element, ground, enabled, canTap, tap, correction, undo, clear}) {
+export function bindDestinationInput({element, ground, enabled, canTap, tap, correction, undo, clear, keepOutside = () => false}) {
   let gesture = null;
   const cancel = () => {
     if (gesture && gesture.correction) ground.cancelMove();
@@ -53,8 +53,8 @@ export function bindDestinationInput({element, ground, enabled, canTap, tap, cor
     else if (!pending.moved && square === pending.square && canTap(square)) tap(square);
   }, {capture:true, passive:false});
   element.addEventListener('touchcancel', () => { cancel(); clear(); }, true);
-  document.addEventListener('pointerdown', event => { if (!element.contains(event.target)) { cancel(); clear(); } }, true);
+  document.addEventListener('pointerdown', event => { if (!element.contains(event.target) && !keepOutside(event.target)) { cancel(); clear(); } }, true);
   // Keyboard/assistive-technology activations also end a correction session.
-  document.addEventListener('click', event => { if (!element.contains(event.target)) { cancel(); clear(); } }, true);
+  document.addEventListener('click', event => { if (!element.contains(event.target) && !keepOutside(event.target)) { cancel(); clear(); } }, true);
   return {cancel};
 }

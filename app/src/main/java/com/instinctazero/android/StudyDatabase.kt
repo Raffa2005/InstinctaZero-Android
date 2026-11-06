@@ -86,7 +86,7 @@ internal class StudyDatabase(private val folder:File,private val legacy:SharedPr
     /** Compatibility for callers with a complete v1 snapshot; the old preferences are
      * never made a competing writable authority after migration. */
     @Synchronized fun saveLegacy(raw:String?):Boolean=runCatching {
-        val state=JSONObject(requireNotNull(raw));require(state.getInt("v")==1)
+        val state=JSONObject(requireNotNull(raw));require(state.getInt("v")==1 && !state.optBoolean("temporary"))
         val branches=JSONArray();var id=0
         val pending=ArrayDeque<Pair<Int,JSONArray>>();pending.addLast(0 to state.getJSONArray("tree"))
         while(pending.isNotEmpty()) {
@@ -106,7 +106,7 @@ internal class StudyDatabase(private val folder:File,private val legacy:SharedPr
      * the previous tree and its cursor intact and the JS pending edit available to retry. */
     @Synchronized fun save(raw:String):String=try {
         val request=JSONObject(raw);val meta=request.getJSONObject("meta")
-        require(meta.getInt("v")==2 && (!meta.optBoolean("editedPosition") || meta.isNull("gameId")))
+        require(meta.getInt("v")==2 && !meta.optBoolean("temporary") && (!meta.optBoolean("editedPosition") || meta.isNull("gameId")))
         val slot=slot(meta)
         var revision=0L
         open().use {db ->

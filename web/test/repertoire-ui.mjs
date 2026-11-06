@@ -194,6 +194,10 @@ try {
     await page.getByText('No repertoire selected.').waitFor();
     assert.equal(await page.locator('.repertoire-book-marker').isVisible(),false);
     await page.reload(); await page.evaluate(() => window.InstinctaZero.setAnalysisActive(true));
+    // The game tab is transient; explicitly reopen it to test its remembered
+    // repertoire selection, rather than expecting it to overwrite saved Analysis.
+    await page.evaluate(()=>window.InstinctaZero.loadArchivedGame({id:'abcdEF12',moves:[{uci:'e2e4'},{uci:'c7c5'},{uci:'g1f3'}],white:{name:'White'},black:{name:'Black'}}));
+    await page.getByRole('button',{name:'Repertoires',exact:true}).tap();
     await page.getByText('No repertoire selected.').waitFor();
     await page.getByRole('button',{name:'Choose repertoires',exact:true}).tap();
     await page.getByRole('checkbox',{name:/Queen/}).tap();
@@ -208,6 +212,15 @@ try {
     await page.getByRole('alert').waitFor();
     assert.equal(await page.evaluate(()=>window.__test.requests.length),beforeFailure,'download error stays visible');
     assert.equal(await page.locator('.rep-card.checked').count(),1);
+    // Restart durability belongs to Analysis. Install an explicit synthetic saved
+    // Analysis fixture for the editor/Undo tests below; imported games must not save.
+    await page.evaluate(()=>{
+      const state={v:1,initialFen:new window.InstinctaZeroChessRules.Chess().fen(),title:'Local analysis',subtitle:'Starting position',gameId:null,tab:'repertoire',black:false,cursor:['e2e4','c7c5','g1f3'],tree:[{u:'e2e4',c:[{u:'c7c5',c:[{u:'g1f3',c:[]}]}]}]};
+      const settings=JSON.parse(localStorage.getItem('repertoires'));settings.analysis=['qga'];localStorage.setItem('repertoires',JSON.stringify(settings));
+      window.InstinctaZeroNative.saveStudyState=()=>true;localStorage.setItem('study',JSON.stringify(state));
+    });
+    await page.reload();await page.evaluate(()=>window.InstinctaZero.setAnalysisActive(true));
+    await page.locator('[data-action=settings]').tap();
     // Terminal coverage -> a real board move -> add to one repertoire, then a whole line.
     await page.evaluate(()=>{window.__test.extensionMode=true;window.__test.failDownload=false;localStorage.setItem('extensionMode','true');});
     await page.getByRole('checkbox',{name:/Queen/}).tap();

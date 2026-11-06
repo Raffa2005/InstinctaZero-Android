@@ -21,6 +21,22 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk=[35], qualifiers="mdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class WorkspaceMenuTest {
+    @Test fun bottomSectionsAndAnalysisLandingHaveIndependentDestinations() {
+        val context=RuntimeEnvironment.getApplication();val menu=WorkspaceMenu(context)
+        for((width,height) in listOf(360 to 584,390 to 724,412 to 788)) {
+            val targets=mutableListOf<ShellScreen>();val actions=mutableListOf<String>()
+            val page=android.widget.LinearLayout(context).apply {
+                orientation=android.widget.LinearLayout.VERTICAL
+                addView(menu.analysisHome({actions.add("analysis")},{actions.add("editor")},{actions.add("import")}),android.widget.LinearLayout.LayoutParams(-1,0,1f))
+                addView(menu.bottomSections(ShellScreen.HOME){targets.add(it)})
+            }
+            snapshot(page,"bottom-sections",width,height)
+            val clickable=views(page).filter {it.isClickable};assertEquals(7,clickable.size)
+            clickable.forEach {assertTrue(it.height>=44);it.performClick()}
+            assertEquals(listOf("analysis","editor","import"),actions)
+            assertEquals(listOf(ShellScreen.HOME,ShellScreen.GAMES,ShellScreen.REPERTOIRES,ShellScreen.PROFILE),targets)
+        }
+    }
     private fun views(view: View): List<View> = listOf(view) + if(view is ViewGroup)(0 until view.childCount).flatMap { views(view.getChildAt(it)) } else emptyList()
     private fun snapshot(view: View,name: String,width: Int,height: Int) {
         view.measure(View.MeasureSpec.makeMeasureSpec(width,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(height,View.MeasureSpec.EXACTLY))

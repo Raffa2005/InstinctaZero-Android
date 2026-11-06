@@ -32,6 +32,8 @@ import android.widget.ListView
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
+import android.provider.OpenableColumns
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import androidx.webkit.WebSettingsCompat
@@ -92,7 +94,53 @@ class MainActivity : ComponentActivity() {
     private var archiveRefreshedThisSession = false
     private var archiveMessage: String? = null
     private var archiveAdapter: GameArchiveAdapter? = null
+    private var archiveScrollPosition = 0
+    private var archiveScrollOffset = 0
     private var pendingArchivedGame: JSONObject? = null
+    private var pendingImport: JSONObject? = null
+    private var pendingImportMenu = false
+    private val documentExecutor = Executors.newSingleThreadExecutor()
+    private var documentGeneration = 0
+    private var exportText: String? = null
+    private val openDocument = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if(uri!=null) {
+            val generation=++documentGeneration
+            documentExecutor.execute {
+                val result=runCatching {
+                    val name=contentResolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME),null,null,null)?.use {if(it.moveToFirst())it.getString(0) else null} ?: "PGN file"
+                    val text=contentResolver.openInputStream(uri)?.use(GameDocuments::read) ?: error("File unavailable")
+                    JSONObject().put("name",name.take(160)).put("text",text)
+                }.getOrElse {JSONObject().put("error","File could not be read. Use UTF-8 or UTF-16 PGN, at most 8 MiB, or paste its text.")}
+                runOnUiThread {if(generation==documentGeneration && !isDestroyed){pendingImport=result;showImportScreen()}}
+            }
+        }
+    }
+    private val saveDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("application/x-chess-pgn")) { uri ->
+        val text=exportText;exportText=null
+        if(uri!=null && text!=null)documentExecutor.execute {
+            val ok=runCatching {contentResolver.openOutputStream(uri)?.use {it.write(text.toByteArray(Charsets.UTF_8));it.flush()} ?: error("File unavailable")}.isSuccess
+            runOnUiThread {documentStatus(if(ok)"PGN exported." else "PGN export failed. Try another location.")}
+        }
+    }
+    internal fun choosePgnFile() {openDocument.launch(arrayOf("*/*"))}
+    internal fun exportPgn(text:String,name:String) {
+        if(exportText!=null){documentStatus("Finish or cancel the current export first.");return}
+        if(runCatching {GameDocuments.checkedText(text)}.isFailure){documentStatus("Export exceeds 8 MiB. Nothing was written.");return}
+        exportText=text;saveDocument.launch(if(name=="original-game.pgn")name else "analysis-game.pgn")
+    }
+    private fun documentStatus(message:String) {
+        if(!isDestroyed && webPageLoaded)webView.evaluateJavascript("window.InstinctaZero.onNativeDocumentStatus(${JSONObject.quote(message)});void 0;",null)
+    }
+    private fun showImportScreen() {
+        pendingImportMenu=true;showAnalysisScreen(false)
+        if(webPageLoaded)deliverImport()
+    }
+    private fun deliverImport() {
+        pendingImportMenu=false
+        val payload=pendingImport;pendingImport=null
+        webView.evaluateJavascript(if(payload==null)"window.InstinctaZero.openGameImport();void 0;" else "window.InstinctaZero.onNativeGameText(${JSONObject.quote(payload.toString())});void 0;",null)
+        setAnalysisActive(true)
+    }
     private val iconTypeface by lazy {
         Typeface.createFromAsset(assets, "analysis/fonts/fontawesome-webfont.ttf")
     }
@@ -218,6 +266,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        documentGeneration++;documentExecutor.shutdown()
         if (::nativeBridge.isInitialized) nativeBridge.close()
         if (::webView.isInitialized) {
             webView.removeJavascriptInterface(NativeAnalysisBridge.JS_OBJECT)
@@ -292,6 +341,7 @@ class MainActivity : ComponentActivity() {
         nativeBridge.refreshSession()
     }
 
+    internal fun returnToGames() = showGamesScreen()
     private fun showGamesScreen() {
         cancelPairingIfActive("left profile")
         if (!archiveCacheLoaded) {
@@ -307,14 +357,14 @@ class MainActivity : ComponentActivity() {
         if (!archiveRefreshedThisSession) refreshArchive()
     }
 
-    private fun showAnalysisScreen() {
-        releaseExtraArchiveRows()
+    private fun showAnalysisScreen(persistent: Boolean = true) {
         cancelPairingIfActive("left profile")
         navigation.showAnalysis()
         archiveLoading = false
         nativeLayer.visibility = View.GONE
         webView.visibility = if(privacyRefreshPending) View.INVISIBLE else View.VISIBLE
-        if (webPageLoaded && pendingArchivedGame == null && !pendingBoardEditor) setAnalysisActive(true)
+        if(webPageLoaded && persistent)webView.evaluateJavascript("window.InstinctaZero.showPersistentAnalysis();void 0;",null)
+        if (webPageLoaded && pendingArchivedGame == null && !pendingBoardEditor && !pendingImportMenu) setAnalysisActive(true)
     }
 
     private fun showRepertoires(id: String? = null) {
@@ -426,7 +476,7 @@ class MainActivity : ComponentActivity() {
             val white = playerName(game.optJSONObject("white")).lowercase(Locale.ROOT)
             game.put("mobile_orientation", if (account.isNotBlank() && account == white) "white" else "black")
             pendingArchivedGame = JSONObject().put("game", game)
-            showAnalysisScreen()
+            showAnalysisScreen(false)
             deliverPendingArchivedGame()
         } else if (navigation.screen == ShellScreen.GAMES) renderNativeScreen()
     }
@@ -505,6 +555,9 @@ class MainActivity : ComponentActivity() {
             },::showRepertoires,privacy,nativeBridge::repertoireBackupAction),weighted())
             else -> page.addView(homeContent(), weighted())
         }
+        if(!navigation.keypadOpen)page.addView(WorkspaceMenu(this).bottomSections(navigation.screen) {screen ->
+            when(screen){ShellScreen.GAMES->showGamesScreen();ShellScreen.REPERTOIRES->showRepertoireLibrary();ShellScreen.PROFILE->showProfileScreen();else->showHomeScreen()}
+        })
         nativeLayer.addView(page, matchFrame())
         if (navigation.drawerOpen) nativeLayer.addView(drawerOverlay(), matchFrame())
     }
@@ -564,10 +617,7 @@ class MainActivity : ComponentActivity() {
     }.also { it.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 56.dp) }
 
     private fun homeContent(): View {
-        val paired = nativeBridge.isPaired()
-        val menu = WorkspaceMenu(this)
-        return menu.home(paired,connectionSummary(),::showAnalysisScreen,
-            { if(paired)showGamesScreen() else showProfileScreen() },::showRepertoireLibrary,{showRepertoires()},::showProfileScreen,::showBoardEditor,privacyControl())
+        return WorkspaceMenu(this).analysisHome({showAnalysisScreen()},::showBoardEditor,::showImportScreen)
     }
 
     private fun gamesContent(): View {
@@ -579,12 +629,14 @@ class MainActivity : ComponentActivity() {
                 setPadding(0, 8.dp, 0, 18.dp)
             })
             addView(actionButton("Open Account / PC") { showProfileScreen() })
+            addView(actionButton("Open PGN / FEN · offline") { showImportScreen() })
         }
 
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(SHELL_BACKGROUND)
         }
+        page.addView(WorkspaceMenu(this).row("\uf15c","Open PGN / FEN",action=::showImportScreen))
         page.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -626,6 +678,8 @@ class MainActivity : ComponentActivity() {
         }
         list.emptyView = empty
         archiveAdapter = GameArchiveAdapter().also { list.adapter = it }
+        val restorePosition=archiveScrollPosition.coerceAtMost((archiveGames.size-1).coerceAtLeast(0))
+        val restoreOffset=archiveScrollOffset
         list.setOnScrollListener(object : AbsListView.OnScrollListener {
             override fun onScrollStateChanged(view: AbsListView?, scrollState: Int) = Unit
 
@@ -635,12 +689,14 @@ class MainActivity : ComponentActivity() {
                 visibleItemCount: Int,
                 totalItemCount: Int,
             ) {
+                if(visibleItemCount>0){archiveScrollPosition=firstVisibleItem;archiveScrollOffset=view?.getChildAt(0)?.top ?: 0}
                 if (totalItemCount > 0 && firstVisibleItem + visibleItemCount >= totalItemCount - 3) {
                     loadMoreArchive()
                 }
             }
         })
         page.addView(body, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        list.setSelectionFromTop(restorePosition,restoreOffset)
         return page
     }
 
@@ -1093,10 +1149,11 @@ class MainActivity : ComponentActivity() {
                 webPageLoaded = true
                 renderedPrivacy = ""
                 refreshPrivacyDisplay()
-                setAnalysisActive(navigation.screen == ShellScreen.ANALYSIS && pendingArchivedGame == null && !pendingBoardEditor)
+                setAnalysisActive(navigation.screen == ShellScreen.ANALYSIS && pendingArchivedGame == null && !pendingBoardEditor && !pendingImportMenu)
                 deliverPendingArchivedGame()
                 if (pendingRepertoires) openRepertoirePage()
                 if (pendingBoardEditor) openBoardEditorPage()
+                if (pendingImportMenu) deliverImport()
             }
         }
     }
@@ -1150,6 +1207,7 @@ internal object AnalysisWebPolicy {
             "/api/mobile/v1/sync",
             "/api/mobile/v1/study/analysis/stream",
             "/api/mobile/v1/study/explorer",
+            "/api/mobile/v1/study/explorer/game",
             "/api/mobile/v1/repertoires",
             "/api/mobile/v1/repertoires/index",
         ) && uri.rawQuery == null
@@ -1425,6 +1483,14 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         val clipboard=activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.primaryClip?.takeIf { it.itemCount>0 }?.getItemAt(0)?.text?.toString()?.take(200).orEmpty()
     }.getOrDefault("")
+    @JavascriptInterface fun pasteGameText(): String = runCatching {
+        val clipboard=activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val text=clipboard.primaryClip?.takeIf {it.itemCount>0}?.getItemAt(0)?.text?.toString().orEmpty()
+        JSONObject().put("text",GameDocuments.checkedText(text)).toString()
+    }.getOrElse {JSONObject().put("error","Clipboard unavailable or larger than 8 MiB. Use a smaller file or manual paste.").toString()}
+    @JavascriptInterface fun openPgnFile() {activity.runOnUiThread {activity.choosePgnFile()}}
+    @JavascriptInterface fun exportPgn(raw:String,name:String) {activity.runOnUiThread {activity.exportPgn(raw,name)}}
+    @JavascriptInterface fun leaveGame(source:String) {activity.runOnUiThread {if(source=="games")activity.returnToGames() else activity.showHomeScreen()}}
     @JavascriptInterface fun copyPositionFen(raw: String): Boolean = runCatching {
         val fen=PositionFen.checked(raw)
         (activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Chess position FEN",fen))
@@ -1539,6 +1605,25 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     @JavascriptInterface
     fun leaveAnalysis() {
         activity.runOnUiThread { activity.showHomeScreen() }
+    }
+    @JavascriptInterface fun requestExplorerGame(raw:String):String=newRequestId().also {id ->
+        val pending=PendingCall();calls[id]=pending
+        executor.execute {
+            try {
+                require(raw.length<512);val input=JSONObject(raw)
+                val source=input.getString("source");val game=input.getString("id")
+                require(source in listOf("masters","lichess") && game.matches(Regex("[A-Za-z0-9]{8}")))
+                val call=authorizedPost("study/explorer/game",JSONObject().put("source",source).put("id",game)) ?: throw IOException("Pair the PC first.")
+                if(!pending.attach(call))return@execute
+                call.execute().use {response ->
+                    val payload=response.body.boundedString(2*1024*1024)
+                    if(!response.isSuccessful)throw GatewayException(response.code,responseError(response,payload))
+                    require(JSONObject(payload).has("pgn"))
+                    emit("onNativeExplorerGame",id,payload) { !pending.isCanceled() }
+                }
+            }catch(error:Exception){if(!pending.isCanceled())emit("onNativeExplorerGame",id,errorPayload("Explorer game unavailable. Check the PC connection.",error.gatewayCode()))}
+            finally {calls.remove(id,pending)}
+        }
     }
 
     /** Forget locally first; remote self-revocation is deliberately best-effort. */

@@ -40,6 +40,28 @@ internal class WorkspaceMenu(private val context: Context) {
         layoutParams=LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin=dp(5) }
     }
     fun scroll(content: View) = ScrollView(context).apply { isFillViewport=true; addView(content) }
+    fun analysisHome(analysis:()->Unit,editor:()->Unit,importGames:()->Unit):View=scroll(column().apply {
+        setPadding(dp(16),dp(10),dp(16),dp(18))
+        addView(section("Your workspace"))
+        addView(row("\uf201","Analysis board","Saved automatically · continue your board",analysis))
+        addView(row("\uf044","Board editor","Set up a separate position",editor))
+        addView(row("\uf15c","Open PGN / FEN","Browse files or paste · experimental",importGames))
+        addView(text("Games open in temporary tabs. Your Analysis board stays saved.",13f,true).apply {setPadding(dp(4),dp(14),dp(4),0)})
+    })
+    fun bottomSections(selected:ShellScreen,open:(ShellScreen)->Unit):View=LinearLayout(context).apply {
+        orientation=LinearLayout.HORIZONTAL;setBackgroundColor(0xff20211d.toInt())
+        // Data-driven sections leave space for another destination without inventing
+        // an empty Broadcasts control before the feature exists.
+        for((screen,icon,label) in listOf(Triple(ShellScreen.HOME,"\uf201","Analysis"),Triple(ShellScreen.GAMES,"\uf009","Games"),Triple(ShellScreen.REPERTOIRES,"\uf02d","Books"),Triple(ShellScreen.PROFILE,"\uf007","Account"))) {
+            addView(column().apply {
+                gravity=Gravity.CENTER;isClickable=true;isFocusable=true;isSelected=selected==screen;contentDescription=label
+                background=RippleDrawable(ColorStateList.valueOf(0x33c4af75),GradientDrawable().apply {setColor(if(isSelected)0xff37382f.toInt() else 0xff20211d.toInt())},null)
+                addView(text(icon,18f).apply {typeface=font;gravity=Gravity.CENTER;setTextColor(if(selected==screen)0xffc4af75.toInt() else 0xffaaa9a2.toInt());importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO})
+                addView(text(label,11f,selected!=screen).apply {gravity=Gravity.CENTER;setPadding(0,dp(4),0,0);importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO})
+                setOnClickListener {open(screen)}
+            },LinearLayout.LayoutParams(0,dp(58),1f))
+        }
+    }
     fun home(paired: Boolean, connection: String, analysis: () -> Unit, games: () -> Unit,
         library: () -> Unit, repertoire: () -> Unit, profile: () -> Unit, editor: () -> Unit, privacy: View? = null): View = scroll(column().apply {
         setPadding(dp(16),dp(2),dp(16),dp(18))
