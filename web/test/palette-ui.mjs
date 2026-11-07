@@ -24,7 +24,8 @@ try{for(const [width,height] of [[320,568],[360,640],[390,780],[412,844]]){
  await page.goto(`http://127.0.0.1:${server.address().port}`);await page.waitForFunction(()=>window.InstinctaZero && !document.documentElement.classList.contains('board-assets-loading'));
  await page.evaluate(()=>document.fonts.ready);
  await page.evaluate(()=>window.InstinctaZero.setAnalysisActive(true));await page.waitForFunction(()=>window.__test.engine);
- await page.evaluate(()=>window.InstinctaZero.onNativeAnalysis(window.__test.engine,{event:'lc0',data:{search_phase:'final',progress:{visits:1300,target:2000},lines:[{pv:['e2e4','e7e5','g1f3'],san:['e4','e5','Nf3'],white_cp:27,visits:1000,nodes:1000,q:.18,prior:.5},{pv:['d2d4','d7d5'],san:['d4','d5'],white_cp:18,visits:300,nodes:300,q:.15,prior:.3}]}}));
+ await page.evaluate(()=>window.InstinctaZero.onNativeAnalysis(window.__test.engine,{event:'lc0',data:{search_phase:'final',progress:{visits:1300,target:2000},move_stats:[{uci:'e2e4',visits:1000,q:.18,prior:.5},{uci:'d2d4',visits:300,q:.15,prior:.3}],lines:[{pv:['e2e4','e7e5','g1f3'],san:['e4','e5','Nf3'],white_cp:27,visits:1000,nodes:1000,q:.18,prior:.5},{pv:['d2d4','d7d5'],san:['d4','d5'],white_cp:18,visits:300,nodes:300,q:.15,prior:.3}]}}));
+ await page.waitForFunction(()=>document.querySelectorAll('.pv').length===2 && document.querySelectorAll('.analysis-arrow').length>0);
  const check=async name=>{
   const result=await page.evaluate(()=>{
    const palette=[...document.styleSheets].find(s=>s.href?.endsWith('/palette.css'));

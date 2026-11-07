@@ -25,9 +25,11 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class WorkspaceMenuTest {
     private fun views(view: View): List<View> = listOf(view) + if(view is ViewGroup)(0 until view.childCount).flatMap { views(view.getChildAt(it)) } else emptyList()
-    private fun snapshot(view: View,name: String,width: Int,height: Int) {
-        view.measure(View.MeasureSpec.makeMeasureSpec(width,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(height,View.MeasureSpec.EXACTLY))
-        view.layout(0,0,width,height)
+    private fun snapshot(view: View,name: String,width: Int,height: Int,relayout: Boolean=true) {
+        if(relayout) {
+            view.measure(View.MeasureSpec.makeMeasureSpec(width,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(height,View.MeasureSpec.EXACTLY))
+            view.layout(0,0,width,height)
+        }
         System.getenv("NATIVE_MENU_PREVIEW")?.let { path ->
             val folder=File(path).apply { mkdirs() };val bitmap=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888)
             val canvas=Canvas(bitmap); canvas.drawColor(AppPalette.BACKGROUND); view.draw(canvas)
@@ -74,7 +76,7 @@ class WorkspaceMenuTest {
         assertTrue(last.bottom-home.scrollY<=home.height)
         assertTrue(last.top-home.scrollY>=0)
         last.performClick();assertTrue(profile)
-        snapshot(home,"home-large-text-bottom",320,520)
+        snapshot(home,"home-large-text-bottom",320,520,relayout=false)
     }
     @Test fun unimplementedDestinationsAreHonestPlaceholdersWithWorkingBack() {
         val menu=WorkspaceMenu(RuntimeEnvironment.getApplication())
