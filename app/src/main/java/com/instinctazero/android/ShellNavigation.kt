@@ -5,6 +5,8 @@ internal enum class ShellScreen {
     GAMES,
     PROFILE,
     REPERTOIRES,
+    PGN_LIBRARY,
+    DRILL,
     ANALYSIS,
 }
 
@@ -72,6 +74,13 @@ internal class ShellNavigation {
         keypadOpen = false
     }
 
+    fun showPlaceholder(destination: ShellScreen) {
+        require(destination == ShellScreen.PGN_LIBRARY || destination == ShellScreen.DRILL)
+        screen = destination
+        drawerOpen = false
+        keypadOpen = false
+    }
+
     fun openDrawer() {
         if (screen != ShellScreen.ANALYSIS) drawerOpen = true
     }
@@ -97,7 +106,7 @@ internal class ShellNavigation {
             drawerOpen = false
             ShellBackAction.RENDER_NATIVE
         }
-        screen == ShellScreen.PROFILE || screen == ShellScreen.GAMES || screen == ShellScreen.REPERTOIRES -> {
+        screen in listOf(ShellScreen.PROFILE, ShellScreen.GAMES, ShellScreen.REPERTOIRES, ShellScreen.PGN_LIBRARY, ShellScreen.DRILL) -> {
             showHome()
             ShellBackAction.RENDER_NATIVE
         }

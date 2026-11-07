@@ -6,6 +6,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ShellNavigationTest {
+    @Test fun placeholdersReturnHomeWithoutEnteringAnalysisOrChangingExistingNavigation() {
+        val navigation=ShellNavigation()
+        for(screen in listOf(ShellScreen.PGN_LIBRARY,ShellScreen.DRILL)) {
+            navigation.showPlaceholder(screen)
+            assertEquals(screen,navigation.screen)
+            assertFalse(navigation.drawerOpen)
+            assertEquals(ShellBackAction.RENDER_NATIVE,navigation.onBack())
+            assertEquals(ShellScreen.HOME,navigation.screen)
+        }
+    }
     @Test
     fun launchStartsAtHomeAndBackUnwindsNativeSurfacesBeforeExit() {
         val navigation = ShellNavigation()

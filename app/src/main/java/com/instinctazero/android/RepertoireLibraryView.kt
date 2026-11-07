@@ -69,7 +69,7 @@ internal object RepertoireLibraryView {
             page.addView(ui.section(if(state.id.isEmpty()) "New repertoire" else "Repertoire name"))
             page.addView(EditText(context).apply {
                 hint="Repertoire name"; contentDescription="Repertoire name"; textSize=18f
-                setTextColor(0xffeeeeea.toInt()); setHintTextColor(0xffaaa9a2.toInt())
+                setTextColor(AppPalette.TEXT); setHintTextColor(AppPalette.MUTED)
                 setSingleLine(); filters=arrayOf(InputFilter.LengthFilter(80)); setText(state.name)
                 addTextChangedListener(object : TextWatcher {
                     override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
