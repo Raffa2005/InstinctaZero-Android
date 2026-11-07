@@ -55,7 +55,7 @@ internal object PrivacyModeView {
                 text="Privacy mode"; textSize=16f; setTextColor(Color.WHITE); minimumHeight=(48*dp).toInt()
                 gravity=Gravity.CENTER_VERTICAL; isChecked=privacy.enabled
                 contentDescription="Privacy mode. On hides account names; off shows real identities."
-                thumbTintList=ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked),intArrayOf()),intArrayOf(AppPalette.TEXT,AppPalette.MUTED))
+                thumbTintList=ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked),intArrayOf()),intArrayOf(0xffc4af75.toInt(),0xffa5a5a0.toInt()))
                 setOnCheckedChangeListener { _, value -> changed(value) }
             },LinearLayout.LayoutParams(-1,-2))
             addView(ui.text(if(privacy.enabled)"On · Player alias; names and ratings hidden" else "Off · real account names are visible",12f,true))

@@ -129,7 +129,7 @@ class MainActivity : ComponentActivity() {
             if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
                 WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, false)
             }
-            setBackgroundColor(SHELL_BACKGROUND)
+            setBackgroundColor(0xff2b2b2b.toInt())
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = false
@@ -329,10 +329,6 @@ class MainActivity : ComponentActivity() {
         pendingBoardEditor=true;showAnalysisScreen()
         if(webPageLoaded)openBoardEditorPage()
     }
-    private fun showPlaceholder(screen: ShellScreen) {
-        navigation.showPlaceholder(screen)
-        renderNativeScreen()
-    }
     private fun openBoardEditorPage() {
         pendingBoardEditor=false
         webView.evaluateJavascript("window.InstinctaZero&&window.InstinctaZero.openBoardEditor&&window.InstinctaZero.openBoardEditor();void 0;",null)
@@ -494,12 +490,10 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(SHELL_BACKGROUND)
         }
-        if (navigation.screen != ShellScreen.HOME) page.addView(nativeHeader())
+        page.addView(nativeHeader())
         when (navigation.screen) {
             ShellScreen.PROFILE -> page.addView(profileContent(), weighted())
             ShellScreen.GAMES -> page.addView(gamesContent(), weighted())
-            ShellScreen.PGN_LIBRARY -> page.addView(WorkspaceMenu(this).placeholder("PGN Library",::showHomeScreen),weighted())
-            ShellScreen.DRILL -> page.addView(WorkspaceMenu(this).placeholder("Drill",::showHomeScreen),weighted())
             ShellScreen.REPERTOIRES -> page.addView(RepertoireLibraryView.build(this,repertoireLibrary,::renderNativeScreen,{ request ->
                 repertoireLibrary.busy=true; repertoireLibrary.error=""; renderNativeScreen()
                 nativeBridge.manageRepertoires(request.put("action","save_repertoire")) { data ->
@@ -520,7 +514,7 @@ class MainActivity : ComponentActivity() {
         gravity = Gravity.CENTER_VERTICAL
         setPadding(4.dp, 0, 10.dp, 0)
         setBackgroundColor(HEADER_BACKGROUND)
-        val childScreen = navigation.screen in listOf(ShellScreen.PROFILE,ShellScreen.GAMES,ShellScreen.REPERTOIRES,ShellScreen.PGN_LIBRARY,ShellScreen.DRILL)
+        val childScreen = navigation.screen in listOf(ShellScreen.PROFILE,ShellScreen.GAMES,ShellScreen.REPERTOIRES)
         val leading = shellButton(if (childScreen) "‹" else "☰", 25f).apply {
             contentDescription = if (childScreen) "Back to home" else "Open menu"
             setOnClickListener {
@@ -550,8 +544,6 @@ class MainActivity : ComponentActivity() {
                 ShellScreen.PROFILE -> "Account / PC"
                 ShellScreen.GAMES -> privacy.account(archiveAccount).ifBlank { "Games" }
                 ShellScreen.REPERTOIRES -> "Repertoires"
-                ShellScreen.PGN_LIBRARY -> "PGN Library"
-                ShellScreen.DRILL -> "Drill"
                 else -> "InstinctaZero"
             }
             setTextColor(Color.WHITE)
@@ -574,10 +566,8 @@ class MainActivity : ComponentActivity() {
     private fun homeContent(): View {
         val paired = nativeBridge.isPaired()
         val menu = WorkspaceMenu(this)
-        return menu.home(::showAnalysisScreen,::showBoardEditor,::showRepertoireLibrary,
-            { showPlaceholder(ShellScreen.PGN_LIBRARY) },
-            { if(paired)showGamesScreen() else showProfileScreen() },
-            { showPlaceholder(ShellScreen.DRILL) },::showProfileScreen)
+        return menu.home(paired,connectionSummary(),::showAnalysisScreen,
+            { if(paired)showGamesScreen() else showProfileScreen() },::showRepertoireLibrary,{showRepertoires()},::showProfileScreen,::showBoardEditor,privacyControl())
     }
 
     private fun gamesContent(): View {
@@ -732,7 +722,7 @@ class MainActivity : ComponentActivity() {
             analysisView.text = if (game.optBoolean("analyzable")) "▥  Computer analysis available"
                 else "⚠  ${privacy.message(game.optString("analysis_block_reason").ifBlank { "Analysis unavailable" },"Analysis unavailable for this game") }"
             analysisView.setTextColor(if (game.optBoolean("analyzable")) 0xff858585.toInt() else 0xff9a6a64.toInt())
-            setBackgroundColor(if (position % 2 == 0) AppPalette.HEADER else AppPalette.SURFACE)
+            setBackgroundColor(if (position % 2 == 0) 0xff292824.toInt() else 0xff302f2a.toInt())
             isClickable = game.optBoolean("analyzable")
             isFocusable = isClickable
             alpha = if (isClickable) 1f else .68f
@@ -928,7 +918,7 @@ class MainActivity : ComponentActivity() {
                 setTextColor(Color.WHITE)
                 textSize = 20f
                 typeface = Typeface.MONOSPACE
-                background = roundedBackground(AppPalette.SURFACE, 1, AppPalette.BORDER, 3)
+                background = roundedBackground(0xff303030.toInt(), 1, 0xff666666.toInt(), 3)
             }, LinearLayout.LayoutParams(0, 42.dp, 1f).apply { setMargins(2.dp, 0, 2.dp, 0) })
         }
         addView(slots, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 42.dp).apply { bottomMargin = 10.dp })
@@ -937,7 +927,7 @@ class MainActivity : ComponentActivity() {
                 orientation = LinearLayout.HORIZONTAL
                 rowCharacters.forEach { character ->
                     addView(shellButton(character.toString(), 16f).apply {
-                        backgroundTintList = ColorStateList.valueOf(AppPalette.CONTROL)
+                        backgroundTintList = ColorStateList.valueOf(0xff3d3d3d.toInt())
                         isEnabled = !pairingCode.busy
                         setOnClickListener { if (pairingCode.append(character)) renderNativeScreen() }
                     }, LinearLayout.LayoutParams(0, 46.dp, 1f).apply { setMargins(1.dp, 1.dp, 1.dp, 1.dp) })
@@ -970,7 +960,7 @@ class MainActivity : ComponentActivity() {
         addView(LinearLayout(this@MainActivity).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(12.dp, 18.dp, 12.dp, 12.dp)
-            setBackgroundColor(AppPalette.HEADER)
+            setBackgroundColor(0xff252525.toInt())
             addView(TextView(this@MainActivity).apply {
                 text = "InstinctaZero"
                 setTextColor(Color.WHITE)
@@ -991,7 +981,7 @@ class MainActivity : ComponentActivity() {
             addView(menu.row("\uf108","Account / PC") { showProfileScreen() })
             addView(privacyControl())
         }.let { content -> android.widget.ScrollView(this@MainActivity).apply {
-            setBackgroundColor(AppPalette.HEADER); isFillViewport=true; addView(content)
+            setBackgroundColor(0xff252525.toInt()); isFillViewport=true; addView(content)
         } }, FrameLayout.LayoutParams(292.dp, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START))
     }
 
@@ -1006,7 +996,7 @@ class MainActivity : ComponentActivity() {
         isClickable = true
         isFocusable = true
         setPadding(18.dp, 17.dp, 18.dp, 17.dp)
-        background = android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(AppPalette.RIPPLE), roundedBackground(AppPalette.SURFACE, 1, AppPalette.BORDER, 12), null)
+        background = android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x33c4af75), roundedBackground(0xff33342f.toInt(), 1, 0xff505148.toInt(), 12), null)
         addView(TextView(this@MainActivity).apply {
             text = title
             setTextColor(Color.WHITE)
@@ -1024,7 +1014,7 @@ class MainActivity : ComponentActivity() {
 
     private fun actionButton(label: String, action: () -> Unit): Button = shellButton(label, 15f).apply {
         backgroundTintList = null
-        background = android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(AppPalette.RIPPLE), roundedBackground(AppPalette.CONTROL, 1, AppPalette.BORDER, 10), null)
+        background = android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x33ffffff), roundedBackground(0xff4a473a.toInt(), 1, 0xff71674e.toInt(), 10), null)
         setOnClickListener { action() }
     }
 
@@ -1121,9 +1111,9 @@ class MainActivity : ComponentActivity() {
     )
 
     companion object {
-        private val SHELL_BACKGROUND = AppPalette.BACKGROUND
-        private val HEADER_BACKGROUND = AppPalette.HEADER
-        private val TEXT_MUTED = AppPalette.MUTED
+        private val SHELL_BACKGROUND = 0xff2b2b2b.toInt()
+        private val HEADER_BACKGROUND = 0xff222222.toInt()
+        private val TEXT_MUTED = 0xffaaaaaa.toInt()
         private val ERROR_TEXT = 0xffff9e80.toInt()
         private val GAME_WIN = 0xff7fa650.toInt()
         private val GAME_LOSS = 0xffb85c54.toInt()

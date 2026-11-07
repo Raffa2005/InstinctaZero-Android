@@ -35,7 +35,6 @@ class PrivacyBridgeShadow {
     @Implementation fun close() { }
     @Implementation fun resumeRepertoireBackup() { }
     @Implementation fun engineBackendLabel()="CPU"
-    @Implementation fun manageRepertoires(request: JSONObject, callback: (JSONObject) -> Unit) { callback(JSONObject().put("repertoires",JSONArray())) }
     @Implementation fun selectAccount(username: String): String? { selected=username;return "select" }
     @Implementation fun loadArchivedGame(id: String): String { loaded=id;return "game" }
     companion object { var state=JSONObject();var selected="";var loaded="" }
@@ -82,33 +81,6 @@ class AccountPrivacyTest {
         assertEquals("Switching accounts…",reopened.message("Switching to SecondAccount…","Retry"))
         assertEquals(raw,saved.getString("pgn",null));assertTrue(reopened.setEnabled(false));assertEquals("SecretOwner",reopened.account("SecretOwner"))
         for(i in 0..300)reopened.remember("Account$i");assertEquals(128,reopened.config().getJSONArray("names").length())
-    }
-    @Test fun actualActivityMenuRoutesPlaceholdersBackAndKeepsToolsAndPrivacyReachable() {
-        AccountPrivacy(context.getSharedPreferences("display_privacy",Context.MODE_PRIVATE)).setEnabled(true)
-        val controller=Robolectric.buildActivity(MainActivity::class.java).setup()
-        val activity=controller.get()
-        fun click(label: String)=views(root(activity)).first { it.isClickable && it.contentDescription==label }.performClick()
-        fun screen()=(field(activity,"navigation") as ShellNavigation).screen
-        snapshot(root(activity),"menu-activity",360,584)
-        assertFalse(views(root(activity)).any { it.contentDescription=="Open menu" })
-        for(label in listOf("PGN Library","Drill")) {
-            click(label);snapshot(root(activity),"menu-${label.replace(' ','-')}",360,584)
-            assertTrue(text(root(activity)).contains("Not available yet"))
-            privateText(root(activity))
-            // Both the destination's own Back and Android Back return to the native menu.
-            click("Back to home");assertEquals(ShellScreen.HOME,screen())
-            click(label);activity.onBackPressedDispatcher.onBackPressed();assertEquals(ShellScreen.HOME,screen())
-        }
-        click("Account/PC");assertEquals(ShellScreen.PROFILE,screen())
-        assertEquals(1,views(root(activity)).filterIsInstance<Switch>().size)
-        click("Back to home");click("Repertoires");assertEquals(ShellScreen.REPERTOIRES,screen())
-        assertTrue(views(root(activity)).any { it.contentDescription?.startsWith("Backups and restore")==true })
-        assertTrue(views(root(activity)).any { it.contentDescription?.startsWith("Repertoire board")==true })
-        click("Back to home");click("Lichess Games");assertEquals(ShellScreen.GAMES,screen())
-        click("Back to home");click("Analysis");assertEquals(ShellScreen.ANALYSIS,screen())
-        activity.showHomeScreen();click("Board Editor");assertEquals(ShellScreen.ANALYSIS,screen())
-        assertTrue(field(activity,"pendingBoardEditor") as Boolean)
-        controller.pause().stop().destroy()
     }
     @Test fun nativeHomeProfileGamesRecyclingAndRecreationUseAliasesButKeepRealOwnership() {
         AccountPrivacy(context.getSharedPreferences("display_privacy",Context.MODE_PRIVATE)).setEnabled(true)

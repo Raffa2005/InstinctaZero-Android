@@ -1,11 +1,31 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.8.16 / code 44), adding only engine-informed destination input and
-opening-explorer castling fixes to the restored v0.8.15 app. The offline click-chess input and drag-back correction
+(version 0.8.18 / code 46), restoring the v0.8.16 appearance and behavior after
+the rejected v0.8.17 visual restyle. It retains the engine-informed destination
+input and opening-explorer castling fixes. The offline click-chess input and drag-back correction
 are described in [input behavior and validation](click-chess-preview.md).
 Ship the minified, production-key-signed `release` APK, not the former development
 preview (which installed separately and had unshrunk dependencies).
+
+## v0.8.18 visual rollback
+
+All production sources and browser assets match `fe2724f` (v0.8.16); only release
+identifiers and documentation differ. The rejected restyle remains recoverable in
+its Git commits and v0.8.17 release. Install this higher-code update over v0.8.17:
+do not uninstall or clear storage. The application ID, signing certificate,
+database formats, pairing and privacy preferences are unchanged. There is no
+migration, reset, backend change or repertoire redownload.
+
+Before release, compare the complete production source/resource/asset tree with
+the baseline. Run the nine baseline packaged phone suites, native tests/lint and
+trained-model parity checks. Use `ClickInputPersistenceTest` with isolated
+synthetic databases actually written by v0.8.17 and `CLICK_CHESS_PROCESS_PHASE=read`
+to verify read/save/reopen compatibility, unchanged trees/cursors and preserved
+PGN/repertoire/archive/preference sentinels. Never use live user data as a fixture.
+Confirm production signing, versionCode46 > 45, unchanged portrait/security
+settings, and the public download's bytes. Native UI/SQLite and browser checks are
+not a physical-device package-install test; do not use the USB tethering phone.
 
 ## v0.8.16 small input fixes
 
@@ -129,7 +149,7 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 44 / 0.8.16 release values;
+- versionCode/versionName are the intended 46 / 0.8.18 release values;
 - confirm the signed artifact descends from merged PR #1, retains the production
   application ID and signing certificate, and passes the bounded-body/stream,
   lazy-connection, corpus/transposition and private-edit preservation regressions;
