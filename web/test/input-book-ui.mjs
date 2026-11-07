@@ -37,13 +37,23 @@ try{for(const [width,height] of [[360,640],[390,780],[412,844]]) {
   await page.evaluate(({uci,san})=>window.InstinctaZero.onNativeExplorer(window.__t.books.at(-1).id,{totals:{games:10,white:5,draws:3,black:2},moves:[{uci,san,games:10,white:5,draws:3,black:2}]}),{uci,san});
   await page.locator(`[data-uci="${uci}"]`).tap();
  };
+ const settledCastle=(turn,rank,side)=>page.waitForFunction(({turn,rank,side})=>{
+  const board=document.querySelector('#board').getBoundingClientRect(),black=document.querySelector('#board-wrap').classList.contains('orientation-black');
+  return [['king',(side==='k'?'g':'c')+rank],['rook',(side==='k'?'f':'d')+rank]].every(([role,square])=>{
+   const piece=[...document.querySelectorAll(`piece.${role}.${turn==='w'?'white':'black'}`)].find(el=>el.cgKey===square);if(!piece)return false;
+   const r=piece.getBoundingClientRect(),file=square.charCodeAt(0)-97,row=Number(square[1])-1;
+   return Math.abs(r.x-(board.x+(black?7-file:file)*board.width/8))<1 && Math.abs(r.y-(board.y+(black?row:7-row)*board.height/8))<1;
+  });
+ },{turn,rank,side});
  for(const turn of ['w','b'])for(const side of ['k','q']) {
   const rank=turn==='w'?'1':'8',fen=`r3k2r/8/8/8/8/8/8/R3K2R ${turn} KQkq - 0 1`;
   const raw=`e${rank}${side==='k'?'h':'a'}${rank}`,canonical=`e${rank}${side==='k'?'g':'c'}${rank}`;
   await load(fen,'book',turn==='b');await bookMove(raw,side==='k'?'O-O':'O-O-O');
   assert.deepEqual((await stored()).cursor,[canonical],`${turn} ${side}: explorer king-to-rook castle must play`);
+  await settledCastle(turn,rank,side);
   await page.getByRole('button',{name:'Previous move',exact:true}).tap();assert.deepEqual((await stored()).cursor,[]);
   await page.getByRole('button',{name:'Next move',exact:true}).tap();assert.deepEqual((await stored()).cursor,[canonical]);
+  await settledCastle(turn,rank,side);
   const game=await page.evaluate(()=>{const state=JSON.parse(localStorage.getItem('study')),c=new window.InstinctaZeroChessRules.Chess(state.initialFen);for(const u of state.cursor)c.move({from:u.slice(0,2),to:u.slice(2,4)});return c.fen()});
   assert.match(game,turn==='w'?(side==='k'?/R4RK1/:/2KR3R/):(side==='k'?/r4rk1/:/2kr3r/));
   await page.screenshot({path:`${output}/castle-${turn}-${side}-${width}.png`});
