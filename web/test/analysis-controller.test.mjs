@@ -202,7 +202,7 @@ test('rapid navigation and interrupted analysis settle only on the current reque
   const engine={attempts:0,lines:[]},settings={enabled:true,nodes:1000},cursor={},document={hidden:false},window={InstinctaZero:{}};
   const native=()=>({cancelAnalysis:id=>cancelled.push(id),startAnalysis:raw=>{const id='s'+ ++requestId;requests.push({id,...JSON.parse(raw)});return id;}});
   const f=new Function('engine','settings','cursor','document','window','native','setTimeout','clearTimeout','studyRequest','coherentAnalysisSnapshot','applyAnalysisSnapshot','renderActivePanel','renderArrows','state','queueAnalysisRender',
-    `let analysisActive=true,gameLoading=false,repertoirePanel=null,studyContext={},book={};const editingPosition=()=>state.editing,cancelBookRequest=()=>{},resetStudy=()=>{};const chess={moves:()=>['legal']};${transport}${recovery}${callback};return {scheduleAnalysis,recoverAnalysis,stopEngineTransport};`
+    `let analysisActive=true,gameLoading=false,repertoirePanel=null,studyContext={},book={};const editingPosition=()=>state.editing,cancelBookRequest=()=>{},resetStudy=()=>{},rememberEngineInput=()=>{};const chess={moves:()=>['legal']};${transport}${recovery}${callback};return {scheduleAnalysis,recoverAnalysis,stopEngineTransport};`
   )(engine,settings,cursor,document,window,native,(fn,ms)=>{const id=++timerId;timers.set(id,{fn,ms});return id;},id=>timers.delete(id),()=>({history:state.history}),data=>data.valid===false?null:data,(snapshot,status)=>{engine.lines=snapshot.lines;engine.status=status;},()=>{},()=>{},state,()=>{});
   const tick=ms=>{for(const [id,timer] of [...timers])if(timer.ms===ms){timers.delete(id);timer.fn();}};
   const emit=(id,event,data={})=>window.InstinctaZero.onNativeAnalysis(id,{event,data});
@@ -664,7 +664,7 @@ test('stream bursts paint once per frame without rebuilding unrelated panels', a
   const window = {InstinctaZero:{}}, document = {hidden:false};
   const ui = new Function('engine','cursor','window','document','requestAnimationFrame','cancelAnimationFrame','renderPanel','renderArrows','heading', `
     let analysisActive=true, gameLoading=false, panelView=null, tab='engine';
-    const editingPosition=()=>false, native=()=>null, cancelBookRequest=()=>{}, watchAnalysis=()=>{}, recoverAnalysis=()=>{},
+    const editingPosition=()=>false, native=()=>null, cancelBookRequest=()=>{}, watchAnalysis=()=>{}, recoverAnalysis=()=>{}, rememberEngineInput=()=>{},
       studyContext={}, settings={nodes:1000}, coherentAnalysisSnapshot=data=>data, chess={moves:()=>['e4']};
     ${transport}${scheduler}${snapshot}${callback}
     return { resetTransport, hide:()=>{analysisActive=false;resetTransport();}, setTab:value=>{tab=value;}, menu:()=>{panelView='settings';} };

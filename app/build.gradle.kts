@@ -11,8 +11,8 @@ android {
         applicationId = "com.instinctazero.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 43
-        versionName = "0.8.15"
+        versionCode = 44
+        versionName = "0.8.16"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

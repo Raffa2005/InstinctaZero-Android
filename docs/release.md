@@ -1,12 +1,41 @@
 # Release build
 
 This repository's current release target is the native-shell analysis app
-(version 0.8.15 / code 43), restoring v0.8.13 behavior exactly. The offline click-chess input and drag-back correction
+(version 0.8.16 / code 44), adding only engine-informed destination input and
+opening-explorer castling fixes to the restored v0.8.15 app. The offline click-chess input and drag-back correction
 are described in [input behavior and validation](click-chess-preview.md).
 Ship the minified, production-key-signed `release` APK, not the former development
 preview (which installed separately and had unshrunk dependencies).
 
-## v0.8.15 restoration
+## v0.8.16 small input fixes
+
+- Destination clicks prefer available visits, then policy, for the exact current
+  FEN and selected engine backend. A bounded 24-position session cache stores only
+  legal-move statistics, including zero-visit policy rows not eligible for display.
+  Provisional/inherited data and stale request IDs cannot populate it. Different
+  turns, castling rights, en-passant squares and move counters do not share entries.
+  Without usable evidence for the tapped destination, the unchanged trained model
+  runs locally. No extra requests, waits or persisted data are introduced.
+- A correction cycle freezes its candidate order until normal input/navigation
+  clears it. Drag-back still restores the complete pre-move state, removes only a
+  leaf and preserves existing continuations. Previous remains ordinary navigation;
+  it is not the withdrawn v0.8.14 correction shortcut.
+- Explorer castling uses king-to-rook UCI, which previously reached the board's
+  standard-UCI move handler unchanged and was rejected. Convert it to the king's
+  destination only when the current legal move list contains that castle. Cover
+  kingside/queenside, both colours, blocked/through-check cases, canonical history
+  and ordinary moves. No new Chess960 support is implied.
+- UI, navigation, import, privacy, saved-state formats, pairing, engine tuning,
+  gateway/security settings and backend are unchanged. Install over the existing
+  app without uninstalling, clearing data, re-pairing or redownloading books.
+
+Run `move-input.test.mjs`, `click-chess.test.mjs`, `input-book-ui.mjs` and all eight
+baseline packaged phone suites. The focused touch test covers cached/current engine
+visits, policy-only and final snapshots, stale callbacks, fallback, drag-back cycling
+and unchanged Previous navigation. Run native tests/lint, verify production signing
+and code44 > 43, then verify the public download. No USB phone testing.
+
+## v0.8.15 restoration (historical)
 
 All production app sources and browser assets match `012c253` (v0.8.13).
 Only the version identifiers, release notes and rollback verification differ.
@@ -100,7 +129,7 @@ release artifact, issue tracker, or source repository.
 
 Before publishing, at minimum verify:
 
-- versionCode/versionName are the intended 43 / 0.8.15 release values;
+- versionCode/versionName are the intended 44 / 0.8.16 release values;
 - confirm the signed artifact descends from merged PR #1, retains the production
   application ID and signing certificate, and passes the bounded-body/stream,
   lazy-connection, corpus/transposition and private-edit preservation regressions;

@@ -6,6 +6,7 @@ import {Chess} from 'chess.js';
 const source=await readFile(new URL('../../app/src/main/assets/analysis/click-chess.js',import.meta.url),'utf8');
 const context={Uint8Array,TextDecoder,atob};vm.runInNewContext(source,context);
 const model=context.InstinctaClickChess.ranker;
+vm.runInNewContext(await readFile(new URL('../../app/src/main/assets/analysis/move-input.js',import.meta.url),'utf8'),context);
 test('packaged binary model matches all 305 upstream JSON-model fixtures',async()=>{
   const fixtures=JSON.parse(await readFile(new URL('click-chess-fixtures.json',import.meta.url),'utf8'));
   for(const f of fixtures){
@@ -67,10 +68,10 @@ async function controller(fen=new Chess().fen()) {
   const source=await readFile(new URL('../../app/src/main/assets/analysis/analysis.js',import.meta.url),'utf8');
   const take=(name,end)=>source.slice(source.indexOf('  function '+name),source.indexOf(end,source.indexOf('  function '+name)+1));
   const functions=['color','history','legalMoves','legalDests','sync','mainlineChild','remember','commitMove','clearClickChoice','recentClickHistory','destinationTap','clickCorrection'].map(name=>take(name,'\n  function ')).join('\n')+take('undoDestinationGuess','\n  if(window.InstinctaClickChess)');
-  const make=new Function('Chess','model','fen',`
+  const make=new Function('Chess','model','fen','EngineCache',`
     const chess=new Chess(fen),root={id:0,fen:chess.fen(),children:[],parent:null};
     let cursor=root,legalCache=null,clickChoice=null,clickInput=null,nodeId=0;
-    const dirtyBranches=new Map(),nodeIndex=new Map([[0,root]]),settings={nodes:1000},engine={},saves=[];
+    const dirtyBranches=new Map(),nodeIndex=new Map([[0,root]]),settings={nodes:1000},engine={},saves=[],inputEvidence=new EngineCache();
     const ranks=[];let promotion=null;const window={InstinctaClickChess:{ranker:{rank:(...args)=>{ranks.push(args);return model.rank(...args);}}}};
     const ground={set:()=>{},cancelMove:()=>{}},loadFailed=false,gameLoading=false,editingPosition=()=>false,
       heading=()=>{},onPositionChanged=()=>{},projectAnalysisToChild=()=>null,
@@ -81,12 +82,21 @@ async function controller(fen=new Chess().fen()) {
     return {tap:destinationTap,commit:commitMove,root,saves,ranks,undo:undoDestinationGuess,
       choice:()=>clickChoice,fen:()=>chess.fen(),history,recent:recentClickHistory,
       current:()=>cursor,promote:p=>promotion(p),
+      evidence:data=>inputEvidence.remember(chess.fen(),settings.backend,legalMoves(),data),
       back:(next=root)=>{clearClickChoice();cursor=next;chess.load(cursor.fen);},
       clear:clearClickChoice};
   `);
-  return make(Chess,model,fen);
+  return make(Chess,model,fen,context.InstinctaMoveInput.EngineCache);
 }
 const undoGuess=study=>{const {from,to}=study.current().move;assert.equal(study.undo(to,from),true);};
+test('engine-ranked corrections keep existing continuations and replace only leaves',async()=>{
+  const study=await controller();study.commit('b1','c3');study.commit('e7','e5');study.back();
+  study.evidence({root_move_stats:[{uci:'b1c3',visits:50},{uci:'c2c3',visits:2}]});study.tap('c3');
+  assert.equal(study.current().move.from,'b1');assert.equal(study.ranks.length,0);
+  undoGuess(study);assert.equal(study.root.children[0].children.length,1);
+  study.tap('c3');assert.equal(study.current().move.from,'c2');undoGuess(study);
+  assert.equal(study.root.children.length,1);assert.equal(study.root.children[0].children[0].move.to,'e5');
+});
 test('only undo-and-click advances candidates, and undo itself is durably saved',async()=>{
   const study=await controller();study.tap('c3');const first=study.history()[0];
   study.tap('c3');assert.equal(study.history()[0],first,'a tap never cycles');

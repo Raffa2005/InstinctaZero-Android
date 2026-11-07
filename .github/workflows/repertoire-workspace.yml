@@ -123,7 +123,7 @@ jobs:
           # Other UI scripts require private native-corpus exports; do not silently
           # treat absent exports as passing tests or contact the private gateway.
           failed=0
-          for scenario in click-chess large-study game-load maneuver-arrows position-editor privacy repertoire-authoring repertoire; do
+          for scenario in input-book click-chess large-study game-load maneuver-arrows position-editor privacy repertoire-authoring repertoire; do
             echo "::group::$scenario"
             if PHONE_PREVIEW_OUTPUT="$RUNNER_TEMP/browser-reports/$scenario" node "test/$scenario-ui.mjs" 2>&1 | tee "$RUNNER_TEMP/$scenario-ui.log"; then
               echo "- $scenario: passed" >> "$GITHUB_STEP_SUMMARY"
