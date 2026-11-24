@@ -120,14 +120,23 @@ internal class LichessPhone(private val prefs: SharedPreferences) {
     }
     fun page(owner:String,cursor:String?,size:Int,read:(Request)->String):JSONObject {
         require(owner.isNotBlank())
-        val url=gamesUrl(owner).addQueryParameter("max",(size+1).toString()).addQueryParameter("sort","dateDesc")
+        // Lichess 'until' is exclusive. Include the first unshown millisecond and
+        // skip only its rows already emitted, including ties spanning many pages.
+        val resume=cursor?.let { Regex("lc_([0-9]{1,14})_([0-9]{1,6})").matchEntire(it) ?: error("Invalid game cursor.") }
+        val until=resume?.groupValues?.get(1)?.toLong()
+        val skip=resume?.groupValues?.get(2)?.toInt() ?: 0
+        val url=gamesUrl(owner).addQueryParameter("max",(size+1+skip).toString()).addQueryParameter("sort","dateDesc")
             .addQueryParameter("moves","false").addQueryParameter("lastFen","true").addQueryParameter("ongoing","false")
             .addQueryParameter("finished","true").addQueryParameter("clocks","false").addQueryParameter("evals","false")
-        if(cursor!=null)url.addQueryParameter("until",cursor.removePrefix("lc_").toLong().toString())
-        val rows=read(request(url.build(),owner,true)).lineSequence().filter(String::isNotBlank).map(::JSONObject).take(size+1).toList()
+        if(until!=null)url.addQueryParameter("until",until.toString())
+        val rows=read(request(url.build(),owner,true)).lineSequence().filter(String::isNotBlank).map(::JSONObject)
+            .let { stream ->
+                var duplicates=skip
+                stream.dropWhile { duplicates>0 && it.getLong("createdAt")==until!!-1 && (--duplicates)>=0 }
+            }.take(size+1).toList()
         val list=JSONArray();rows.take(size).forEach { list.put(game(it,owner,false)) }
         return JSONObject().put("games",list).put("account",owner).put("total",-1)
-            .put("next_cursor",rows.getOrNull(size)?.let { "lc_"+it.getLong("createdAt") } ?: JSONObject.NULL)
+            .put("next_cursor",rows.getOrNull(size)?.let { val stamp=it.getLong("createdAt");val count=rows.take(size).count { row->row.getLong("createdAt")==stamp }; "lc_${stamp+1}_${count+if(until==stamp+1)skip else 0}" } ?: JSONObject.NULL)
     }
     fun detail(owner:String,id:String,read:(Request)->String):JSONObject {
         require(id.matches(Regex("[A-Za-z0-9]{8,16}")))

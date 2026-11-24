@@ -21,7 +21,7 @@ class LichessPhoneTest {
             assertEquals("false",req.url.queryParameter("moves"));assertEquals("true",req.url.queryParameter("lastFen"))
             assertNull(req.header("Authorization"));row+"\n"+row.replace("1234,","1200,")
         }
-        assertEquals("lc_1200",p.getString("next_cursor"))
+        assertEquals("lc_1201_0",p.getString("next_cursor"))
         val summary=p.getJSONArray("games").getJSONObject(0)
         assertFalse(summary.has("moves"));assertEquals("0-1",summary.getString("result"))
         val detail=phone.detail("owner","abcD1234"){req->assertEquals("true",req.url.queryParameter("moves"));row}
@@ -29,6 +29,24 @@ class LichessPhoneTest {
         assertTrue(runCatching{phone.detail("unrelated","abcD1234"){row}}.isFailure)
         assertTrue(runCatching{phone.detail("owner","abcD1234"){row.replace("resign","started")}}.isFailure)
     }
+    @Test fun exclusivePageBoundaryNeverSkipsLookaheadOrRepeatsTiedRows(){
+        val phone=LichessPhone(prefs)
+        val games=listOf(1200,1200,1200,1100,1000).mapIndexed { i,t ->
+            JSONObject(row).put("createdAt",t).put("id","abcD123"+i)
+        }
+        var cursor:String?=null;val ids=mutableListOf<String>()
+        do {
+            val page=phone.page("owner",cursor,2){r->
+                val until=r.url.queryParameter("until")?.toLong() ?: Long.MAX_VALUE
+                games.filter { it.getLong("createdAt")<until }.take(r.url.queryParameter("max")!!.toInt()).joinToString("\n")
+            }
+            val items=page.getJSONArray("games");for(i in 0 until items.length())ids+=items.getJSONObject(i).getString("id")
+            assertTrue(ids.size<=games.size)
+            cursor=if(page.isNull("next_cursor"))null else page.getString("next_cursor")
+        }while(cursor!=null)
+        assertEquals(games.map { it.getString("id") },ids)
+    }
+
     @Test fun privatePkceCredentialIsBoundToOwnerAndOngoingGatePrecedesExplorer(){
         val phone=LichessPhone(prefs);phone.forget()
         val auth=phone.authorize("owner");val state=auth.getQueryParameter("state")!!
