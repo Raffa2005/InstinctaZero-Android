@@ -20,8 +20,8 @@ internal class WorkspaceMenu(private val context: Context) {
         text=label; textSize=size; setTextColor(if(muted)0xffaaa9a2.toInt() else 0xffeeeeea.toInt())
     }
     fun column() = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL }
-    fun section(label: String) = text(label.uppercase(),11f,true).apply {
-        letterSpacing=.12f; setPadding(dp(4),dp(20),0,dp(9))
+    fun section(label: String) = text(label,16f).apply {
+        typeface=Typeface.DEFAULT_BOLD; setPadding(0,dp(14),0,dp(6))
     }
     fun row(icon: String, title: String, subtitle: String? = null, action: () -> Unit): View = LinearLayout(context).apply {
         orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL
@@ -42,10 +42,10 @@ internal class WorkspaceMenu(private val context: Context) {
     fun scroll(content: View) = ScrollView(context).apply { isFillViewport=true; addView(content) }
     fun home(paired: Boolean, connection: String, analysis: () -> Unit, games: () -> Unit,
         library: () -> Unit, repertoire: () -> Unit, profile: () -> Unit, editor: () -> Unit, privacy: View? = null): View = scroll(column().apply {
-        setPadding(dp(16),0,dp(16),dp(18))
+        setPadding(dp(16),dp(14),dp(16),dp(18))
         fun surface(color:Int,radius:Int)=GradientDrawable().apply { setColor(color);cornerRadius=dp(radius).toFloat() }
-        fun group(label:String, entries:List<View>) {
-            addView(section(label))
+        fun group(entries:List<View>) {
+            addView(View(context),LinearLayout.LayoutParams(1,dp(12)))
             addView(column().apply {
                 background=surface(0xff323330.toInt(),14);clipToOutline=true
                 for((i,entry) in entries.withIndex()) {
@@ -56,22 +56,21 @@ internal class WorkspaceMenu(private val context: Context) {
                 }
             })
         }
-        addView(section("Analysis"))
-        addView(row("\uf201","Analysis board","Continue where you left off",analysis).apply {
+        addView(row("\uf201","Analysis board",null,analysis).apply {
             background=RippleDrawable(ColorStateList.valueOf(0x33c4af75),surface(0xff423e33.toInt(),14).apply {
                 setStroke(dp(1),0xff6d6247.toInt()) },null)
         })
         addView(column().apply {
             background=surface(0xff323330.toInt(),14);clipToOutline=true
             for(entry in listOf(row("\uf044","Board editor",null,editor),row("\uf009","Games",
-                if(paired)null else "Connect your PC to browse games",games))) {
+                if(paired)null else "PC not paired",games))) {
                 entry.background=RippleDrawable(ColorStateList.valueOf(0x33c4af75),null,surface(-1,6))
                 addView(entry,LinearLayout.LayoutParams(-1,-2))
             }
         })
-        group("Repertoires",listOf(row("\uf02d","Repertoire library","Manage your openings",library),
+        group(listOf(row("\uf02d","Repertoire library",null,library),
             row("\uf279","Repertoire board",null,repertoire)))
-        group("Connection",listOf(row("\uf108","Account / PC",connection,profile)))
+        group(listOf(row("\uf108","Account / PC",connection,profile)))
         privacy?.let { addView(it) }
     })
 }

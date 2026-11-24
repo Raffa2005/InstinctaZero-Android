@@ -126,7 +126,7 @@
     board.addEventListener('touchcancel',()=>{gesture=null;ground.cancelMove();});
     board.addEventListener('contextmenu',e=>e.preventDefault());
     function resize(){if(ground)requestAnimationFrame(()=>{ground.setBounds(board.getBoundingClientRect());ground.redrawSync();});}
-    function status(){const result=validate(state);el.querySelector('.pe-status').textContent=notice||result.error||'Ready · opens separately from your saved board';el.querySelector('.pe-status').classList.toggle('invalid',!!result.error);el.querySelector('[data-pe-analyse]').disabled=!!result.error||fenError;}
+    function status(){const result=validate(state);el.querySelector('.pe-status').textContent=notice||result.error||'';el.querySelector('.pe-status').classList.toggle('invalid',!!result.error);el.querySelector('[data-pe-analyse]').disabled=!!result.error||fenError;}
     function sync(){if(ground){ground.set({fen:placement(state),orientation:black?'black':'white',lastMove:null});ground.selectSquare(null);}wrap.classList.toggle('orientation-black',black);wrap.classList.toggle('orientation-white',!black);save();render();resize();}
     function render(){
       el.classList.toggle('pe-fen-view',page==='fen');

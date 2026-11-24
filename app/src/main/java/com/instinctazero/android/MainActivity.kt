@@ -1014,14 +1014,11 @@ class MainActivity : ComponentActivity() {
             })
             val menu=WorkspaceMenu(this@MainActivity)
             addView(menu.row("\uf015","Home") { showHomeScreen() })
-            addView(menu.section("Analysis"))
             addView(menu.row("\uf201","Analysis board") { showAnalysisScreen() })
             addView(menu.row("\uf044","Board editor") { showBoardEditor() })
             addView(menu.row("\uf009","Games") { if (nativeBridge.isPaired()) showGamesScreen() else showProfileScreen() })
-            addView(menu.section("Repertoires"))
             addView(menu.row("\uf02d","Repertoire library") { showRepertoireLibrary() })
             addView(menu.row("\uf279","Repertoire board") { showRepertoires() })
-            addView(menu.section("Connection"))
             addView(menu.row("\uf108","Account / PC") { showProfileScreen() })
             addView(privacyControl())
         }.let { content -> android.widget.ScrollView(this@MainActivity).apply {
@@ -1081,7 +1078,7 @@ class MainActivity : ComponentActivity() {
 
     private fun connectionSummary(): String = JSONObject(nativeBridge.getConnectionState()).let { state ->
         if (state.optBoolean("paired")) if(privacy.enabled)"Paired PC · identity hidden" else "Paired as ${state.optString("deviceName").ifBlank { "InstinctaZero Android" }}"
-        else "Not paired · tap to connect"
+        else "Not paired"
     }
 
     private fun rememberPrivateAccounts(state: JSONObject) {

@@ -43,7 +43,7 @@ class WorkspaceMenuTest {
             for(row in rows) { assertTrue(row.height>=48);row.performClick() }
             assertEquals(listOf("analysis","editor","games","library","repertoire","profile"),clicked)
             val text=views(home).filterIsInstance<TextView>().map { it.text.toString() }
-            assertTrue(text.containsAll(listOf("ANALYSIS","REPERTOIRES","CONNECTION")))
+            assertTrue(text.containsAll(listOf("Analysis board","Repertoire library","Account / PC")))
         }
     }
     @Test fun nativeLibraryCreatesNamesChoosesColourAndOpensTheRightBook() {

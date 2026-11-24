@@ -38,7 +38,7 @@ internal object RepertoireLibraryView {
             val date={ ms: Long -> java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM,java.text.DateFormat.SHORT).format(java.util.Date(ms)) }
             page.addView(ui.text(when { busy -> "Connecting to your PC…";state.backup.optBoolean("pending") -> "Changes saved on this phone · PC backup pending";saved>0 -> "Last saved: ${date(saved)}";else -> "No confirmed backup from this phone yet" },15f))
             if(state.backup.optString("message").isNotBlank())page.addView(ui.text(state.backup.getString("message"),14f,true))
-            page.addView(ui.text("Additions, deleted moves, recommendations, comments, phone-created repertoires, selection settings and the last Undo are saved privately on your paired PC. Up to 100 versions (64 MiB compressed). Games, pairing and original PGNs are not changed.",14f,true).apply { setPadding(0,(12*dp).toInt(),0,0) })
+            page.addView(ui.text("Backups contain repertoire edits and selections. Games and original PGNs are not changed.",14f,true).apply { setPadding(0,(12*dp).toInt(),0,0) })
             if(state.restoreVersion.isNotEmpty()) {
                 page.addView(ui.section("Restore this version?"))
                 page.addView(ui.text("Your current repertoire edits are backed up first. This replaces only phone repertoire edits and selections. On a replacement phone, pair with the same PC and download its repertoire library, then restore here.",15f))
@@ -66,7 +66,7 @@ internal object RepertoireLibraryView {
                 page.addView(ui.row("\uf00d","Cancel") { state.editing=false;render() })
                 return ui.scroll(page)
             }
-            page.addView(ui.section(if(state.id.isEmpty()) "New repertoire" else "Repertoire name"))
+            page.addView(ui.section(if(state.id.isEmpty()) "New repertoire" else "Rename repertoire"))
             page.addView(EditText(context).apply {
                 hint="Repertoire name"; contentDescription="Repertoire name"; textSize=18f
                 setTextColor(0xffeeeeea.toInt()); setHintTextColor(0xffaaa9a2.toInt())
@@ -82,16 +82,13 @@ internal object RepertoireLibraryView {
                 for(side in listOf("white","black"))page.addView(ui.row(if(state.side==side)"\uf058" else "\uf10c",side.replaceFirstChar(Char::uppercase)) {
                     state.side=side; render()
                 }.apply { isSelected=state.side==side })
-                page.addView(ui.text("Start empty. Add moves and comments from the analysis board. Saved on this phone.",14f,true))
             }
-            page.addView(ui.section(""))
             page.addView(ui.row("\uf00c",if(state.busy)"Saving…" else if(state.id.isEmpty())"Create repertoire" else "Save name") {
                 if(!state.busy)save(JSONObject().put("id",state.id).put("name",state.name).put("side",state.side))
             }.apply { isEnabled=!state.busy })
             page.addView(ui.row("\uf00d","Cancel") { state.editing=false; state.error=""; render() }.apply { isEnabled=!state.busy })
         } else {
-            page.addView(ui.section("Your collection"))
-            page.addView(ui.row("\uf067","New repertoire","Build an opening repertoire for White or Black") {
+            page.addView(ui.row("\uf067","New repertoire") {
                 state.editing=true; state.id=""; state.name=""; state.side="white"; state.error=""; state.revealPrivateText=false; render()
             })
             val rows=state.catalog.optJSONArray("repertoires")
@@ -101,18 +98,16 @@ internal object RepertoireLibraryView {
                 page.addView(ui.section(if(local)"On this phone" else "From your PC"))
                 for(rep in reps) {
                     val label=privacy?.text(rep.getString("name")) ?: rep.getString("name")
-                    page.addView(ui.row("\uf02d",label,rep.getString("side").replaceFirstChar(Char::uppercase)+" · Open on the analysis board") { open(rep.getString("id")) })
+                    page.addView(ui.row("\uf02d",label,rep.getString("side").replaceFirstChar(Char::uppercase)) { open(rep.getString("id")) })
                     if(local)page.addView(ui.row("\uf040","Rename $label") {
                         state.editing=true; state.id=rep.getString("id"); state.name=rep.getString("name"); state.side=rep.getString("side"); state.revealPrivateText=false;render()
                     })
                 }
             }
-            page.addView(ui.section("Explore"))
-            page.addView(ui.row("\uf0ee","Backups and restore","Private history on your paired PC") {
+            page.addView(ui.row("\uf0ee","Backups and restore") {
                 state.backupsOpen=true;state.restoreVersion="";render();backupAction("list","")
             })
-            page.addView(ui.row("\uf279","Repertoire board","Compare your selected repertoires") { open(null) })
-            page.addView(ui.text("PC copies can be updated from repertoire settings on the board. Local edits are backed up when your paired PC is reachable.",13f,true))
+            page.addView(ui.row("\uf279","Repertoire board") { open(null) })
         }
         return ui.scroll(page)
     }

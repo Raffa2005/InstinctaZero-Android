@@ -45,8 +45,12 @@ try {
     await page.locator('[data-sf-lines]').fill('3');await page.waitForFunction(()=>window.lastSearch?.sf_lines===3);
     await page.locator('[data-section="Leela"]').tap();await page.locator('[data-leela-lines]').fill('4');
     await page.waitForFunction(()=>window.lastSearch?.leela_lines===4 && window.lastSearch.sf_lines===3);
-    await page.locator('[data-tab="moves"]').tap();
-    assert.ok(await page.locator('#sf-eval').isVisible());
+    for(const tab of ['moves','book','repertoire','info','chart','engine']){
+      await page.locator('[data-tab="'+tab+'"]').tap();
+      assert.ok(await page.locator('.tabs #sf-eval').isVisible());
+      assert.ok(await page.locator('.tabs #leela-eval').isVisible());
+      assert.equal(await page.locator('#sf-eval').evaluate(el=>el.parentNode.id),'tab-title');
+    }
     await page.evaluate(()=>window.InstinctaZero.setAnalysisActive(false));
     await page.close();console.log(model+': real local MultiPV, arrows and navigation passed');
   }
