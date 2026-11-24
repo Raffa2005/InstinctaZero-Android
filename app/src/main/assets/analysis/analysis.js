@@ -50,6 +50,37 @@
   let gameLoadId = 0, gameLoading = null;
   const engine = { requestId: null, timer: null, watchdog:null, attempts:0, received:false, status: 'idle', lastGood: null, lines: [], stats: null, progress: null, error: '' };
   const book = { requestId: null, loading: false, data: null, error: '' };
+  const fish = {local:'off', server:false, phoneLines:[], pcLines:[], pcError:'', error:'', download:'', lite:false, full:false};
+  const localFish = new LocalStockfish((fen, lines, error) => {
+    if (fen && fen !== chess.fen()) return;
+    fish.phoneLines = lines;
+    fish.error = error;
+    queueAnalysisRender(true);
+  });
+  let displayedRoots = [];
+  let displayedFen = '';
+  function fishOptions() {
+    try { Object.assign(fish, JSON.parse(native()?.stockfishOptions?.() || '{}')); } catch (_) {}
+  }
+  function stopFishPosition() {
+    localFish.cancel();
+    fish.phoneLines = [];
+    fish.pcLines = [];
+    fish.pcError = '';
+    fish.error = '';
+    displayedRoots = [];
+  }
+  function startPhoneFish() {
+    if (fish.local !== 'off' && analysisActive && !document.hidden && !gameLoading && !editingPosition())
+      localFish.search(fish.local,chess.fen(),studyContext.initialFen,history());
+  }
+  function visibleRank(moves,to) {
+    if (displayedFen !== chess.fen()) return null;
+    const origins = displayedRoots.filter(u => u.slice(2,4)===to).map(u => u.slice(0,2));
+    if (!origins.length) return null;
+    const candidates = moves.filter(move => move.to === to).map(move => move.from);
+    return [...new Set([...origins.filter(from=>candidates.includes(from)), ...candidates])].map(from=>({from}));
+  }
   const boardAssets = ['brown.svg','pieces/wK.svg','pieces/wQ.svg','pieces/wR.svg','pieces/wB.svg','pieces/wN.svg','pieces/wP.svg','pieces/bK.svg','pieces/bQ.svg','pieces/bR.svg','pieces/bB.svg','pieces/bN.svg','pieces/bP.svg'];
   Promise.all(boardAssets.map(source => new Promise(resolve => { const image = new Image(); image.onload = image.onerror = resolve; image.src = source; }))).then(() => { document.documentElement.classList.remove('board-assets-loading'); refreshBoardBounds(); });
 
@@ -67,7 +98,7 @@
   }
   function cancelBookRequest() { if (book.requestId && native() && native().cancelAnalysis) native().cancelAnalysis(book.requestId); book.requestId = null; book.loading = false; }
   function stopEngineTransport() { if(engine.watchdog)clearTimeout(engine.watchdog);engine.watchdog=null;if(engine.timer)clearTimeout(engine.timer);engine.timer=null;if(engine.requestId && native())native().cancelAnalysis(engine.requestId);engine.requestId=null; }
-  function resetTransport() { stopEngineTransport(); cancelBookRequest(); if (engine.renderFrame != null) cancelAnimationFrame(engine.renderFrame); engine.renderFrame = null; engine.arrowsPending = false; }
+  function resetTransport() { stopFishPosition(); if (!analysisActive || document.hidden || gameLoading || editingPosition()) localFish.close(); stopEngineTransport(); cancelBookRequest(); if (engine.renderFrame != null) cancelAnimationFrame(engine.renderFrame); engine.renderFrame = null; engine.arrowsPending = false; }
   function clearEngine(nextStatus) { if(engine.watchdog)clearTimeout(engine.watchdog);engine.watchdog=null; if (engine.timer) clearTimeout(engine.timer); engine.timer = null; if (engine.requestId && native()) native().cancelAnalysis(engine.requestId); engine.requestId = null; engine.status = nextStatus || 'idle'; engine.lastGood = null; engine.lines = []; engine.stats = null; engine.progress = null; engine.error = ''; renderArrows([]); }
   function commitMove(from, to, promotion, keepClickChoice = false) { if (loadFailed || gameLoading || editingPosition()) return;
     if(!keepClickChoice)clearClickChoice();
@@ -100,7 +131,7 @@
     if(!resumed) {
       if(!legalMoves().some(move=>move.to===to))return;
       clearClickChoice();
-      const moves=legalMoves(), ranking=inputEvidence.rank(chess.fen(),settings.backend,moves,to) || window.InstinctaClickChess.ranker.rank(chess.fen(),moves,to,recentClickHistory());
+      const moves=legalMoves(), ranking=visibleRank(moves,to) || (settings.enabled && inputEvidence.rank(chess.fen(),settings.backend,moves,to)) || window.InstinctaClickChess.ranker.rank(chess.fen(),moves,to,recentClickHistory());
       if(!ranking.length)return;
       clickChoice={parent:cursor,current:null,to,ranking,moves,index:0};
     }
@@ -150,9 +181,9 @@
   }
   function clampInteger(value, minimum, maximum, fallback) { const parsed = Number.parseInt(String(value == null ? '' : value), 10); return Number.isFinite(parsed) ? Math.max(minimum, Math.min(maximum, parsed)) : fallback; }
   function orderedSelection(values, allowed) { const selected = new Set(Array.isArray(values) ? values.map(String) : []); return allowed.filter(value => selected.has(String(value))); }
-  function loadUiSettings() { if (!native() || !native().getUiSettings) return; try { const saved = JSON.parse(native().getUiSettings() || '{}'); if(typeof saved.smartInput === 'boolean')settings.smartInput=saved.smartInput; settings.nodes = NODE_OPTIONS.includes(Number(saved.nodes)) ? Number(saved.nodes) : settings.nodes; settings.arrowCount = clampInteger(saved.arrowCount, 1, 8, settings.arrowCount); if (saved.arrowMode === 'best' || saved.arrowMode === 'maneuver') settings.arrowMode = saved.arrowMode; if (typeof saved.leelaEnabled === 'boolean') settings.enabled = saved.leelaEnabled; if (typeof saved.arrowsEnabled === 'boolean') settings.showArrows = saved.arrowsEnabled; if (saved.engineBackend === 'cpu' || saved.engineBackend === 'sycl') settings.backend = saved.engineBackend; if (saved.bookSource === 'masters' || saved.bookSource === 'lichess') settings.bookSource = saved.bookSource; settings.bookSpeeds = orderedSelection(saved.bookSpeeds, BOOK_SPEEDS); settings.bookRatings = orderedSelection(saved.bookRatings, BOOK_RATINGS); } catch (_) {} }
+  function loadUiSettings() { fishOptions(); if (!native() || !native().getUiSettings) return; try { const saved = JSON.parse(native().getUiSettings() || '{}'); if(typeof saved.smartInput === 'boolean')settings.smartInput=saved.smartInput; settings.nodes = NODE_OPTIONS.includes(Number(saved.nodes)) ? Number(saved.nodes) : settings.nodes; settings.arrowCount = clampInteger(saved.arrowCount, 1, 8, settings.arrowCount); if (saved.arrowMode === 'best' || saved.arrowMode === 'maneuver') settings.arrowMode = saved.arrowMode; if (typeof saved.leelaEnabled === 'boolean') settings.enabled = saved.leelaEnabled; if (typeof saved.arrowsEnabled === 'boolean') settings.showArrows = saved.arrowsEnabled; if (saved.engineBackend === 'cpu' || saved.engineBackend === 'sycl') settings.backend = saved.engineBackend; if (saved.bookSource === 'masters' || saved.bookSource === 'lichess') settings.bookSource = saved.bookSource; settings.bookSpeeds = orderedSelection(saved.bookSpeeds, BOOK_SPEEDS); settings.bookRatings = orderedSelection(saved.bookRatings, BOOK_RATINGS); } catch (_) {} }
   function saveUiSettings() { if (!native() || !native().saveUiSettings) return; native().saveUiSettings(JSON.stringify({ smartInput:settings.smartInput, nodes: settings.nodes, arrowCount: settings.arrowCount, arrowMode:settings.arrowMode, leelaEnabled: settings.enabled, arrowsEnabled: settings.showArrows, engineBackend:settings.backend, appearance: 'brown', bookSource:settings.bookSource, bookSpeeds:settings.bookSpeeds, bookRatings:settings.bookRatings })); }
-  function studyRequest() { const request = { history: history(), nodes: settings.nodes, backend:settings.backend }; if (studyContext.gameId) request.game_id = studyContext.gameId; else if(studyContext.editedPosition)request.initial_fen = studyContext.initialFen; return request; }
+  function studyRequest() { const request = { history: history(), nodes: settings.nodes, backend:settings.backend }; if (fish.server) request.engines=settings.enabled?'both':'stockfish'; if (studyContext.gameId) request.game_id = studyContext.gameId; else if(studyContext.editedPosition)request.initial_fen = studyContext.initialFen; return request; }
   function explorerRequest() { const request = { history: history(), source:settings.bookSource }; if (studyContext.gameId) request.game_id = studyContext.gameId; else if(studyContext.editedPosition)request.initial_fen = studyContext.initialFen; if (settings.bookSource === 'lichess') { if (settings.bookSpeeds.length) request.speeds = settings.bookSpeeds.slice(); if (settings.bookRatings.length) request.ratings = settings.bookRatings.slice(); } return request; }
   function moveUci(node) { return node && node.move ? node.move.from + node.move.to + (node.move.promotion || '') : ''; }
   function wireNode(node) { const result={u:moveUci(node),x:0,c:[]}, pending=[[node,result]];while(pending.length){const [parent,wire]=pending.pop();for(const child of parent.children){const next={u:moveUci(child),x:0,c:[]};wire.c.push(next);pending.push([child,next]);}}return result; }
@@ -225,9 +256,10 @@
       for (const item of game.moves) {
         if (id !== gameLoadId) return false;
         const uci = String(item && item.uci || '');
-        if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(uci)) throw new Error('Invalid archived move');
+        const san = item && item.san;
+        if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(uci) && !(uci==='' && typeof san==='string' && san.length<=12)) throw new Error('Invalid archived move');
         const number = probe.moveNumber(), mover = probe.turn();
-        const move = probe.move({from:uci.slice(0,2),to:uci.slice(2,4),promotion:uci[4]});
+        const move = probe.move(uci ? {from:uci.slice(0,2),to:uci.slice(2,4),promotion:uci[4]} : san);
         const child = {id:++count,fen:probe.fen(),san:move.san,move:{from:move.from,to:move.to,promotion:move.promotion || null},number,color:mover,parent,children:[],selectedChild:null};
         parent.children.push(child); parent.selectedChild = child; parent = child;
         if (performance.now() - slice >= 6) { await new Promise(resolve => setTimeout(resolve,0)); slice = performance.now(); }
@@ -271,23 +303,24 @@
   }
   function recoverAnalysis() {
     stopEngineTransport();
-    if(!analysisActive || !settings.enabled || gameLoading || editingPosition() || document.hidden)return;
+    if(!analysisActive || (!settings.enabled && !fish.server) || gameLoading || editingPosition() || document.hidden)return;
     if(engine.attempts>=3){engine.status='error';engine.error='Analysis interrupted. Open Engine and tap Retry.';renderActivePanel();return;}
     engine.attempts++;scheduleAnalysis(true);
   }
   function scheduleAnalysis(retry=false) {
     if(gameLoading || editingPosition() || (repertoirePanel && repertoirePanel.isLibrary()))return;
     if(!analysisActive){resetTransport();return;}
-    if(!settings.enabled){clearEngine('off');renderActivePanel();return;}
+    if (!retry) startPhoneFish();
+    if(!settings.enabled && !fish.server){clearEngine('off');renderActivePanel();return;}
     if(!native()){engine.status='disconnected';renderActivePanel();return;}
     stopEngineTransport();if(!retry)engine.attempts=0;engine.received=false;
     engine.status=retry?'retrying':'starting';engine.error=retry?'Connection interrupted. Retrying this position…':'';renderActivePanel();
     engine.timer=setTimeout(()=>{
-      engine.timer=null;if(!analysisActive || !settings.enabled || document.hidden)return;
+      engine.timer=null;if(!analysisActive || (!settings.enabled && !fish.server) || document.hidden)return;
       try{engine.requestId=native().startAnalysis(JSON.stringify(studyRequest()));watchAnalysis();}catch(_){recoverAnalysis();}
     },retry?Math.min(5000,1000*2**(engine.attempts-1)):120);
   }
-  function requestBook() { if (gameLoading || editingPosition()) return;  if (!analysisActive || tab !== 'book' || !native()) { cancelBookRequest(); renderActivePanel(); return; } cancelBookRequest(); bookSettingsDirty = false; book.loading = true; book.error = ''; renderActivePanel(); try { book.requestId = native().requestExplorer(JSON.stringify(explorerRequest())); } catch (_) { book.loading = false; book.error = 'Connection unavailable'; renderActivePanel(); } }
+  function requestBook() { if (gameLoading || editingPosition()) return;  if (!analysisActive || tab !== 'book' || !native()) { cancelBookRequest(); renderActivePanel(); return; } cancelBookRequest(); bookSettingsDirty = false; book.loading = true; book.error = ''; renderActivePanel(); try { book.requestId = native().requestExplorer(JSON.stringify({...explorerRequest(),fen:chess.fen()})); } catch (_) { book.loading = false; book.error = 'Connection unavailable'; renderActivePanel(); } }
   function projectAnalysisToChild(data, move, targetNodes) {
     const selectedMove = String(move || '');
     if (!data || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(selectedMove)) return null;
@@ -329,13 +362,31 @@
   function whiteEvalText(line) { if (line && line.white_score != null && line.white_score !== 'n/a') return String(line.white_score); const mate = finiteMetric(line && line.white_mate); if (mate !== null) return '#' + mate; const cp = finiteMetric(line && line.white_cp); return cp === null ? '—' : (cp / 100 >= 0 ? '+' : '') + (cp / 100).toFixed(2); }
   function engineMoveStats() { const stats = engine.stats || {}; const source = Array.isArray(stats.move_stats) && stats.move_stats.length ? stats.move_stats : (Array.isArray(stats.root_move_stats) ? stats.root_move_stats : []); return new Map(source.map(item => [item.uci, item])); }
   function leelaStatBar(rootStat, totalVisits) { const prior = finiteMetric(rootStat && rootStat.prior), visits = finiteMetric(rootStat && rootStat.visits); const priorPercent = prior === null ? 0 : Math.max(0, Math.min(100, prior * 100)); const visitPercent = visits === null || totalVisits <= 0 ? 0 : Math.max(0, Math.min(100, visits / totalVisits * 100)); const label = 'Prior ' + (prior === null ? 'unknown' : priorPercent.toFixed(1) + '%') + '; ' + (visits === null ? 'unknown visits' : compactCount(visits) + ' visits, ' + visitPercent.toFixed(1) + '% of root visits'); return '<svg class="leela-stat-bar" viewBox="0 0 100 8" role="img" aria-label="' + safe(label) + '"><rect class="stat-track" width="100" height="8" rx="4"/><rect class="stat-prior" width="' + priorPercent + '" height="4"/><rect class="stat-visits" y="4" width="' + visitPercent + '" height="4"/></svg>'; }
-  function enginePanel() {
+  function leelaPanel() {
     const status = engine.progress ? ' ' + safe(engine.progress.visits || 0) + '/' + safe(engine.progress.target || settings.nodes) : engine.status === 'starting' ? ' starting' : engine.status === 'disconnected' ? ' disconnected' : '';
     const rootStats = engineMoveStats();
     const stats = engine.stats || {}; const statValues = [...rootStats.values()]; const reportedRootVisits = finiteMetric(stats.total_nodes != null ? stats.total_nodes : stats.nodes); const summedRootVisits = statValues.reduce((total, stat) => total + Math.max(0, finiteMetric(stat.visits) || 0), 0); const totalRootVisits = reportedRootVisits !== null && reportedRootVisits > 0 ? reportedRootVisits : summedRootVisits; const rows = engine.lines.length ? engine.lines.map((line, index) => { const rootMove = Array.isArray(line.pv) ? line.pv[0] : ''; const rootStat = rootStats.get(rootMove) || {}; const visits = finiteMetric(rootStat.visits); const prior = finiteMetric(rootStat.prior); const statText = (visits === null ? '— visits' : compactCount(visits) + ' visits') + ' · ' + (prior === null ? '— prior' : (Math.max(0, Math.min(100, prior * 100))).toFixed(1) + '% prior'); return '<button class="pv" data-pv="' + index + '" data-pv-uci="' + safe(rootMove) + '"><strong>' + safe(whiteEvalText(line)) + leelaStatBar(rootStat, totalRootVisits) + '</strong><span class="pv-copy"><small>' + safe(statText) + '</small><span>' + safe((line.san || []).join(' ') || (line.pv || []).join(' ')) + '</span></span></button>'; }).join('') : '<div class="empty">' + (engine.error ? safe(privacy.error(engine.error,'Leela unavailable. Check the PC connection or retry analysis.')) : 'Waiting for Leela…') + '</div>';
     const progress = engine.progress || {}, visits = progress.visits || 0;
     const notice=engine.lines.length && engine.error ? '<div class="empty" role="status">'+safe(privacy.error(engine.error,'Leela unavailable. Retry analysis.'))+'</div>' : '';
     return notice + '<div class="stats"><span><b>visits:</b> ' + safe(visits) + '/' + safe(progress.target || settings.nodes) + '</span><span><b>nodes:</b> ' + safe(stats.total_nodes || stats.nodes || visits) + '</span><span><b>n/s:</b> ' + safe(stats.nps || progress.nps || 0) + '</span><span><b>time:</b> ' + safe(stats.elapsed_ms != null ? Math.round(stats.elapsed_ms / 1000) + 's' : '—') + '</span></div>' + rows + (engine.status==='error' || engine.status==='disconnected' ? '<button class="rep-button" data-engine-retry>Retry Leela</button>' : '');
+  }
+  function stockfishPanel(label,lines,message) {
+    return '<div class="stats">'+label+'</div>'+(lines.length ? lines.map(line=>{
+      const uci=line.pv[0], pv=line.san || (line.san=fishSan(line.pv));
+      return '<button class="pv" data-uci="'+safe(uci)+'"><strong>'+safe(whiteEvalText(line))+'</strong><span class="pv-copy"><small>Depth '+safe(line.depth)+'</small>'+safe(pv.join(' '))+'</span></button>';
+    }).join('') : '<div class="empty">'+safe(message || 'Waiting for analysis…')+'</div>');
+  }
+  function fishSan(pv) {
+    const board=new Chess(chess.fen()), moves=[];
+    for(const u of pv){try{moves.push(board.move({from:u.slice(0,2),to:u.slice(2,4),promotion:u[4]}).san);}catch(_){break;}}
+    return moves;
+  }
+  function enginePanel() {
+    return '<button class="fish-settings" data-fish-menu>Engine options ›</button>'+
+      (settings.enabled?leelaPanel():'')+
+      (fish.server?stockfishPanel('Stockfish 19 · PC',fish.pcLines,fish.pcError || (engine.error?'PC analysis unavailable. Check pairing and retry.':'')):'')+
+      (fish.local!=='off'?stockfishPanel('Stockfish 19 · phone',fish.phoneLines,fish.error):'')+
+      (!settings.enabled && (engine.error || fish.error || fish.pcError)?'<button class="fish-settings" data-engine-retry>Retry analysis</button>':'');
   }
   function moveMarkup(child, variationRoot) { const number = child.color === 'w' ? child.number + '.' : variationRoot ? child.number + '...' : ''; return '<button class="move ' + (child === cursor ? 'current' : '') + '" data-node="' + child.id + '">' + (number ? '<span class="no">' + number + '</span>' : '') + safe(child.san) + '</button>'; }
   function renderMoves(node) {
@@ -353,6 +404,10 @@
   function filterSummary(values) { return values.length ? values.join(' · ') : 'All'; }
   function chip(value, label, selected) { return '<button class="filter-chip' + (selected ? ' selected' : '') + '" data-filter="' + safe(value) + '" aria-pressed="' + selected + '">' + safe(label) + '</button>'; }
   function panelViewHtml() {
+    if(panelView==='fish') {
+      const option=(key,label,active)=>'<button class="rep-button" data-fish="'+key+'" aria-pressed="'+active+'">'+(active?'✓ ':'')+label+'</button>';
+      return '<div class="rep-settings"><div class="rep-section-label">Analysis PC</div><div class="rep-footer">'+option('leela','Leela',settings.enabled)+option('server','Stockfish 19',fish.server)+'</div><div class="rep-section-label">On this phone</div><div class="rep-footer">'+option('off','Off',fish.local==='off')+['lite','full'].map(key=>option(key,(fish[key]?'':'Download ')+(key==='lite'?'Lite · 1.9 MB':'Full · 99 MB'),fish.local===key)).join('')+'</div><p role="status">'+safe(fish.download || 'Phone downloads stay on this device and work offline.')+'</p></div>';
+    }
     if (panelView === 'repertoireSettings') return repertoirePanel ? privacy.html(repertoirePanel.settingsHtml()) : '';
     if (panelView === 'settings') {
       const nodeIndex = Math.max(0, NODE_OPTIONS.indexOf(settings.nodes));
@@ -370,11 +425,23 @@
     if (panelView === 'variationActions') return '<div class="panel-view"><div class="panel-readout"><span>Variation</span><b>' + safe(variationTarget && variationTarget.san || '') + '</b></div><div class="panel-buttons panel-buttons-stack"><button data-promote-variation>Promote to main line</button><button data-delete-variation>Delete variation</button><button data-cancel-variation>Cancel</button></div></div>';
     return '<div class="panel-view"><div class="panel-buttons panel-buttons-stack"><button data-editor>Board editor</button>' + (studyContext.editedPosition ? '<button data-source-board>Return to saved board</button>' : '') + '<button data-reset>New / reset</button><button data-delete' + (cursor.parent ? '' : ' disabled') + '>Delete current branch</button></div></div>';
   }
-  function heading() { if (gameLoading) { title.textContent = 'Loading game…'; document.querySelector('[data-study-title]').textContent = privacy.title(gameLoading.title,true); document.querySelector('.game-title small').textContent = 'Loading game…'; return; }  const best = engine.lines && engine.lines[0] || engine.stats && engine.stats.inherited_eval; const evalText = settings.enabled && best ? whiteEvalText(best) : null; title.textContent = evalText && evalText !== '—' ? evalText + (engine.status==='retrying'?' · retrying':engine.status==='error'?' · interrupted':' · Leela') : settings.enabled ? 'Leela · ' + (engine.status === 'running' || engine.status === 'starting' ? 'analyzing' : engine.status) : ({moves:'Moves',info:'Study information',engine:'Leela off',chart:'',book:'Opening book',repertoire:'Repertoires'})[tab]; document.querySelector('[data-study-title]').textContent = repertoirePanel && repertoirePanel.isLibrary() ? 'Repertoires' : privacy.title(studyContext.title,!!studyContext.gameId); document.querySelector('[data-panel-tab]').hidden = !panelView; document.querySelector('[data-panel-tab]').classList.toggle('selected', !!panelView);  const marker = document.querySelector('[data-tab="repertoire"]'), summary = repertoirePanel ? privacy.text(repertoirePanel.summary()) : ''; if (marker) { marker.setAttribute('title', summary || 'Repertoires'); marker.classList.toggle('rep-covered', !!summary && !summary.startsWith('Outside') && !summary.includes('deviation')); marker.classList.toggle('rep-deviated', summary.startsWith('Outside') || summary.includes('deviation')); } if (repertoirePanel && repertoirePanel.isLibrary()) document.querySelector('.game-title small').textContent = 'Private library · on this phone'; else if (summary) { const subtitle = document.querySelector('.game-title small'); subtitle.textContent = (cursor.san || privacy.subtitle(studyContext.subtitle)) + ' · ' + summary; } if(!summary && clickChoice && clickChoice.current===cursor)document.querySelector('.game-title small').textContent=cursor.san+' · drag back to '+cursor.move.from+' to undo'; else if(!summary && clickChoice && !clickChoice.current && clickChoice.parent===cursor)document.querySelector('.game-title small').textContent='Tap '+clickChoice.to+' for '+(clickChoice.ranking.length>1?'the next piece':'the move'); else if(!summary && !(repertoirePanel && repertoirePanel.isLibrary()))document.querySelector('.game-title small').textContent=privacy.subtitle(studyContext.subtitle); }
+  function heading() { if (gameLoading) { title.textContent = 'Loading game…'; document.querySelector('[data-study-title]').textContent = privacy.title(gameLoading.title,true); document.querySelector('.game-title small').textContent = 'Loading game…'; return; }  const best = engine.lines && engine.lines[0] || engine.stats && engine.stats.inherited_eval; const evalText = settings.enabled && best ? whiteEvalText(best) : null; title.textContent = evalText && evalText !== '—' ? evalText + (engine.status==='retrying'?' · retrying':engine.status==='error'?' · interrupted':' · Leela') : settings.enabled && !fish.pcLines.length && !fish.phoneLines.length ? 'Leela · ' + (engine.status === 'running' || engine.status === 'starting' ? 'analyzing' : engine.status) : (fish.server || fish.local!=='off') ? (whiteEvalText(fish.pcLines[0] || fish.phoneLines[0] || {})+' · Stockfish') : ({moves:'Moves',info:'Study information',engine:'Engines off',chart:'',book:'Opening book',repertoire:'Repertoires'})[tab]; document.querySelector('[data-study-title]').textContent = repertoirePanel && repertoirePanel.isLibrary() ? 'Repertoires' : privacy.title(studyContext.title,!!studyContext.gameId); document.querySelector('[data-panel-tab]').hidden = !panelView; document.querySelector('[data-panel-tab]').classList.toggle('selected', !!panelView);  const marker = document.querySelector('[data-tab="repertoire"]'), summary = repertoirePanel ? privacy.text(repertoirePanel.summary()) : ''; if (marker) { marker.setAttribute('title', summary || 'Repertoires'); marker.classList.toggle('rep-covered', !!summary && !summary.startsWith('Outside') && !summary.includes('deviation')); marker.classList.toggle('rep-deviated', summary.startsWith('Outside') || summary.includes('deviation')); } if (repertoirePanel && repertoirePanel.isLibrary()) document.querySelector('.game-title small').textContent = 'Private library · on this phone'; else if (summary) { const subtitle = document.querySelector('.game-title small'); subtitle.textContent = (cursor.san || privacy.subtitle(studyContext.subtitle)) + ' · ' + summary; } if(!summary && clickChoice && clickChoice.current===cursor)document.querySelector('.game-title small').textContent=cursor.san+' · drag back to '+cursor.move.from+' to undo'; else if(!summary && clickChoice && !clickChoice.current && clickChoice.parent===cursor)document.querySelector('.game-title small').textContent='Tap '+clickChoice.to+' for '+(clickChoice.ranking.length>1?'the next piece':'the move'); else if(!summary && !(repertoirePanel && repertoirePanel.isLibrary()))document.querySelector('.game-title small').textContent=privacy.subtitle(studyContext.subtitle); }
   function closePanelView() { const refreshBook = panelView === 'bookSettings' && bookSettingsDirty; panelView = null; variationTarget = null; if (refreshBook) { bookSettingsDirty = false; requestBook(); } renderPanel(); scheduleStudySave(); }
   function clearAnalysisCaches(node) { delete node.analysisCache; node.children.forEach(clearAnalysisCaches); }
   function persistBookSettings() { saveUiSettings(); cancelBookRequest(); book.data = null; bookSettingsDirty = true; }
   function bindPanelView() {
+    if(panelView==='fish'){
+      panel.querySelectorAll('[data-fish]').forEach(button=>button.onclick=()=>{
+        const key=button.dataset.fish;
+        if(key==='leela'){ settings.enabled=!settings.enabled; saveUiSettings(); }
+        else if(key==='server'){fish.server=!fish.server;native()?.setStockfishOptions?.(fish.local,fish.server);}
+        else if(key==='off' || fish[key]){fish.wanted=null;fish.local=key;native()?.setStockfishOptions?.(key,fish.server);}
+        else {if(fish.pendingPack)return;fish.pendingPack=fish.wanted=key;native()?.downloadStockfish?.(key);fish.download='Downloading '+key+'…';renderPanel();return;}
+        localFish.close();resetTransport();clearEngine('idle');if(settings.enabled)restoreCachedAnalysis();
+        scheduleAnalysis();renderPanel();
+      });
+      return;
+    }
     if (panelView === 'repertoireSettings') { if (repertoirePanel) repertoirePanel.bind(panel); return; }
     if (panelView === 'settings') {
       const nodes = panel.querySelector('[data-nodes]'), arrowsControl = panel.querySelector('[data-arrow-count]');
@@ -388,7 +455,7 @@
         panel.querySelectorAll('[data-arrow-mode]').forEach(item => item.setAttribute('aria-pressed',item.dataset.arrowMode === settings.arrowMode));
         saveUiSettings(); renderArrows(engine.lines);
       });
-      panel.querySelectorAll('[data-switch]').forEach(button => button.onclick = () => { const key = button.dataset.switch; if(key==='smartInput'){settings.smartInput=!settings.smartInput;clearClickChoice();button.classList.toggle('on',settings.smartInput);button.setAttribute('aria-checked',settings.smartInput);saveUiSettings();return;} if (key === 'leela') settings.enabled = !settings.enabled; else settings.showArrows = !settings.showArrows; button.classList.toggle('on', key === 'leela' ? settings.enabled : settings.showArrows); button.setAttribute('aria-checked', key === 'leela' ? settings.enabled : settings.showArrows); saveUiSettings(); renderArrows(engine.lines); if (key === 'leela') { if (settings.enabled) { restoreCachedAnalysis(); scheduleAnalysis(); } else clearEngine('off'); } });
+      panel.querySelectorAll('[data-switch]').forEach(button => button.onclick = () => { const key = button.dataset.switch; if(key==='smartInput'){settings.smartInput=!settings.smartInput;clearClickChoice();button.classList.toggle('on',settings.smartInput);button.setAttribute('aria-checked',settings.smartInput);saveUiSettings();return;} if (key === 'leela') settings.enabled = !settings.enabled; else settings.showArrows = !settings.showArrows; button.classList.toggle('on', key === 'leela' ? settings.enabled : settings.showArrows); button.setAttribute('aria-checked', key === 'leela' ? settings.enabled : settings.showArrows); saveUiSettings(); renderArrows(engine.lines); if (key === 'leela') { if (settings.enabled) { restoreCachedAnalysis(); scheduleAnalysis(); } else {clearEngine('off');scheduleAnalysis();} } });
     } else if (panelView === 'bookSettings') {
       panel.querySelectorAll('[data-source]').forEach(button => button.onclick = () => { const source = button.dataset.source; if (source === settings.bookSource) return; settings.bookSource = source; persistBookSettings(); renderPanel(); });
       panel.querySelectorAll('[data-filter]').forEach(button => button.onclick = () => { const raw = button.dataset.filter, rating = BOOK_RATINGS.includes(Number(raw)), values = rating ? settings.bookRatings : settings.bookSpeeds, value = rating ? Number(raw) : raw, index = values.indexOf(value); if (index >= 0) values.splice(index, 1); else values.push(value); const allowed = rating ? BOOK_RATINGS : BOOK_SPEEDS; values.splice(0, values.length, ...orderedSelection(values, allowed)); persistBookSettings(); renderPanel(); });
@@ -398,7 +465,7 @@
   }
   function bindMoveNode(button) { let held = false, timer = null; const stop = () => { if (timer) clearTimeout(timer); timer = null; }; button.onpointerdown = event => { if (event.pointerType === 'mouse' && event.button !== 0) return; stop(); held = false; const target = findNode(Number(button.dataset.node)); if (!target || !target.parent || target.parent.children.length < 2) return; timer = setTimeout(() => { held = true; variationTarget = target; openPanelView('variationActions'); }, 480); }; button.onpointerup = button.onpointercancel = button.onpointerleave = stop; button.oncontextmenu = event => event.preventDefault(); button.onclick = event => { if (held) { event.preventDefault(); held = false; return; } restore(findNode(Number(button.dataset.node))); }; }
   function navigationControls() { const prev=document.querySelector('[data-action="prev"]'),next=document.querySelector('[data-action="next"]'),mainline=document.querySelector('[data-action="mainline"]');prev.disabled=!cursor.parent;next.disabled=!mainlineChild(cursor);mainline.disabled=!navigationIntersection();mainline.setAttribute('aria-label',tab==='repertoire'?'Return to intersection':'Return to mainline'); }
-  function renderPanel() { if(!gameLoading && !panelView && tab==='moves' && renderedTreeRevision===treeRevision && panel.querySelector('.moves')) { panel.querySelector('.move.current')?.classList.remove('current');panel.querySelector('[data-node="'+cursor.id+'"]')?.classList.add('current');document.querySelector('.game-title small').textContent=(cursor.san || privacy.subtitle(studyContext.subtitle))+' · '+(chess.turn()==='w'?'White to move':'Black to move');heading();navigationControls();return; } if (gameLoading) { panel.innerHTML = '<div class="empty" role="status">Loading game…</div>'; heading(); for(const name of ['prev','next','mainline']) document.querySelector('[data-action="'+name+'"]').disabled = true; return; }  if (panelView === 'repertoireSettings' && repertoirePanel && repertoirePanel.hasEditorFocus()) { heading(); return; } const preserveEngine = !panelView && tab === 'engine' ? { scrollTop: panel.scrollTop, focusedPv: document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.pv : null } : null; const info = '<div class="empty"><b>Turn:</b> ' + (chess.turn() === 'w' ? 'White' : 'Black') + '<br><b>FEN:</b> ' + safe(chess.fen()) + '<br><b>Leela:</b> ' + safe(engine.status) + '<br>Paired PC credentials remain in the native shell.</div>'; document.querySelector('.game-title small').textContent = (cursor.san || privacy.subtitle(studyContext.subtitle)) + ' · ' + (engine.status === 'disconnected' ? 'PC disconnected' : chess.turn() === 'w' ? 'White to move' : 'Black to move'); panel.innerHTML = panelView ? panelViewHtml() : tab === 'engine' ? enginePanel() : tab === 'moves' ? movesPanel() : tab === 'book' ? bookPanel() : tab === 'repertoire' ? (repertoirePanel ? privacy.html(repertoirePanel.html()) : '') : tab === 'info' ? info : '<div class="chart-blank" aria-label="Chart intentionally empty"></div>'; heading(); const retry=panel.querySelector('[data-engine-retry]');if(retry)retry.onclick=()=>scheduleAnalysis(); if (panelView) bindPanelView(); if (!panelView && tab === 'repertoire' && repertoirePanel) repertoirePanel.bind(panel); if(!panelView && tab==='moves')renderedTreeRevision=treeRevision;panel.querySelectorAll('[data-node]').forEach(bindMoveNode); panel.querySelectorAll('[data-uci]').forEach(button => button.onclick = () => playExplorerMove(button.dataset.uci)); panel.querySelectorAll('[data-pv]').forEach(button => button.onclick = () => playUci(button.dataset.pvUci)); if (preserveEngine) { panel.scrollTop = preserveEngine.scrollTop; if (preserveEngine.focusedPv != null) { const focused = panel.querySelector('[data-pv="' + preserveEngine.focusedPv + '"]'); if (focused) { focused.focus({ preventScroll:true }); panel.scrollTop = preserveEngine.scrollTop; } } } const prev = document.querySelector('[data-action="prev"]'), next = document.querySelector('[data-action="next"]'), mainline = document.querySelector('[data-action="mainline"]'); prev.disabled = !cursor.parent; next.disabled = !mainlineChild(cursor); mainline.disabled = !navigationIntersection(); mainline.setAttribute('aria-label',tab==='repertoire'?'Return to intersection':'Return to mainline'); }
+  function renderPanel() { if(!gameLoading && !panelView && tab==='moves' && renderedTreeRevision===treeRevision && panel.querySelector('.moves')) { panel.querySelector('.move.current')?.classList.remove('current');panel.querySelector('[data-node="'+cursor.id+'"]')?.classList.add('current');document.querySelector('.game-title small').textContent=(cursor.san || privacy.subtitle(studyContext.subtitle))+' · '+(chess.turn()==='w'?'White to move':'Black to move');heading();navigationControls();return; } if (gameLoading) { panel.innerHTML = '<div class="empty" role="status">Loading game…</div>'; heading(); for(const name of ['prev','next','mainline']) document.querySelector('[data-action="'+name+'"]').disabled = true; return; }  if (panelView === 'repertoireSettings' && repertoirePanel && repertoirePanel.hasEditorFocus()) { heading(); return; } const preserveEngine = !panelView && tab === 'engine' ? { scrollTop: panel.scrollTop, focusedPv: document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.pv : null } : null; const info = '<div class="empty"><b>Turn:</b> ' + (chess.turn() === 'w' ? 'White' : 'Black') + '<br><b>FEN:</b> ' + safe(chess.fen()) + '<br><b>Leela:</b> ' + safe(engine.status) + '<br>Paired PC credentials remain in the native shell.</div>'; document.querySelector('.game-title small').textContent = (cursor.san || privacy.subtitle(studyContext.subtitle)) + ' · ' + (engine.status === 'disconnected' ? 'PC disconnected' : chess.turn() === 'w' ? 'White to move' : 'Black to move'); panel.innerHTML = panelView ? panelViewHtml() : tab === 'engine' ? enginePanel() : tab === 'moves' ? movesPanel() : tab === 'book' ? bookPanel() : tab === 'repertoire' ? (repertoirePanel ? privacy.html(repertoirePanel.html()) : '') : tab === 'info' ? info : '<div class="chart-blank" aria-label="Chart intentionally empty"></div>'; heading(); const fishMenu=panel.querySelector('[data-fish-menu]');if(fishMenu)fishMenu.onclick=()=>openPanelView('fish'); const retry=panel.querySelector('[data-engine-retry]');if(retry)retry.onclick=()=>scheduleAnalysis(); if (panelView) bindPanelView(); if (!panelView && tab === 'repertoire' && repertoirePanel) repertoirePanel.bind(panel); if(!panelView && tab==='moves')renderedTreeRevision=treeRevision;panel.querySelectorAll('[data-node]').forEach(bindMoveNode); panel.querySelectorAll('[data-uci]').forEach(button => button.onclick = () => playExplorerMove(button.dataset.uci)); panel.querySelectorAll('[data-pv]').forEach(button => button.onclick = () => playUci(button.dataset.pvUci)); if (preserveEngine) { panel.scrollTop = preserveEngine.scrollTop; if (preserveEngine.focusedPv != null) { const focused = panel.querySelector('[data-pv="' + preserveEngine.focusedPv + '"]'); if (focused) { focused.focus({ preventScroll:true }); panel.scrollTop = preserveEngine.scrollTop; } } } const prev = document.querySelector('[data-action="prev"]'), next = document.querySelector('[data-action="next"]'), mainline = document.querySelector('[data-action="mainline"]'); prev.disabled = !cursor.parent; next.disabled = !mainlineChild(cursor); mainline.disabled = !navigationIntersection(); mainline.setAttribute('aria-label',tab==='repertoire'?'Return to intersection':'Return to mainline'); }
   function findNode(id) { if(nodeIndex.has(id))return nodeIndex.get(id);const pending=[root];while(pending.length){const n=pending.pop();nodeIndex.set(n.id,n);pending.push(...n.children);}return nodeIndex.get(id) || null; }
   function forgetBranch(node) { const pending=[node];while(pending.length){const n=pending.pop();nodeIndex.delete(n.id);dirtyBranches.delete(n.id);pending.push(...n.children);} }
   function mainlineIntersection(node) { for (let branch = node; branch && branch.parent; branch = branch.parent) if (mainlineChild(branch.parent) !== branch) return branch.parent; return null; }
@@ -478,6 +545,10 @@
   }
   function arrowLine(move, kind, width, shortening) { if (!/^[a-h][1-8][a-h][1-8]/.test(move || '')) return ''; const a = squarePoint(move.slice(0,2)), b = squarePoint(move.slice(2,4)), dx = b[0] - a[0], dy = b[1] - a[1], length = Math.hypot(dx, dy) || 1, amount = Math.min(shortening || 10, length / 2), x2 = b[0] - dx / length * amount, y2 = b[1] - dy / length * amount; return '<line class="analysis-arrow ' + kind + '" stroke-width="' + width + '" x1="' + a[0] + '" y1="' + a[1] + '" x2="' + x2 + '" y2="' + y2 + '" marker-end="url(#arrow-' + kind + ')"/>'; }
   function renderArrows(lines) {
+    displayedRoots = [];
+    displayedFen = chess.fen();
+    const useFish = !(settings.enabled && lines.length);
+    if(useFish) lines = (fish.server && fish.pcLines.length) ? fish.pcLines : fish.phoneLines;
     const defs = arrows.querySelector('defs').outerHTML;
     if (!settings.showArrows || !lines.length) { arrows.innerHTML = defs; return; }
     const best = lines[0], bestMove = best && best.pv && best.pv[0];
@@ -490,14 +561,16 @@
       ? maneuverArrowShapes(best.pv, 'paleBlue').map(shape => ({move:shape.orig + shape.dest, kind:'blue', width:15}))
       : [{move:bestMove, kind:'blue', width:15}]).slice(0, settings.arrowCount);
     const seen = new Set([bestMove.slice(0,4)]);
-    const alternatives = rankedLeelaAlternativeLines(lines.slice(1), statsByMove);
+    displayedRoots.push(bestMove);
+    const alternatives = useFish ? lines.slice(1) : rankedLeelaAlternativeLines(lines.slice(1), statsByMove);
     for (const [index, line] of alternatives.entries()) {
       if (shapes.length >= settings.arrowCount) break;
       const move = line && line.pv && line.pv[0];
       if (!move || seen.has(move.slice(0,4))) continue;
-      const width = alternativeArrowWidth(best, line, index, moveStats, statsByMove);
+      const shift = useFish ? (lineWinningChance(best)-lineWinningChance(line))/2 : 0;
+      const width = useFish ? (shift<0 || shift>=0.2 ? null : Math.round(12-shift*50)) : alternativeArrowWidth(best, line, index, moveStats, statsByMove);
       if (width === null) continue;
-      if (/^[a-h][1-8][a-h][1-8]/.test(move)) { seen.add(move.slice(0,4)); shapes.push({move, kind:'grey', width}); }
+      if (/^[a-h][1-8][a-h][1-8]/.test(move)) { seen.add(move.slice(0,4)); displayedRoots.push(move); shapes.push({move, kind:'grey', width}); }
     }
     const destinationCounts = new Map();
     shapes.forEach(shape => destinationCounts.set(shape.move.slice(2,4), (destinationCounts.get(shape.move.slice(2,4)) || 0) + 1));
@@ -546,15 +619,31 @@
   }
 
   window.InstinctaZero = window.InstinctaZero || {};
+  window.InstinctaZero.onStockfishDownload = (key,ok) => {
+    fishOptions();
+    fish.pendingPack=null;
+    fish.download=ok?'Download ready.':'Download failed. Tap the network to retry.';
+    if(ok && fish.wanted===key){fish.local=key;native()?.setStockfishOptions?.(key,fish.server);startPhoneFish();}
+    renderPanel();
+  };
   window.InstinctaZero.openBoardEditor = openBoardEditor;
   function rememberEngineInput(data) { inputEvidence.remember(chess.fen(),settings.backend,legalMoves(),data); }
   window.InstinctaZero.onNativeAnalysis = function (id, payloadJson) {
     if(id!==engine.requestId)return;let payload;
     try{payload=typeof payloadJson==='string'?JSON.parse(payloadJson):payloadJson;}catch(_){return;}
     const data=payload.data || payload;
+    if(payload.event==='stockfish') {
+      watchAnalysis();
+      fish.pcLines = data.lines || [];
+      if (fish.pcLines.length) engine.received = true;
+      queueAnalysisRender(true);
+      return;
+    }
+    if(payload.event==='engine-error' && data.engine==='stockfish'){fish.pcLines=[];fish.pcError='PC Stockfish unavailable.';engine.received=true;queueAnalysisRender(true);return;}
+    if(payload.event==='engine-error' && data.engine==='lc0' && fish.server){engine.lines=[];engine.error='Leela unavailable.';engine.status='error';queueAnalysisRender(true);return;}
     if(payload.event==='stream-ended'){recoverAnalysis();return;}
     if(payload.event==='engine-error' || payload.event==='error' || data.error){
-      if(studyContext.gameId && Number(payload.code || data.code) === 404){resetStudy();return;}
+      if(studyContext.gameId && Number(payload.code || data.code) === 404){recoverAnalysis();engine.error='Waiting for the PC archive to sync this game.';queueAnalysisRender();return;}
       if(payload.retryable===true || data.retryable===true){recoverAnalysis();return;}
       stopEngineTransport();engine.error=data.error || payload.message || 'Engine unavailable';engine.status='error';queueAnalysisRender();return;
     }
@@ -587,7 +676,7 @@
     book.loading = false;
     renderActivePanel();
   };
-  window.InstinctaZero.onNativeConnectionState = function () { window.InstinctaZero.refreshDisplayPrivacy(); if (!analysisActive) return; if (settings.enabled) scheduleAnalysis(); if (tab === 'book') requestBook(); };
+  window.InstinctaZero.onNativeConnectionState = function () { window.InstinctaZero.refreshDisplayPrivacy(); if (!analysisActive) return; if (settings.enabled || fish.server || fish.local!=='off') scheduleAnalysis(); if (tab === 'book') requestBook(); };
   window.InstinctaZero.refreshDisplayPrivacy = function () { if(privacy.refresh()){repertoirePanel?.privacyChanged?.();renderPanel();} };
   window.InstinctaZero.onAccountChanged = function () { if (studyContext.gameId || gameLoading) resetStudy(); };
   window.InstinctaZero.loadArchivedGame = function (payloadJson) { let payload; try { payload = typeof payloadJson === 'string' ? JSON.parse(payloadJson) : payloadJson; } catch (_) { return false; } return installArchivedGame(payload); };

@@ -61,6 +61,10 @@ try{for(const [width,height] of [[360,640],[390,780],[412,844]]) {
  const start='rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
  await load(start,'book');await bookMove('e2e4','e4');assert.deepEqual((await stored()).cursor,['e2e4']);
  await page.getByRole('button',{name:'Previous move',exact:true}).tap();assert.deepEqual((await stored()).cursor,[]);
+ // The inherited arrow is immediately actionable even though Black has no fresh stats.
+ await load(start);await emit({mobile_backend:'cpu',target_nodes:1000,lines:[{pv:['e2e4','f7f6'],white_cp:20}],move_stats:[{uci:'e2e4',visits:100}]});
+ await page.waitForSelector('.analysis-arrow',{state:'attached'});await tap('e4');await page.waitForSelector('.analysis-arrow',{state:'attached'});
+ await tap('f6');assert.deepEqual((await stored()).cursor,['e2e4','f7f6']);assert.equal(await page.evaluate(()=>window.__t.ranks),0);
  // Root statistics can be usable before any line is eligible for display.
  await load(start);const rootId=await page.evaluate(()=>window.__t.analysis.at(-1).id);
  await emit({search_phase:'ready',root_move_stats:[{uci:'c2c3',visits:30,prior:.1},{uci:'b1c3',visits:2,prior:.9}],lines:[]});

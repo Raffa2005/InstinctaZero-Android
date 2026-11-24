@@ -3,6 +3,8 @@ package com.instinctazero.android
 import android.annotation.SuppressLint
 import android.content.res.ColorStateList
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.graphics.Color
@@ -89,6 +91,7 @@ class MainActivity : ComponentActivity() {
     private var archiveCacheLoaded = false
     private var archiveLoading = false
     private var archiveSyncing = false
+    private var lastGamesRefresh=0L
     private var archiveRefreshedThisSession = false
     private var archiveMessage: String? = null
     private var archiveAdapter: GameArchiveAdapter? = null
@@ -179,6 +182,24 @@ class MainActivity : ComponentActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = handleShellBack()
         })
+        receiveSignIn(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        receiveSignIn(intent)
+    }
+
+    private fun receiveSignIn(incoming: Intent?) {
+        val uri=incoming?.data ?: return
+        if(incoming.action!=Intent.ACTION_VIEW || uri.toString().substringBefore('?')!=LichessPhone.REDIRECT)return
+        incoming.data=null
+        navigation.showProfile()
+        renderNativeScreen()
+        nativeBridge.finishLichess(uri) { ok ->
+            connectionMessage=if(ok) "Direct opening book connected." else "Sign-in failed. Use the selected PC account and try again."
+            if(navigation.screen==ShellScreen.PROFILE)renderNativeScreen()
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -304,7 +325,7 @@ class MainActivity : ComponentActivity() {
         webView.visibility = View.VISIBLE
         nativeLayer.visibility = View.VISIBLE
         renderNativeScreen()
-        if (!archiveRefreshedThisSession) refreshArchive()
+        if (!archiveRefreshedThisSession || android.os.SystemClock.elapsedRealtime()-lastGamesRefresh>30_000) refreshArchive()
     }
 
     private fun showAnalysisScreen() {
@@ -367,6 +388,7 @@ class MainActivity : ComponentActivity() {
 
     private fun refreshArchive() {
         if (archiveLoading || navigation.screen != ShellScreen.GAMES || !nativeBridge.isPaired()) return
+        lastGamesRefresh=android.os.SystemClock.elapsedRealtime()
         archiveRefreshedThisSession = true
         archiveLoading = true
         archiveMessage = null
@@ -590,7 +612,7 @@ class MainActivity : ComponentActivity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(8.dp, 0, 4.dp, 0)
             addView(TextView(this@MainActivity).apply {
-                text = "▾  ${archiveTotal.coerceAtLeast(archiveGames.size)} games" +
+                text = (if(archiveTotal<0 && archiveCursor!=null)"▾  Recent games" else "▾  ${archiveTotal.coerceAtLeast(archiveGames.size)} games") +
                     if (archiveSyncing) "  ·  syncing…" else ""
                 setTextColor(0xffb8b8b8.toInt())
                 textSize = 13f
@@ -838,6 +860,13 @@ class MainActivity : ComponentActivity() {
                     setPadding(0, 8.dp, 0, 14.dp)
                 })
                 if (state.optBoolean("paired")) {
+                    val connected=nativeBridge.phoneConnected()
+                    addView(actionButton(if(connected)"Disconnect direct opening book" else if(privacy.enabled)"Connect book · opens real Lichess account" else "Connect opening book directly to Lichess") {
+                        if(connected){nativeBridge.forgetLichess();renderNativeScreen()}
+                        else runCatching { startActivity(Intent(Intent.ACTION_VIEW,nativeBridge.lichessSignIn())) }.onFailure {
+                            connectionMessage="Select an account and open a browser to connect the book.";renderNativeScreen()
+                        }
+                    })
                     addView(nativeText("Lichess account", 13f, TEXT_MUTED, true).apply {
                         setPadding(2.dp, 0, 0, 5.dp)
                     })
@@ -1079,7 +1108,7 @@ class MainActivity : ComponentActivity() {
         ): WebResourceResponse? {
             val url = request.url.toString()
             return if (AnalysisWebPolicy.isAllowedAssetUrl(url)) {
-                assetLoader.shouldInterceptRequest(request.url) ?: blockedResponse()
+                nativeBridge.stockfishResponse(url) ?: assetLoader.shouldInterceptRequest(request.url) ?: blockedResponse()
             } else {
                 blockedResponse()
             }
@@ -1214,6 +1243,35 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     // race engine startup or ordinary network jitter, so only explicit request/lifecycle
     // cancellation terminates analysis. This client shares the bounded connect/write settings.
     private val streamHttp = GatewayHttpPolicy.streamClient(restHttp)
+    private val directHttp=restHttp.newBuilder().followRedirects(false).followSslRedirects(false).build()
+    private val phone by lazy { LichessPhone(encryptedPreferences) }
+    private val owner get()=encryptedPreferences.getString(ACCOUNT_NAME_KEY,"").orEmpty()
+    fun phoneConnected()=phone.connected(owner)
+    fun forgetLichess()=phone.forget()
+    fun lichessSignIn()=phone.authorize(owner)
+    fun finishLichess(uri:Uri, callback:(Boolean)->Unit) {
+        executor.execute {
+            val signed=runCatching { phone.finish(uri,owner){directRead(PendingCall(),it)} }.isSuccess
+            activity.runOnUiThread { if(!bridgeClosed)callback(signed) }
+        }
+    }
+    private val downloadHttp=restHttp.newBuilder().dispatcher(okhttp3.Dispatcher()).followSslRedirects(false).build()
+    private val fishFiles=StockfishDownloads(java.io.File(activity.filesDir,"stockfish19"),downloadHttp)
+    private val installing=java.util.concurrent.atomic.AtomicBoolean(false)
+    fun stockfishResponse(url:String)=fishFiles.response(url)
+    @JavascriptInterface fun stockfishOptions()=JSONObject().put("local",uiPreferences.getString("fish.local","off"))
+        .put("server",uiPreferences.getBoolean("fish.server",false)).put("lite",fishFiles.installed("lite")).put("full",fishFiles.installed("full")).toString()
+    @JavascriptInterface fun setStockfishOptions(local:String,server:Boolean) {
+        if(local=="off" || fishFiles.installed(local))uiPreferences.edit().putString("fish.local",local).putBoolean("fish.server",server).apply()
+    }
+    @JavascriptInterface fun downloadStockfish(key:String) {
+        if(key !in setOf("lite","full") || !installing.compareAndSet(false,true))return
+        executor.execute {
+            val ok=runCatching { fishFiles.install(key) }.isSuccess
+            installing.set(false)
+            activity.runOnUiThread { if(!bridgeClosed)webView?.evaluateJavascript("window.InstinctaZero?.onStockfishDownload("+JSONObject.quote(key)+","+ok+");void 0;",null) }
+        }
+    }
     private val repertoireStore = RepertoireStore(activity)
     private val repertoireExecutor = Executors.newSingleThreadExecutor()
     private val repertoireDownloading = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -1546,6 +1604,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         backupCall.getAndSet(null)?.cancel()
         val token = encryptedPreferences.getString(TOKEN_KEY, null)
         cancelAll("disconnected")
+        forgetLichess()
         encryptedPreferences.edit().remove(TOKEN_KEY).remove(DEVICE_NAME_KEY)
             .remove(ACCOUNT_NAME_KEY).remove(ACCOUNT_LIST_KEY).commit()
         archivePreferences.edit().clear().commit()
@@ -1578,6 +1637,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         bridgeClosed=true;backupCall.getAndSet(null)?.cancel()
         cancelAll("destroyed")
         repertoireBackups.close()
+        downloadHttp.dispatcher.cancelAll()
         executor.shutdownNow()
         // Accepted edits are not obsolete navigation reads. Let queued writes reach
         // their durable transaction when the Activity is recreated or closed.
@@ -1625,6 +1685,17 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         }
     }
 
+    private val syncPending=java.util.concurrent.atomic.AtomicBoolean(false)
+    private fun requestPcArchiveSync(token:String) {
+        if(!syncPending.compareAndSet(false,true))return
+        executor.execute {
+            try { restHttp.newCall(Request.Builder().url(apiUrl("sync")).header("Authorization","Bearer $token")
+                .post(GatewayHttpPolicy.nonReplayable("{}".toRequestBody("application/json".toMediaType()))).build()).execute().close()
+            } catch(_:IOException) { /* Archive sync is independent; a later refresh tries again. */ }
+            finally { syncPending.set(false) }
+        }
+    }
+
     private fun refreshArchiveOnWorker(id: String, pending: PendingCall) {
         val token = encryptedPreferences.getString(TOKEN_KEY, null)
         if (token.isNullOrBlank()) {
@@ -1633,32 +1704,20 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
             return
         }
         try {
-            val syncResponse = executeJson(
-                pending,
-                Request.Builder().url(apiUrl("sync"))
-                    .header("Authorization", "Bearer $token")
-                    .post(GatewayHttpPolicy.nonReplayable(
-                        "{}".toRequestBody("application/json; charset=utf-8".toMediaType()),
-                    ))
-                    .build(),
-                256 * 1024,
-            )
-            val session = executeJson(
-                pending,
-                Request.Builder().url(apiUrl("session"))
-                    .header("Authorization", "Bearer $token")
-                    .get().build(),
-                256 * 1024,
-            )
-            val account = storeSessionPayload(session)
-            val syncRunning = syncResponse.optJSONObject("sync")?.optBoolean("running") == true ||
-                session.optJSONObject("sync")?.optBoolean("running") == true
-            val result = fetchArchivePage(pending, token, null)
-                .put("account", account)
-                .put("sync_running", syncRunning)
+            requestPcArchiveSync(token)
+            val account=owner.ifBlank {
+                storeSessionPayload(executeJson(pending,Request.Builder().url(apiUrl("session")).header("Authorization","Bearer $token").build(),256*1024))
+            }
+            val result=try {
+                phone.page(account,null,ARCHIVE_PAGE_SIZE){directRead(pending,it)}
+            } catch(e:Exception) {
+                if(pending.isCanceled())throw e
+                fetchArchivePage(pending,token,null)
+            }.put("account",account).put("sync_running",false)
+            if(pending.isCanceled() || account!=owner)return
             require(result.toString().length <= MAX_ARCHIVE_JSON) { "Completed-game cache is too large." }
             check(archivePreferences.edit().putString("games_v1", result.toString()).commit())
-            if (!pending.isCanceled()) activity.runOnUiThread { activity.onArchivePayload(result, null, append = false) }
+            if (!pending.isCanceled()) activity.runOnUiThread { if(!pending.isCanceled() && account==owner)activity.onArchivePayload(result, null, append = false) }
         } catch (error: Exception) {
             if (!pending.isCanceled()) activity.runOnUiThread {
                 activity.onArchivePayload(null, error.safeMessage(), append = false)
@@ -1744,9 +1803,9 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
             return
         }
         try {
-            val result = fetchArchivePage(pending, token, cursor)
+            val result = if(cursor.startsWith("lc_"))phone.page(owner,cursor,ARCHIVE_PAGE_SIZE){directRead(pending,it)} else fetchArchivePage(pending, token, cursor)
             if (!pending.isCanceled()) activity.runOnUiThread {
-                activity.onArchivePayload(result, null, append = true)
+                if(!pending.isCanceled())activity.onArchivePayload(result, null, append = true)
             }
         } catch (error: Exception) {
             if (!pending.isCanceled()) activity.runOnUiThread {
@@ -1791,13 +1850,15 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
             return
         }
         try {
-            val payload = executeJson(
+            val payload = try { phone.detail(owner,gameId){directRead(pending,it)} } catch(e:Exception) {
+                if(pending.isCanceled())throw e
+                executeJson(
                 pending,
                 Request.Builder().url(apiUrl("games/$gameId"))
                     .header("Authorization", "Bearer $token")
                     .get().build(),
                 MAX_ARCHIVE_JSON,
-            )
+            ) }
             if (!pending.isCanceled()) activity.runOnUiThread {
                 if (!pending.isCanceled() && archivedGameRequest.compareAndSet(pending, null)) activity.onArchivedGame(payload, null)
             }
@@ -1807,6 +1868,18 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
             }
         } finally {
             calls.remove(id, pending)
+        }
+    }
+
+    @Volatile private var directResumeAt=0L
+    private fun directRead(pending:PendingCall,request:Request):String {
+        if(android.os.SystemClock.elapsedRealtime()<directResumeAt)throw IOException("Lichess rate limit. Try again in a minute.")
+        val call=directHttp.newCall(request.newBuilder().header("User-Agent","InstinctaZeroAndroid/"+BuildConfig.VERSION_NAME+" (github.com/Raffa2005/InstinctaZero-Android)").build())
+        if(!pending.attach(call))throw IOException("Cancelled.")
+        return call.execute().use { r ->
+            if(r.code==429)directResumeAt=android.os.SystemClock.elapsedRealtime()+1000L*(r.header("Retry-After")?.toLongOrNull() ?: 60L).coerceIn(60,86400)
+            if(!r.isSuccessful)throw IOException(if(r.code==401)"Reconnect the direct book in Account / PC." else "Lichess returned "+r.code+".")
+            r.body.boundedString(MAX_ARCHIVE_JSON)
         }
     }
 
@@ -1852,6 +1925,16 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     }
 
     private fun requestExplorerOnWorker(id: String, pending: PendingCall, request: JSONObject) {
+        if(phoneConnected() && request.has("fen")) {
+            try {
+                val result=phone.explorer(request,owner){directRead(pending,it)}
+                if(!pending.isCanceled())emit("onNativeExplorer",id,result.toString())
+            } catch(error:Exception) {
+                if(!pending.isCanceled())emit("onNativeExplorer",id,errorPayload(error.safeMessage()))
+            } finally { calls.remove(id,pending) }
+            return
+        }
+        request.remove("fen")
         val call = authorizedPost("study/explorer", request) ?: run {
             if (!pending.isCanceled()) {
                 emit("onNativeExplorer", id, errorPayload("Pair this device before requesting the book."))
@@ -1915,6 +1998,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
                 put("initial_fen",PositionFen.checked(parsed.getString("initial_fen")))
             }
             if (target == "analysis") {
+                if(parsed.has("engines"))put("engines",parsed.getString("engines").also { require(it in setOf("leela","both","stockfish")) })
                 put("nodes", parsed.optInt("nodes", 1000).coerceIn(1, 100_000))
                 val backend = parsed.optString("backend", "cpu")
                 require(backend == "cpu" || backend == "sycl") { "Invalid engine backend." }
@@ -1923,6 +2007,7 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
                 val source = parsed.optString("source", "masters")
                 require(source == "masters" || source == "lichess") { "Invalid opening-book source." }
                 put("source", source)
+                if(parsed.has("fen"))put("fen",PositionFen.checked(parsed.getString("fen")))
                 if (source == "lichess") {
                     parsed.optJSONArray("speeds")?.let {
                         put("speeds", JSONArray(normalizedStringSelection(it, BOOK_SPEEDS)))

@@ -107,7 +107,7 @@ class OfflineShellContractTest {
     fun gatewayRetriesRoutesWithoutReplayingUnsafeOrLongLivedPosts() {
         val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
         val policy = projectFile("src/main/java/com/instinctazero/android/GatewayHttpPolicy.kt").readText()
-        val syncStart = activity.indexOf("private fun refreshArchiveOnWorker")
+        val syncStart = activity.indexOf("private fun requestPcArchiveSync")
         val syncEnd = activity.indexOf("private fun refreshSessionOnWorker", syncStart)
         val sync = activity.substring(syncStart, syncEnd)
         val postStart = activity.indexOf("private fun authorizedPost")
@@ -171,7 +171,8 @@ class OfflineShellContractTest {
         assertTrue(normalizer.contains("put(\"speeds\", JSONArray(normalizedStringSelection(it, BOOK_SPEEDS)))"))
         assertTrue(normalizer.contains("put(\"ratings\", JSONArray(normalizedIntSelection(it, BOOK_RATINGS)))"))
         assertFalse(normalizer.contains("put(\"multipv\""))
-        assertFalse(normalizer.contains("put(\"fen\""))
+        assertTrue(normalizer.contains("PositionFen.checked(parsed.getString(\"fen\"))"))
+        assertTrue(activity.indexOf("request.remove(\"fen\")") in 1 until activity.indexOf("authorizedPost(\"study/explorer\", request)"))
         assertTrue(normalizer.contains("if (parsed.has(\"game_id\"))"))
         assertTrue(normalizer.contains("put(\"game_id\", gameId)"))
     }
@@ -248,7 +249,8 @@ class OfflineShellContractTest {
         assertTrue(activity.contains("fun clearArchivedStudyContext()"))
         assertTrue(activity.contains("window.InstinctaZero.onAccountChanged"))
         assertFalse(activity.contains("for (attempt in 0 until 60)"))
-        assertTrue(activity.contains("put(\"sync_running\", syncRunning)"))
+        assertTrue(activity.contains("requestPcArchiveSync(token)"))
+        assertTrue(activity.contains("phone.page(account,null,ARCHIVE_PAGE_SIZE)"))
     }
 
     @Test

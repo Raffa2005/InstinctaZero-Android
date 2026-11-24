@@ -20,7 +20,7 @@ internal object AnalysisStreamReader {
         fun dispatch() {
             if(data.isNotEmpty() && current()) {
                 val frame=JSONObject().put("event",event).put("data",JSONObject(data.toString().trim()))
-                terminal=event=="done" || event=="engine-error" || event=="error"
+                terminal=event=="done" || event=="error" || (event=="engine-error" && !frame.getJSONObject("data").has("engine"))
                 emit(frame)
             }
             event="message";data.setLength(0);dataBytes=0

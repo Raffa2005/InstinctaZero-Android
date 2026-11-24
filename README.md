@@ -1,5 +1,9 @@
 # InstinctaZero Android
 
+**0.8.19:** Open **Analysis board → Engine → Engine options** for independent Leela, PC Stockfish 19, and phone Stockfish 19 controls. Phone Lite (~1.9 MB) and Full (~99 MB) are optional single-threaded [Stockfish.js 19 downloads](https://github.com/nmrugg/stockfish.js/releases/tag/v19.0.1), not APK contents. Once installed they run offline in a local worker. Off retains the download. Full needs more memory. When several engines return lines, arrows use Leela first, then PC Stockfish, then phone Stockfish. Stockfish alternatives are weighted by evaluation, not visits. Tapping an arrow's destination uses that displayed root move, including an inherited reply.
+
+Games pages read completed-game summaries directly from Lichess; only opening a game requests its moves. The PC archive still syncs in the background and is a fallback. PC analysis of a very recent game waits for the archive; local analysis does not. For direct Explorer reads, open **Account / PC → Connect opening book directly to Lichess**, and authorize the same selected account in the browser. Without a phone authorization the book keeps using the PC. The phone checks for ongoing games before direct explorer reads. Lichess rate limits and network latency still apply.
+
 Version **0.8.13** adds offline destination-tap move input. Drag a guessed piece
 back to undo, then tap its destination again to try the next legal origin.
 See [input behavior, APK builds and validation](docs/click-chess-preview.md).
@@ -133,13 +137,7 @@ Lichess Android client, rather than a replacement board implementation. The
 local controller uses `chess.js` for legal moves, FEN, SAN, castling,
 en-passant, and promotion.
 
-The WebView still loads only APK-packaged files and is forbidden from making
-network requests. A narrow native bridge performs pairing, Leela, and book
-requests. The revocable bearer token is held in Android Keystore-backed
-encrypted storage and is never exposed to JavaScript. The native client accepts
-only the fixed HTTPS host and the pairing/study API routes; cookies, downloads,
-pop-ups, external navigation, cleartext traffic, and arbitrary WebView network
-access remain blocked.
+The board and worker load from the private local asset origin, not from a website. The only installable worker files are four pinned upstream assets verified by byte count and SHA-256 before atomic installation. The native bridge handles HTTPS transport. PC pairing and optional Lichess OAuth (authorization code with PKCE, no requested scopes) have separate credentials, kept in Keystore-backed encrypted preferences and never given to JavaScript. The Lichess client accepts fixed endpoints, refuses redirects and never receives the PC bearer. Pop-ups, cleartext traffic and arbitrary WebView network access remain blocked.
 
 Leela offers two closed, server-owned choices: `CPU · safe` uses the approximate
 oneDNN INT8 CPU profile, while `iGPU · exact` uses the normal `exact-sycl` BT4

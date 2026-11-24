@@ -34,6 +34,7 @@ class PrivacyBridgeShadow {
     @Implementation fun cancelAll(reason: String) { }
     @Implementation fun close() { }
     @Implementation fun resumeRepertoireBackup() { }
+    @Implementation fun phoneConnected()=false
     @Implementation fun engineBackendLabel()="CPU"
     @Implementation fun selectAccount(username: String): String? { selected=username;return "select" }
     @Implementation fun loadArchivedGame(id: String): String { loaded=id;return "game" }

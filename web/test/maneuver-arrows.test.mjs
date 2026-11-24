@@ -43,10 +43,11 @@ test('maneuvers share the total arrow cap and do not change alternative weightin
   const draw=source.slice(source.indexOf('  function renderArrows('),source.indexOf('  function openPanelView('));
   const engine={stats:{move_stats:[{uci:'g1f3',visits:1000,q:.2},{uci:'b1c3',visits:300,q:.18},{uci:'e2e4',visits:80,q:-.4},{uci:'d2d4',visits:15,q:.16}]}};
   const lines=[{pv:knight},{pv:['b1c3']},{pv:['e2e4']},{pv:['d2d4']},{pv:['g1f3']}];
-  const settings={showArrows:true,arrowMode:'maneuver',arrowCount:8},arrows={querySelector:()=>({outerHTML:''}),innerHTML:''};
+  const settings={enabled:true,showArrows:true,arrowMode:'maneuver',arrowCount:8},arrows={querySelector:()=>({outerHTML:''}),innerHTML:''};
   let shapes=[];
-  const drawArrows=new Function('settings','engine','arrows','finiteMetric','chess','arrowLine',math+helpers+draw+';return renderArrows;')(
-    settings,engine,arrows,v=>v==null?null:Number(v),{turn:()=> 'w'},(move,kind,width,shortening)=>{shapes.push({move,kind,width,shortening});return '';});
+  const fish={server:true,pcLines:[{pv:['c2c4'],white_cp:40},{pv:['g1f3'],white_cp:32},{pv:['a2a3'],white_cp:-500}],phoneLines:[{pv:['d2d4'],white_cp:0}]};
+  const drawArrows=new Function('settings','engine','arrows','finiteMetric','chess','arrowLine','fish','let displayedFen,displayedRoots;'+math+helpers+draw+';return renderArrows;')(
+    settings,engine,arrows,v=>v==null?null:Number(v),{fen:()=>'',turn:()=> 'w'},(move,kind,width,shortening)=>{shapes.push({move,kind,width,shortening});return '';},fish);
   const render=()=>{shapes=[];drawArrows(lines);return shapes};
   assert.deepEqual(render().map(s=>s.move),['g1f3','f3h4','h4f5','b1c3','d2d4']);
   const alternative=shapes.find(s=>s.move==='b1c3');
@@ -54,5 +55,8 @@ test('maneuvers share the total arrow cap and do not change alternative weightin
   assert.deepEqual(shapes.find(s=>s.move==='b1c3'),alternative);
   settings.arrowMode='maneuver';settings.arrowCount=2;assert.deepEqual(render().map(s=>s.move),['g1f3','f3h4']);
   settings.arrowCount=1;assert.deepEqual(render().map(s=>s.move),['g1f3']);
+  settings.arrowMode='best';settings.arrowCount=5;settings.enabled=false;
+  assert.deepEqual(render().map(s=>s.move),['c2c4','g1f3'],'Stockfish uses eval loss, never Leela visits');
+  fish.server=false;assert.deepEqual(render().map(s=>s.move),['d2d4']);
   settings.showArrows=false;assert.deepEqual(render(),[]);
 });

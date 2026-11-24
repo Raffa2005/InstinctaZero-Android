@@ -70,8 +70,9 @@ async function controller(fen=new Chess().fen()) {
   const functions=['color','history','legalMoves','legalDests','sync','mainlineChild','remember','commitMove','clearClickChoice','recentClickHistory','destinationTap','clickCorrection'].map(name=>take(name,'\n  function ')).join('\n')+take('undoDestinationGuess','\n  if(window.InstinctaClickChess)');
   const make=new Function('Chess','model','fen','EngineCache',`
     const chess=new Chess(fen),root={id:0,fen:chess.fen(),children:[],parent:null};
+    const visibleRank=()=>null;
     let cursor=root,legalCache=null,clickChoice=null,clickInput=null,nodeId=0;
-    const dirtyBranches=new Map(),nodeIndex=new Map([[0,root]]),settings={nodes:1000},engine={},saves=[],inputEvidence=new EngineCache();
+    const dirtyBranches=new Map(),nodeIndex=new Map([[0,root]]),settings={nodes:1000,enabled:true},engine={},saves=[],inputEvidence=new EngineCache();
     const ranks=[];let promotion=null;const window={InstinctaClickChess:{ranker:{rank:(...args)=>{ranks.push(args);return model.rank(...args);}}}};
     const ground={set:()=>{},cancelMove:()=>{}},loadFailed=false,gameLoading=false,editingPosition=()=>false,
       heading=()=>{},onPositionChanged=()=>{},projectAnalysisToChild=()=>null,

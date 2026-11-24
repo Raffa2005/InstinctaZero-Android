@@ -42,16 +42,36 @@ internal class WorkspaceMenu(private val context: Context) {
     fun scroll(content: View) = ScrollView(context).apply { isFillViewport=true; addView(content) }
     fun home(paired: Boolean, connection: String, analysis: () -> Unit, games: () -> Unit,
         library: () -> Unit, repertoire: () -> Unit, profile: () -> Unit, editor: () -> Unit, privacy: View? = null): View = scroll(column().apply {
-        setPadding(dp(16),dp(2),dp(16),dp(18))
+        setPadding(dp(16),0,dp(16),dp(18))
+        fun surface(color:Int,radius:Int)=GradientDrawable().apply { setColor(color);cornerRadius=dp(radius).toFloat() }
+        fun group(label:String, entries:List<View>) {
+            addView(section(label))
+            addView(column().apply {
+                background=surface(0xff323330.toInt(),14);clipToOutline=true
+                for((i,entry) in entries.withIndex()) {
+                    if(i>0)addView(View(context).apply { setBackgroundColor(0xff454540.toInt()) },
+                        LinearLayout.LayoutParams(-1,dp(1)).apply { marginStart=dp(58);marginEnd=dp(12) })
+                    entry.background=RippleDrawable(ColorStateList.valueOf(0x33c4af75),null,surface(-1,6))
+                    addView(entry,LinearLayout.LayoutParams(-1,-2))
+                }
+            })
+        }
         addView(section("Analysis"))
-        addView(row("\uf201","Analysis board","Continue where you left off",analysis))
-        addView(row("\uf044","Board editor","Set up a position to analyse",editor))
-        addView(row("\uf009","Games",if(paired)"Your completed games" else "Connect your PC to browse games",games))
-        addView(section("Repertoires"))
-        addView(row("\uf02d","Repertoire library","Create and manage your openings",library))
-        addView(row("\uf279","Repertoire board","Explore your selected openings",repertoire))
-        addView(section("Connection"))
-        addView(row("\uf108","Account / PC",connection,profile))
+        addView(row("\uf201","Analysis board","Continue where you left off",analysis).apply {
+            background=RippleDrawable(ColorStateList.valueOf(0x33c4af75),surface(0xff423e33.toInt(),14).apply {
+                setStroke(dp(1),0xff6d6247.toInt()) },null)
+        })
+        addView(column().apply {
+            background=surface(0xff323330.toInt(),14);clipToOutline=true
+            for(entry in listOf(row("\uf044","Board editor",null,editor),row("\uf009","Games",
+                if(paired)null else "Connect your PC to browse games",games))) {
+                entry.background=RippleDrawable(ColorStateList.valueOf(0x33c4af75),null,surface(-1,6))
+                addView(entry,LinearLayout.LayoutParams(-1,-2))
+            }
+        })
+        group("Repertoires",listOf(row("\uf02d","Repertoire library","Manage your openings",library),
+            row("\uf279","Repertoire board",null,repertoire)))
+        group("Connection",listOf(row("\uf108","Account / PC",connection,profile)))
         privacy?.let { addView(it) }
     })
 }
