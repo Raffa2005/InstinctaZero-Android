@@ -49,9 +49,10 @@ test('notation is an inline mainline and introduces structure only for real sibl
   const c5 = { id:4, color:'b', number:1, san:'c5', children:[] };
   e4.children = [e5, c5];
   const branches = render(root);
-  assert.equal((branches.match(/class="variation"/g) || []).length, 1);
-  assert.match(branches, /e5<\/button>.*class="variation">\(.*1\.\.\.<\/span>c5<\/button>\)<\/div>.*Nf3<\/button>/);
-  assert.match(style, /\.moves>\.move\{font-weight:bold/);
+  assert.equal((branches.match(/class="variation"/g) || []).length, 2);
+  assert.equal((branches.match(/1\.\.\./g) || []).length, 2);
+  assert.match(style, /\.variations\{display:block;/);
+  assert.match(style, /\.variation\{display:block\}/);
 });
 
 test('controller uses the narrow native study bridge without credentials or direct network', async () => {
@@ -542,7 +543,7 @@ test('stream bursts paint once per frame without rebuilding unrelated panels', a
   emit('done',{final_snapshot:{lines:[{nodes:1000}]}});
   assert.equal(engine.status,'done');assert.equal(engine.requestId,null);assert.equal(frames.size,1);
   flush();assert.deepEqual(paints,[['arrows',1000],['panel','done']]);
-  for(const tab of ['moves','book','repertoire']){
+  for(const tab of ['moves','book','chart','repertoire']){
     paints.length=0;engine.requestId='current';ui.setTab(tab);
     emit('lc0',{progress:{nodes:123}});flush();
     assert.deepEqual(paints,[['heading']],`${tab} is not rebuilt for engine progress`);

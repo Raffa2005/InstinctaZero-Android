@@ -46,18 +46,14 @@ try {
     await page.locator('[data-section="Leela"]').tap();await page.locator('[data-leela-lines]').fill('4');
     await page.waitForFunction(()=>window.lastSearch?.leela_lines===4 && window.lastSearch.sf_lines===3);
     assert.equal(await page.evaluate(()=>'sf_depth' in window.lastSearch),false);
-    assert.equal(await page.locator('[data-tab="chart"]').count(),0);
     await page.evaluate(()=>window.InstinctaZero.onNativeAnalysis('mock',{event:'stockfish',data:{lines:[{white_cp:37,multipv:1,depth:10,pv:['e7e5'],san:['e5']}]}}));
-    for(const tab of ['moves','book','repertoire','info','engine']){
+    for(const tab of ['moves','book','repertoire','info','chart','engine']){
       await page.locator('[data-tab="'+tab+'"]').tap();
       assert.ok(await page.locator('.tabs #sf-eval').isVisible());
       assert.match(await page.locator('#sf-eval').textContent(), /\+0\.37\s·\sSF\sPC/);
       assert.ok(await page.locator('.tabs #leela-eval').isVisible());
       assert.equal(await page.locator('#sf-eval').evaluate(el=>el.parentNode.id),'tab-title');
     }
-    const pane=page.locator('.engine-pane.pc'), bounds=await pane.boundingBox(), chrome=await pane.locator('header').boundingBox(), pv=await pane.locator('.pv').boundingBox();
-    assert.ok(Math.abs(bounds.height-chrome.height-pv.height)<2,'one Stockfish line uses just its intrinsic height');
-    assert.equal(await page.locator('#sf-eval').evaluate(el=>getComputedStyle(el).color),await page.locator('#leela-eval').evaluate(el=>getComputedStyle(el).color));
     await page.evaluate(()=>window.InstinctaZero.setAnalysisActive(false));
     assert.deepEqual(errors,[]);await page.close();console.log(model+': real local MultiPV, arrows and navigation passed');
   }

@@ -550,7 +550,7 @@ class MainActivity : ComponentActivity() {
         setPadding(4.dp, 0, 10.dp, 0)
         setBackgroundColor(HEADER_BACKGROUND)
         val childScreen = navigation.screen in listOf(ShellScreen.PROFILE,ShellScreen.GAMES,ShellScreen.REPERTOIRES)
-        val leading = shellButton(if (childScreen) "‹" else "≡", 21f).apply {
+        val leading = shellButton(if (childScreen) "‹" else "☰", 25f).apply {
             contentDescription = if (childScreen) "Back to home" else "Open menu"
             setOnClickListener {
                 if (navigation.screen==ShellScreen.REPERTOIRES && (repertoireLibrary.editing || repertoireLibrary.backupsOpen)) handleShellBack()
@@ -567,6 +567,12 @@ class MainActivity : ComponentActivity() {
                 gravity = Gravity.CENTER
                 contentDescription = "Account online status"
             }, LinearLayout.LayoutParams(24.dp, 32.dp))
+        } else {
+            addView(ImageView(this@MainActivity).apply {
+                setImageResource(com.instinctazero.android.R.drawable.instinctazero_logo)
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                contentDescription = null
+            }, LinearLayout.LayoutParams(32.dp, 32.dp).apply { marginEnd = 8.dp })
         }
         addView(TextView(this@MainActivity).apply {
             text = when (navigation.screen) {
@@ -576,8 +582,8 @@ class MainActivity : ComponentActivity() {
                 else -> "InstinctaZero"
             }
             setTextColor(Color.WHITE)
-            textSize = 17f
-            typeface = Typeface.create("sans-serif-medium",Typeface.NORMAL)
+            textSize = 18f
+            typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER_VERTICAL
         }, LinearLayout.LayoutParams(0, 56.dp, 1f))
         if (navigation.screen == ShellScreen.GAMES) {
@@ -596,7 +602,7 @@ class MainActivity : ComponentActivity() {
         val paired = nativeBridge.isPaired()
         val menu = WorkspaceMenu(this)
         return menu.home(paired,connectionSummary(),::showAnalysisScreen,
-            { if(paired)showGamesScreen() else showProfileScreen() },::showRepertoireLibrary,{showRepertoires()},::showProfileScreen,::showBoardEditor,privacyControl(compact=true))
+            { if(paired)showGamesScreen() else showProfileScreen() },::showRepertoireLibrary,{showRepertoires()},::showProfileScreen,::showBoardEditor,privacyControl())
     }
 
     private fun gamesContent(): View {
@@ -998,7 +1004,7 @@ class MainActivity : ComponentActivity() {
         addView(LinearLayout(this@MainActivity).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(12.dp, 18.dp, 12.dp, 12.dp)
-            setBackgroundColor(0xff202020.toInt())
+            setBackgroundColor(0xff252525.toInt())
             addView(TextView(this@MainActivity).apply {
                 text = "InstinctaZero"
                 setTextColor(Color.WHITE)
@@ -1007,16 +1013,16 @@ class MainActivity : ComponentActivity() {
                 setPadding(10.dp, 8.dp, 10.dp, 18.dp)
             })
             val menu=WorkspaceMenu(this@MainActivity)
-            addView(menu.row("Home") { showHomeScreen() })
-            addView(menu.row("Analysis board") { showAnalysisScreen() })
-            addView(menu.row("Board editor") { showBoardEditor() })
-            addView(menu.row("Games") { if (nativeBridge.isPaired()) showGamesScreen() else showProfileScreen() })
-            addView(menu.row("Repertoire library") { showRepertoireLibrary() })
-            addView(menu.row("Repertoire board") { showRepertoires() })
-            addView(menu.row("Account / PC") { showProfileScreen() })
-            addView(privacyControl(compact=true))
+            addView(menu.row("\uf015","Home") { showHomeScreen() })
+            addView(menu.row("\uf201","Analysis board") { showAnalysisScreen() })
+            addView(menu.row("\uf044","Board editor") { showBoardEditor() })
+            addView(menu.row("\uf009","Games") { if (nativeBridge.isPaired()) showGamesScreen() else showProfileScreen() })
+            addView(menu.row("\uf02d","Repertoire library") { showRepertoireLibrary() })
+            addView(menu.row("\uf279","Repertoire board") { showRepertoires() })
+            addView(menu.row("\uf108","Account / PC") { showProfileScreen() })
+            addView(privacyControl())
         }.let { content -> android.widget.ScrollView(this@MainActivity).apply {
-            setBackgroundColor(0xff202020.toInt()); isFillViewport=true; addView(content)
+            setBackgroundColor(0xff252525.toInt()); isFillViewport=true; addView(content)
         } }, FrameLayout.LayoutParams(292.dp, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START))
     }
 
@@ -1049,7 +1055,7 @@ class MainActivity : ComponentActivity() {
 
     private fun actionButton(label: String, action: () -> Unit): Button = shellButton(label, 15f).apply {
         backgroundTintList = null
-        background = android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x33ffffff), roundedBackground(0xff313131.toInt(), 1, 0xff474747.toInt(), 4), null)
+        background = android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x33ffffff), roundedBackground(0xff4a473a.toInt(), 1, 0xff71674e.toInt(), 10), null)
         setOnClickListener { action() }
     }
 
@@ -1080,7 +1086,7 @@ class MainActivity : ComponentActivity() {
         privacy.remember(state.optString("accountUsername"),archiveAccount,
             *(0 until accounts.length()).map { accounts.optJSONObject(it)?.optString("username").orEmpty() }.toTypedArray())
     }
-    private fun privacyControl(compact:Boolean=false) = PrivacyModeView.build(this,privacy,compact) { enabled ->
+    private fun privacyControl() = PrivacyModeView.build(this,privacy) { enabled ->
         // Keep the warm WebView covered until its presentation policy has updated.
         privacyRefreshPending=true;webView.visibility=View.INVISIBLE
         if(!privacy.setEnabled(enabled))connectionMessage="Privacy setting could not be saved."
@@ -1146,8 +1152,8 @@ class MainActivity : ComponentActivity() {
     )
 
     companion object {
-        private val SHELL_BACKGROUND = 0xff202020.toInt()
-        private val HEADER_BACKGROUND = 0xff202020.toInt()
+        private val SHELL_BACKGROUND = 0xff2b2b2b.toInt()
+        private val HEADER_BACKGROUND = 0xff222222.toInt()
         private val TEXT_MUTED = 0xffaaaaaa.toInt()
         private val ERROR_TEXT = 0xffff9e80.toInt()
         private val GAME_WIN = 0xff7fa650.toInt()
