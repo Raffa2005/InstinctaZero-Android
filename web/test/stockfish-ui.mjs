@@ -25,7 +25,7 @@ const browser=await chromium.launch({executablePath:process.env.PHONE_PREVIEW_CH
 try {
   for(const model of process.env.STOCKFISH_MODEL?[process.env.STOCKFISH_MODEL]:['lite','full']) {
     const page=await browser.newPage({viewport:{width:390,height:780},isMobile:true,hasTouch:true});
-    page.on('pageerror',err=>console.error(err.message));
+    const errors=[];page.on('pageerror',err=>errors.push(err.message));
     await page.addInitScript(model=>{window.InstinctaZeroNative={
       getUiSettings:()=>'{"leelaEnabled":true}',getRepertoireSettings:()=>'{}',getStudyState:()=>'{}',
       stockfishOptions:()=>JSON.stringify({local:model,lite:true,full:true}),saveStudyState:raw=>{window.saved=JSON.parse(raw);return true;},
@@ -45,13 +45,15 @@ try {
     await page.locator('[data-sf-lines]').fill('3');await page.waitForFunction(()=>window.lastSearch?.sf_lines===3);
     await page.locator('[data-section="Leela"]').tap();await page.locator('[data-leela-lines]').fill('4');
     await page.waitForFunction(()=>window.lastSearch?.leela_lines===4 && window.lastSearch.sf_lines===3);
+    await page.evaluate(()=>window.InstinctaZero.onNativeAnalysis('mock',{event:'stockfish',data:{lines:[{white_cp:37,multipv:1,depth:10,pv:['e7e5'],san:['e5']}]}}));
     for(const tab of ['moves','book','repertoire','info','chart','engine']){
       await page.locator('[data-tab="'+tab+'"]').tap();
       assert.ok(await page.locator('.tabs #sf-eval').isVisible());
+      assert.match(await page.locator('#sf-eval').textContent(), /\+0\.37\s·\sSF\sPC/);
       assert.ok(await page.locator('.tabs #leela-eval').isVisible());
       assert.equal(await page.locator('#sf-eval').evaluate(el=>el.parentNode.id),'tab-title');
     }
     await page.evaluate(()=>window.InstinctaZero.setAnalysisActive(false));
-    await page.close();console.log(model+': real local MultiPV, arrows and navigation passed');
+    assert.deepEqual(errors,[]);await page.close();console.log(model+': real local MultiPV, arrows and navigation passed');
   }
 } finally {await browser.close();http.close();}

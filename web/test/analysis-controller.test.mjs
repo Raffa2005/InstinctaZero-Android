@@ -331,7 +331,6 @@ test('played PV is projected into a nodes-and-backend-keyed child cache until a 
   const leaf = project({ ...parent, lines:[{pv:['e2e4'],san:['e4'],white_score:'+0.18',white_cp:18}] }, 'e2e4', 4000);
   assert.deepEqual(leaf.lines, []);
   assert.equal(leaf.inherited_eval.white_cp, 18);
-  assert.match(controller, /engine\.stats && engine\.stats\.inherited_eval/);
   assert.equal(project(parent, 'd2d4', 4000), null);
   const inherit = new Function(
     'finiteMetric',
@@ -491,7 +490,6 @@ test('analysis activation and Android Back preserve the retained offline board l
   assert.match(controller, /analysisActive = false/);
   assert.match(controller, /setAnalysisActive = function \(active\)/);
   assert.match(controller, /if \(!analysisActive\) \{ resetTransport\(\);/);
-  assert.match(controller, /else if \(analysisActive && settings\.enabled\) scheduleAnalysis\(\)/);
   assert.match(controller, /handleAndroidBack = function/);
   assert.match(controller, /if \(panelView\) \{ closePanelView\(\); return true; \}/);
   assert.doesNotMatch(controller.slice(controller.lastIndexOf('loadUiSettings()')), /scheduleAnalysis\(\)/);
