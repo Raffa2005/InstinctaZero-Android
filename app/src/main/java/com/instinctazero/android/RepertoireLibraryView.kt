@@ -42,17 +42,17 @@ internal object RepertoireLibraryView {
             if(state.restoreVersion.isNotEmpty()) {
                 page.addView(ui.section("Restore this version?"))
                 page.addView(ui.text("Your current repertoire edits are backed up first. This replaces only phone repertoire edits and selections. On a replacement phone, pair with the same PC and download its repertoire library, then restore here.",15f))
-                page.addView(ui.row("\uf0e2","Restore repertoire edits") { if(!busy)backupAction("restore",state.restoreVersion) }.apply { isEnabled=!busy })
-                page.addView(ui.row("\uf00d","Cancel") { state.restoreVersion="";render() }.apply { isEnabled=!busy })
+                page.addView(ui.row("Restore repertoire edits") { if(!busy)backupAction("restore",state.restoreVersion) }.apply { isEnabled=!busy })
+                page.addView(ui.row("Cancel") { state.restoreVersion="";render() }.apply { isEnabled=!busy })
             } else {
-                page.addView(ui.row("\uf0ee","Back up now") { if(!busy)backupAction("save","") }.apply { isEnabled=!busy })
-                page.addView(ui.row("\uf021","Refresh history") { if(!busy)backupAction("list","") }.apply { isEnabled=!busy })
+                page.addView(ui.row("Back up now") { if(!busy)backupAction("save","") }.apply { isEnabled=!busy })
+                page.addView(ui.row("Refresh history") { if(!busy)backupAction("list","") }.apply { isEnabled=!busy })
                 page.addView(ui.section("Saved versions"))
                 val versions=state.backup.optJSONArray("versions")
                 if(versions==null || versions.length()==0)page.addView(ui.text("Connect to your PC and refresh to see saved versions.",14f,true))
                 if(versions!=null)for(i in 0 until versions.length()) {
                     val item=versions.getJSONObject(i)
-                    page.addView(ui.row("\uf017",date(item.getLong("saved_ms")),if(item.optBoolean("this_device"))"From this phone" else "From another paired phone") {
+                    page.addView(ui.row(date(item.getLong("saved_ms")),if(item.optBoolean("this_device"))"From this phone" else "From another paired phone") {
                         state.restoreVersion=item.getString("id");render()
                     }.apply { isEnabled=!busy })
                 }
@@ -62,8 +62,8 @@ internal object RepertoireLibraryView {
             if(privacy?.enabled==true && privacy.text(state.name)!=state.name && !state.revealPrivateText) {
                 page.addView(ui.section("Private name"))
                 page.addView(ui.text("Renaming displays the original name, which contains hidden identity information.",14f,true))
-                page.addView(ui.row("\uf06e","Show original name (reveals identity)") { state.revealPrivateText=true;render() })
-                page.addView(ui.row("\uf00d","Cancel") { state.editing=false;render() })
+                page.addView(ui.row("Show original name (reveals identity)") { state.revealPrivateText=true;render() })
+                page.addView(ui.row("Cancel") { state.editing=false;render() })
                 return ui.scroll(page)
             }
             page.addView(ui.section(if(state.id.isEmpty()) "New repertoire" else "Rename repertoire"))
@@ -79,16 +79,16 @@ internal object RepertoireLibraryView {
             })
             if(state.id.isEmpty()) {
                 page.addView(ui.section("Play as"))
-                for(side in listOf("white","black"))page.addView(ui.row(if(state.side==side)"\uf058" else "\uf10c",side.replaceFirstChar(Char::uppercase)) {
+                for(side in listOf("white","black"))page.addView(ui.row(side.replaceFirstChar(Char::uppercase),if(state.side==side)"Selected" else null) {
                     state.side=side; render()
                 }.apply { isSelected=state.side==side })
             }
-            page.addView(ui.row("\uf00c",if(state.busy)"Saving…" else if(state.id.isEmpty())"Create repertoire" else "Save name") {
+            page.addView(ui.row(if(state.busy)"Saving…" else if(state.id.isEmpty())"Create repertoire" else "Save name") {
                 if(!state.busy)save(JSONObject().put("id",state.id).put("name",state.name).put("side",state.side))
             }.apply { isEnabled=!state.busy })
-            page.addView(ui.row("\uf00d","Cancel") { state.editing=false; state.error=""; render() }.apply { isEnabled=!state.busy })
+            page.addView(ui.row("Cancel") { state.editing=false; state.error=""; render() }.apply { isEnabled=!state.busy })
         } else {
-            page.addView(ui.row("\uf067","New repertoire") {
+            page.addView(ui.row("New repertoire") {
                 state.editing=true; state.id=""; state.name=""; state.side="white"; state.error=""; state.revealPrivateText=false; render()
             })
             val rows=state.catalog.optJSONArray("repertoires")
@@ -98,16 +98,18 @@ internal object RepertoireLibraryView {
                 page.addView(ui.section(if(local)"On this phone" else "From your PC"))
                 for(rep in reps) {
                     val label=privacy?.text(rep.getString("name")) ?: rep.getString("name")
-                    page.addView(ui.row("\uf02d",label,rep.getString("side").replaceFirstChar(Char::uppercase)) { open(rep.getString("id")) })
-                    if(local)page.addView(ui.row("\uf040","Rename $label") {
+                    val line=LinearLayout(context)
+                    line.addView(ui.row(label,rep.getString("side").replaceFirstChar(Char::uppercase)) { open(rep.getString("id")) },LinearLayout.LayoutParams(0,-2,1f))
+                    if(local)line.addView(ui.row("Rename") {
                         state.editing=true; state.id=rep.getString("id"); state.name=rep.getString("name"); state.side=rep.getString("side"); state.revealPrivateText=false;render()
-                    })
+                    }.apply { contentDescription="Rename $label";setPadding((12*dp).toInt(),0,0,0) },LinearLayout.LayoutParams((76*dp).toInt(),-2))
+                    page.addView(line)
                 }
             }
-            page.addView(ui.row("\uf0ee","Backups and restore") {
+            page.addView(ui.row("Backups and restore") {
                 state.backupsOpen=true;state.restoreVersion="";render();backupAction("list","")
             })
-            page.addView(ui.row("\uf279","Repertoire board") { open(null) })
+            page.addView(ui.row("Repertoire board") { open(null) })
         }
         return ui.scroll(page)
     }

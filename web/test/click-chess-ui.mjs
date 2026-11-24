@@ -85,7 +85,7 @@ try { for(const [width,height] of [[360,640],[390,780],[412,844]]) {
   assert.equal(await page.evaluate(()=>window.__ranks.length),1,'repeat reuses original ranking');
   await undo();await tap('c3');assert.deepEqual((await stored()).cursor,[ranking[0].from+'c3']);await trace('corrected leaf');
   await page.reload();await page.waitForFunction(()=>!!window.InstinctaZero);assert.deepEqual((await stored()).cursor,[ranking[0].from+'c3']);
-  await gesture('c3',ranking[0].from);assert.deepEqual((await stored()).cursor,[ranking[0].from+'c3'],'reopening does not revive a stale correction');
+  await gesture('c3',ranking[0].from);assert.deepEqual((await stored()).cursor,[],'drag-back after reopening navigates to the parent');assert.equal((await stored()).nodes.length,1,'no stale correction prunes the saved move');
   // Existing branches and descendants must survive cycling through them.
   await load(startFen,{tree:[{u:'b1c3',c:[{u:'e7e5',c:[]}]},{u:'c2c3',c:[]}]});
   await tap('c3');await undo();await tap('c3');await undo();assert.equal((await stored()).nodes.length,2);
@@ -96,6 +96,13 @@ try { for(const [width,height] of [[360,640],[390,780],[412,844]]) {
   ranking=await page.evaluate(()=>window.__ranks[0].rows);assert.equal(ranking.length,4);
   for(let i=1;i<=4;i++){await undo();await tap('d4');assert.deepEqual((await stored()).cursor,[ranking[i%4].from+'d4']);assert.equal((await stored()).nodes.length,1);}
   assert.equal(await page.evaluate(()=>window.__ranks.length),1);
+  // Drag-back is navigation on an ordinary restored line, even with guessing off.
+  await page.evaluate(()=>localStorage.setItem('settings','{"leelaEnabled":false,"smartInput":false}'));
+  await load(startFen,{black:true,tree:[{u:'e2e4',c:[{u:'e7e5',c:[]}]}],cursor:['e2e4','e7e5']});
+  await gesture('e5','e7');assert.deepEqual((await stored()).cursor,['e2e4']);assert.equal((await stored()).nodes.length,2);
+  await gesture('e4','e2');assert.deepEqual((await stored()).cursor,[]);
+  await page.getByRole('button',{name:'Next move',exact:true}).click();assert.deepEqual((await stored()).cursor,['e2e4']);
+  await page.evaluate(()=>localStorage.removeItem('settings'));
   // Explicit selection and dragging always win over the model.
   await load();await tap('c2');await tap('c3');await page.waitForTimeout(30);
   assert.deepEqual((await stored()).cursor,['c2c3']);assert.equal(await page.evaluate(()=>window.__ranks.length),0);

@@ -31,11 +31,11 @@ class WorkspaceMenuTest {
             File(folder,"$name-$width.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG,100,it) };bitmap.recycle()
         }
     }
-    @Test fun actualNativeMenuHasGroupedIconDestinationsAndWorkingTouchTargets() {
+    @Test fun minimalHomeKeepsAllDestinationsAndWorkingTouchTargets() {
         val context=RuntimeEnvironment.getApplication(); val menu=WorkspaceMenu(context)
         for((width,height) in listOf(360 to 584,390 to 724,412 to 788)) {
             val clicked=mutableListOf<String>()
-            val home=menu.home(false,"Not paired · tap to connect",{clicked.add("analysis")},{clicked.add("games")},
+            val home=menu.home(false,"Not paired",{clicked.add("analysis")},{clicked.add("games")},
                 {clicked.add("library")},{clicked.add("repertoire")},{clicked.add("profile")},{clicked.add("editor")})
             snapshot(home,"home",width,height)
             val rows=views(home).filter { it.isClickable }

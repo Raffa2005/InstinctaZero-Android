@@ -47,17 +47,18 @@ internal class AccountPrivacy(private val prefs: SharedPreferences) {
 }
 
 internal object PrivacyModeView {
-    fun build(context: Context, privacy: AccountPrivacy, changed: (Boolean) -> Unit): View {
+    fun build(context: Context, privacy: AccountPrivacy, compact:Boolean=false, changed: (Boolean) -> Unit): View {
         val ui=WorkspaceMenu(context); val dp=context.resources.displayMetrics.density
         return ui.column().apply {
             setPadding((4*dp).toInt(),(5*dp).toInt(),(4*dp).toInt(),(10*dp).toInt())
             addView(Switch(context).apply {
-                text="Privacy mode"; textSize=16f; setTextColor(Color.WHITE); minimumHeight=(48*dp).toInt()
+                text="Privacy mode"; textSize=15f; setTextColor(Color.WHITE); minimumHeight=(48*dp).toInt()
                 gravity=Gravity.CENTER_VERTICAL; isChecked=privacy.enabled
                 contentDescription="Privacy mode. On hides account names; off shows real identities."
-                thumbTintList=ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked),intArrayOf()),intArrayOf(0xffc4af75.toInt(),0xffa5a5a0.toInt()))
+                thumbTintList=ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked),intArrayOf()),intArrayOf(0xffd7d7d7.toInt(),0xffa5a5a0.toInt()))
                 setOnCheckedChangeListener { _, value -> changed(value) }
             },LinearLayout.LayoutParams(-1,-2))
+            if(compact)return@apply
             addView(ui.text(if(privacy.enabled)"On · Player alias; names and ratings hidden" else "Off · real account names are visible",12f,true))
             addView(ui.text("Screen privacy only. Public Lichess games and original PGNs remain identifiable.",12f,true).apply { setPadding(0,(4*dp).toInt(),0,0) })
         }
