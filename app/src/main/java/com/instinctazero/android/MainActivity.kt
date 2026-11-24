@@ -82,6 +82,7 @@ class MainActivity : ComponentActivity() {
     private var pendingBoardEditor = false
     private var pendingRepertoireId: String? = null
     private val repertoireLibrary = RepertoireLibraryState()
+    private var bookLoginResult:BookLogin?=null
     private var connectionMessage: String? = null
     private val archiveGames = mutableListOf<JSONObject>()
     private var archiveAccount = ""
@@ -190,14 +191,25 @@ class MainActivity : ComponentActivity() {
         receiveSignIn(intent)
     }
 
+    private fun openBookBrowser(uri:Uri) {
+        // Resolve web browsers on a neutral address, not applications claiming lichess.org links.
+        val web=Intent(Intent.ACTION_VIEW,Uri.parse("https://example.org/")).addCategory(Intent.CATEGORY_BROWSABLE)
+        val packages=packageManager.queryIntentActivities(web,android.content.pm.PackageManager.MATCH_DEFAULT_ONLY).map { it.activityInfo.packageName }.distinct()
+        val preferred=web.resolveActivity(packageManager)?.packageName
+        val choices=packages.map { Intent(Intent.ACTION_VIEW,uri).addCategory(Intent.CATEGORY_BROWSABLE).setPackage(it) }
+        require(choices.isNotEmpty())
+        val browser=choices.firstOrNull { it.`package`==preferred } ?: choices.singleOrNull()
+        startActivity(browser ?: Intent.createChooser(choices.first(),"Open Lichess in a browser").putExtra(Intent.EXTRA_INITIAL_INTENTS,choices.drop(1).toTypedArray()))
+    }
+
     private fun receiveSignIn(incoming: Intent?) {
         val uri=incoming?.data ?: return
         if(incoming.action!=Intent.ACTION_VIEW || uri.toString().substringBefore('?')!=LichessPhone.REDIRECT)return
         incoming.data=null
         navigation.showProfile()
         renderNativeScreen()
-        nativeBridge.finishLichess(uri) { ok ->
-            connectionMessage=if(ok) "Direct opening book connected." else "Sign-in failed. Use the selected PC account and try again."
+        nativeBridge.finishLichess(uri) { outcome ->
+            bookLoginResult=outcome
             if(navigation.screen==ShellScreen.PROFILE)renderNativeScreen()
         }
     }
@@ -272,6 +284,7 @@ class MainActivity : ComponentActivity() {
             val accountChanged = selectedAccount.isNotBlank() && archiveAccount.isNotBlank() &&
                 !archiveAccount.equals(selectedAccount, ignoreCase = true)
             if (accountChanged) {
+                bookLoginResult=null
                 archiveGames.clear()
                 archiveCursor = null
                 archiveFirstPageCursor = null
@@ -860,10 +873,12 @@ class MainActivity : ComponentActivity() {
                     setPadding(0, 8.dp, 0, 14.dp)
                 })
                 if (state.optBoolean("paired")) {
+                    bookLoginResult?.let { addView(nativeText(it.label,13f,if(it==BookLogin.READY)TEXT_MUTED else ERROR_TEXT).apply { isSingleLine=false;maxLines=3 }) }
                     val connected=nativeBridge.phoneConnected()
                     addView(actionButton(if(connected)"Disconnect direct opening book" else if(privacy.enabled)"Connect book · opens real Lichess account" else "Connect opening book directly to Lichess") {
+                        bookLoginResult=null
                         if(connected){nativeBridge.forgetLichess();renderNativeScreen()}
-                        else runCatching { startActivity(Intent(Intent.ACTION_VIEW,nativeBridge.lichessSignIn())) }.onFailure {
+                        else runCatching { openBookBrowser(nativeBridge.lichessSignIn()) }.onFailure {
                             connectionMessage="Select an account and open a browser to connect the book.";renderNativeScreen()
                         }
                     })
@@ -1249,9 +1264,9 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
     fun phoneConnected()=phone.connected(owner)
     fun forgetLichess()=phone.forget()
     fun lichessSignIn()=phone.authorize(owner)
-    fun finishLichess(uri:Uri, callback:(Boolean)->Unit) {
+    internal fun finishLichess(uri:Uri, callback:(BookLogin)->Unit) {
         executor.execute {
-            val signed=runCatching { phone.finish(uri,owner){directRead(PendingCall(),it)} }.isSuccess
+            val signed=try { phone.finish(uri,owner){directRead(PendingCall(),it)};BookLogin.READY } catch(e:BookLoginFailure){e.reason} catch(_:Exception){BookLogin.NETWORK}
             activity.runOnUiThread { if(!bridgeClosed)callback(signed) }
         }
     }
@@ -1452,6 +1467,9 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         require(appearance in setOf("brown", "blue", "green", "grey")) { "Invalid board appearance." }
         check(uiPreferences.edit()
             .putInt("nodes", nodes)
+            .putInt("leelaLines",requested.optInt("leelaLines",uiPreferences.getInt("leelaLines",0)).coerceIn(0,8))
+            .putInt("sfLines",requested.optInt("sfLines",uiPreferences.getInt("sfLines",2)).coerceIn(1,8))
+            .putInt("sfDepth",requested.optInt("sfDepth",uiPreferences.getInt("sfDepth",16)).coerceIn(8,24))
             .putInt("arrowCount", arrowCount)
             .putString("arrowMode", arrowMode)
             .putBoolean("smartInput", smartInput)
@@ -1878,7 +1896,8 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
         if(!pending.attach(call))throw IOException("Cancelled.")
         return call.execute().use { r ->
             if(r.code==429)directResumeAt=android.os.SystemClock.elapsedRealtime()+1000L*(r.header("Retry-After")?.toLongOrNull() ?: 60L).coerceIn(60,86400)
-            if(!r.isSuccessful)throw IOException(if(r.code==401)"Reconnect the direct book in Account / PC." else "Lichess returned "+r.code+".")
+            if(r.code==401) { phone.forgetRejected(request.header("Authorization"));throw LichessUnauthorized() }
+            if(!r.isSuccessful)throw IOException("Lichess returned "+r.code+".")
             r.body.boundedString(MAX_ARCHIVE_JSON)
         }
     }
@@ -1929,10 +1948,14 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
             try {
                 val result=phone.explorer(request,owner){directRead(pending,it)}
                 if(!pending.isCanceled())emit("onNativeExplorer",id,result.toString())
+                calls.remove(id,pending);return
+            } catch(_:LichessUnauthorized) {
+                // Revoked direct credential: the paired PC independently checks ongoing games.
+                if(pending.isCanceled()){calls.remove(id,pending);return}
             } catch(error:Exception) {
                 if(!pending.isCanceled())emit("onNativeExplorer",id,errorPayload(error.safeMessage()))
-            } finally { calls.remove(id,pending) }
-            return
+                calls.remove(id,pending);return
+            }
         }
         request.remove("fen")
         val call = authorizedPost("study/explorer", request) ?: run {
@@ -1998,6 +2021,9 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
                 put("initial_fen",PositionFen.checked(parsed.getString("initial_fen")))
             }
             if (target == "analysis") {
+                if(parsed.has("leela_lines"))put("leela_lines",parsed.getInt("leela_lines").coerceIn(0,8))
+                if(parsed.has("sf_lines"))put("sf_lines",parsed.getInt("sf_lines").coerceIn(1,8))
+                if(parsed.has("sf_depth"))put("sf_depth",parsed.getInt("sf_depth").coerceIn(8,24))
                 if(parsed.has("engines"))put("engines",parsed.getString("engines").also { require(it in setOf("leela","both","stockfish")) })
                 put("nodes", parsed.optInt("nodes", 1000).coerceIn(1, 100_000))
                 val backend = parsed.optString("backend", "cpu")
@@ -2046,6 +2072,9 @@ class NativeAnalysisBridge(private val activity: MainActivity) {
 
     private fun uiSettings() = JSONObject()
         .put("nodes", uiPreferences.getInt("nodes", 1000))
+        .put("leelaLines",uiPreferences.getInt("leelaLines",0))
+        .put("sfLines",uiPreferences.getInt("sfLines",2))
+        .put("sfDepth",uiPreferences.getInt("sfDepth",16))
         .put("arrowCount", uiPreferences.getInt("arrowCount", 8).coerceIn(1, 8))
         .put("arrowMode", uiPreferences.getString("arrowMode", "best").takeIf { it in setOf("best", "maneuver") } ?: "best")
         .put("smartInput", uiPreferences.getBoolean("smartInput", true))

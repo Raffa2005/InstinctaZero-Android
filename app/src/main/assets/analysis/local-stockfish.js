@@ -18,15 +18,15 @@ class LocalStockfish {
       this.stopDeadline = setTimeout(() => {
         const next = this.pending;
         this.close();
-        if (next) this.search(this.model,next.fen,next.initialFen,next.history);
+        if (next) this.search(this.model,next.fen,next.initialFen,next.history,next.lines,next.depth);
       },350);
     }
   }
-  search(model, fen, initialFen, history) {
+  search(model, fen, initialFen, history, lines, depth) {
     if (this.model !== model) this.close();
     this.cancel();
     this.model = model;
-    this.pending = {fen, initialFen, history, rows:new Map()};
+    this.pending = {fen, initialFen, history, lines, depth, rows:new Map()};
     this.timer = setTimeout(() => {
       try {
         if (!this.worker) {
@@ -47,13 +47,13 @@ class LocalStockfish {
     this.current = this.pending;
     this.pending = null;
     const {initialFen, history} = this.current;
+    this.worker.postMessage('setoption name MultiPV value '+this.current.lines);
     this.worker.postMessage('position fen ' + initialFen + (history.length ? ' moves ' + history.join(' ') : ''));
-    this.worker.postMessage('go depth 16');
+    this.worker.postMessage('go depth '+this.current.depth);
   }
   message(text) {
     if (text === 'uciok') {
       this.worker.postMessage('setoption name Hash value 16');
-      this.worker.postMessage('setoption name MultiPV value 5');
       this.worker.postMessage('isready');
     } else if (text === 'readyok') { this.ready = true; this.start(); }
     else if (text.startsWith('bestmove')) { clearTimeout(this.stopDeadline); this.current = null; this.start(); }

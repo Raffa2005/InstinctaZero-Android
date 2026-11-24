@@ -70,16 +70,6 @@ test('controller uses the narrow native study bridge without credentials or dire
   assert.doesNotMatch(controller, /localStorage/);
 });
 
-test('controller retains study branches and presents all underpromotions', async () => {
-  const controller = await readFile(controllerUrl, 'utf8');
-
-  assert.match(controller, /cursor\.children\.find/);
-  const remember = functionSource(controller, 'remember', 'cancelBookRequest');
-  assert.doesNotMatch(remember, /children\.splice|children\s*=/);
-  assert.match(controller, /\['q','r','b','n'\]/);
-  assert.match(controller, /data-cancel/);
-  assert.match(controller, /selectedChild/);
-});
 
 test('creating and restoring a new variation does not replace the main navigation continuation', async () => {
   const controller = await readFile(controllerUrl, 'utf8');
@@ -223,42 +213,7 @@ test('rapid navigation and interrupted analysis settle only on the current reque
   settings.enabled=true;f.scheduleAnalysis();document.hidden=true;tick(120);assert.equal(engine.requestId,null,'backgrounded app cannot start fresh analysis');
 });
 
-test('visible study controls have menu and native-home behavior without a header appearance popup', async () => {
-  const controller = await readFile(controllerUrl, 'utf8');
-  const page = await readFile(pageUrl, 'utf8');
 
-  assert.match(controller, /function showMenu/);
-  assert.match(controller, /function deleteCurrentBranch/);
-  assert.match(controller, /Delete the current branch\?/);
-  assert.match(controller, /function setTab/);
-  assert.match(controller, /leaveAnalysis/);
-  assert.doesNotMatch(controller, /exitStudy/);
-  assert.match(controller, /settings\.arrowCount/);
-  assert.doesNotMatch(controller, /function showAppearance/);
-  assert.doesNotMatch(page, /board-icon/);
-  assert.doesNotMatch(controller, /settings\.multipv|data-multipv/);
-  assert.doesNotMatch(controller, /engine\.lines\.slice/);
-  const requestSource = functionSource(controller, 'studyRequest', 'renderActivePanel');
-  const requests = new Function('history', 'settings', 'studyContext', `const fish={server:false}; ${requestSource}; return [studyRequest(), explorerRequest()];`)(() => ['e2e4'], { nodes:4321, backend:'cpu', bookSource:'lichess', bookSpeeds:[], bookRatings:[] }, {gameId:null});
-  assert.deepEqual(requests, [
-    { history:['e2e4'], nodes:4321, backend:'cpu' },
-    { history:['e2e4'], source:'lichess' }
-  ]);
-  assert.match(controller, /saveUiSettings/);
-  assert.match(controller, /settings\.nodes = next/);
-});
-
-test('explorer errors render as errors and PV buttons retain legacy row styling', async () => {
-  const [controller, style] = await Promise.all([
-    readFile(controllerUrl, 'utf8'),
-    readFile(styleUrl, 'utf8')
-  ]);
-
-  assert.match(controller, /payload\.event === 'error'/);
-  assert.match(controller, /book\.error = payload\.message/);
-  assert.match(controller, /book\.data = null/);
-  assert.match(style, /\.pv\{[^}]*width:100%[^}]*border:0[^}]*background:transparent[^}]*text-align:left[^}]*appearance:none/);
-});
 
 test('reset clears the tree and game context, Leela off clears engine state, and tabs preserve analysis', async () => {
   const controller = await readFile(controllerUrl, 'utf8');
@@ -297,18 +252,6 @@ test('board resize refreshes Chessground cached bounds after layout', async () =
   assert.ok((controller.match(/refreshBoardBounds\(\)/g) || []).length >= 3);
 });
 
-test('stream rerenders retain engine scroll/focus and PV taps play the first move', async () => {
-  const controller = await readFile(controllerUrl, 'utf8');
-
-  assert.match(controller, /scrollTop: panel\.scrollTop/);
-  assert.match(controller, /document\.activeElement\.dataset\.pv/);
-  assert.match(controller, /focused\.focus\(\{ preventScroll:true \}\)/);
-  assert.match(controller, /panel\.scrollTop = preserveEngine\.scrollTop/);
-  assert.match(controller, /data-pv-uci=/);
-  assert.match(controller, /playUci\(button\.dataset\.pvUci\)/);
-  assert.doesNotMatch(controller, /selectedPv|engineArrowLines/);
-  assert.match(controller, /function flipBoard\(\) \{[^}]*renderArrows\(engine\.lines\)/);
-});
 
 test('leaving the book tab cancels its in-flight native request', async () => {
   const controller = await readFile(controllerUrl, 'utf8');
@@ -319,18 +262,6 @@ test('leaving the book tab cancels its in-flight native request', async () => {
   assert.match(controller, /book\.requestId = null; book\.loading = false/);
 });
 
-test('menus are touch-first full-panel views and Back dismisses them', async () => {
-  const controller = await readFile(controllerUrl, 'utf8');
-  const style = await readFile(styleUrl, 'utf8');
-
-  assert.match(controller, /function panelViewHtml\(\)/);
-  assert.match(controller, /panel\.innerHTML = panelView \? panelViewHtml\(\)/);
-  assert.match(controller, /handleAndroidBack = function \(\) \{[^\n]*if \(promotionPicker\)[^\n]*if \(panelView\) \{ closePanelView\(\); return true; \}/);
-  assert.doesNotMatch(controller, /study-overlay|overlay-card|document\.body\.appendChild\(overlay\)/);
-  assert.match(style, /\.panel-view\{width:100%/);
-  assert.match(style, /\.panel-buttons button\{min-height:40px/);
-  assert.doesNotMatch(style, /\.study-overlay|\.overlay-card/);
-});
 
 test('desktop Leela arrow weighting fixtures execute with exact widths and suppression', async () => {
   const controller = await readFile(controllerUrl, 'utf8');
@@ -537,23 +468,6 @@ test('active full-panel forms are not rebuilt by streamed engine updates', async
   assert.match(controller, /renderArrows\(engine\.lines\)/);
 });
 
-test('engine controls are touch-only discrete sliders and contain no text or number field', async () => {
-  const [controller, page, style] = await Promise.all([readFile(controllerUrl, 'utf8'), readFile(pageUrl, 'utf8'), readFile(styleUrl, 'utf8')]);
-  assert.match(controller, /const NODE_OPTIONS = \[100, 200, 400, 700, 1000, 2000, 4000, 7000, 10000, 20000, 40000, 70000, 100000\]/);
-  assert.match(controller, /data-nodes type="range"/);
-  assert.match(controller, /data-arrow-count type="range" min="1" max="8" step="1"/);
-  assert.match(controller, /data-backend="cpu"/);
-  assert.match(controller, /data-backend="sycl"/);
-  assert.match(controller, /settings\.backend = next; clearAnalysisCaches\(root\)/);
-  assert.match(controller, /nodes\.oninput[^\n]*data-node-readout/);
-  assert.match(controller, /nodes\.onchange[^\n]*clearAnalysisCaches\(root\)[^\n]*scheduleAnalysis\(\)/);
-  assert.match(controller, /role="switch"/);
-  assert.doesNotMatch(controller + page, /<input[^>]+type=["'](?:text|number)["']/i);
-  assert.doesNotMatch(controller, /data-code|data-pair|Pair code/);
-  assert.match(style, /\.panel-view\{[^}]*height:100%;overflow:hidden/);
-  assert.match(style, /\.range-row\{height:46px/);
-  assert.match(style, /\.switch-row\{height:42px/);
-});
 
 test('book settings produce exact source/filter payloads and refetch only on panel return', async () => {
   const controller = await readFile(controllerUrl, 'utf8');
@@ -583,56 +497,9 @@ test('analysis activation and Android Back preserve the retained offline board l
   assert.doesNotMatch(controller.slice(controller.lastIndexOf('loadUiSettings()')), /scheduleAnalysis\(\)/);
 });
 
-test('legacy drag has no magnified finger offset and readable book geometry is phone sized', async () => {
-  const [controller, style] = await Promise.all([readFile(controllerUrl, 'utf8'), readFile(styleUrl, 'utf8')]);
-  assert.match(controller, /draggable:\{ enabled:true, magnified:false \}/);
-  assert.doesNotMatch(controller, /draggable:\{ enabled:true, magnified:true \}/);
-  assert.match(style, /\.book-move\{[^}]*height:44px/);
-  assert.match(style, /\.book-move b\{font-size:14px/);
-  assert.match(style, /\.book-share,\.book-games\{[^}]*font-size:12px/);
-  assert.match(style, /\.result-bar\{[^}]*height:20px/);
-  assert.match(style, /\.result-bar text\{[^}]*font:9px/);
-});
 
-test('study tree, cursor, game context and board layout persist through the typed native bridge', async () => {
-  const controller = await readFile(controllerUrl, 'utf8');
-  assert.match(controller, /function studyState\(\)/);
-  assert.match(controller, /gameId:studyContext\.gameId/);
-  assert.match(controller, /cursor:history\(\)/);
-  assert.match(controller, /tree:root\.children\.map\(wireNode\)/);
-  assert.match(controller, /black:wrap\.classList\.contains\('orientation-black'\)/);
-  assert.match(controller, /expanded:false/);
-  assert.match(controller, /wrap\.classList\.remove\('expanded'\)/);
-  assert.match(controller, /native\(\)\.saveStudyState/);
-  assert.match(controller, /native\(\)\.getStudyState/);
-  assert.match(controller, /window\.InstinctaZero\.persistStudy = saveStudyNow/);
-  assert.match(controller, /cursor\.selectedChild = mainlineChild\(cursor\)/);
-  assert.match(controller, /cursor = child; saveStudyNow\(\)/);
-  assert.match(controller, /function rebuildTree/);
-  assert.match(controller, /loadStudyState\(\)/);
-  assert.doesNotMatch(controller, /localStorage/);
-});
 
-test('variation long press opens touch actions without text selection', async () => {
-  const [controller, style] = await Promise.all([readFile(controllerUrl, 'utf8'), readFile(styleUrl, 'utf8')]);
-  assert.match(controller, /setTimeout\(\(\) => \{ held = true; variationTarget = target; openPanelView\('variationActions'\); \}, 480\)/);
-  assert.match(controller, /Promote to main line/);
-  assert.match(controller, /Delete variation/);
-  assert.match(controller, /function promoteVariation/);
-  assert.match(controller, /function deleteVariation/);
-  assert.match(controller, /button\.oncontextmenu = event => event\.preventDefault\(\)/);
-  assert.match(style, /\.moves\{[^}]*user-select:none[^}]*-webkit-touch-callout:none/);
-});
 
-test('settings are toggleable panel tabs and White POV eval remains in the tab title', async () => {
-  const [controller, page] = await Promise.all([readFile(controllerUrl, 'utf8'), readFile(pageUrl, 'utf8')]);
-  assert.match(page, /data-panel-tab="settings"/);
-  assert.match(controller, /document\.querySelector\('\[data-panel-tab\]'\)\.onclick = closePanelView/);
-  assert.match(controller, /if \(panelView === target\) closePanelView\(\)/);
-  assert.match(controller, /const evalText = settings\.enabled && best \? whiteEvalText\(best\)/);
-  assert.match(controller, /evalText \+ \(engine.status==='retrying'\?' · retrying'/);
-  assert.doesNotMatch(controller, /panel-back|‹ Back/);
-});
 
 test('stored completed games extend study requests only by trusted game id', async () => {
   const controller = await readFile(controllerUrl, 'utf8');

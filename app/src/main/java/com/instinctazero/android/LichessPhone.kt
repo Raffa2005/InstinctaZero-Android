@@ -15,6 +15,14 @@ import java.security.SecureRandom
 import java.util.Base64
 
 /** Public game reads and an independent, scope-free PKCE token. Never accepts gateway credentials. */
+internal enum class BookLogin(val label:String) {
+    READY("Direct opening book connected."), CANCELLED("Book connection cancelled."),
+    EXPIRED("Book sign-in expired. Start again from Account / PC."),
+    ACCOUNT("Book sign-in needs the same account selected on the PC."),
+    NETWORK("Lichess could not finish book sign-in. Try again; the PC book is still available.")
+}
+internal class BookLoginFailure(val reason:BookLogin): Exception()
+internal class LichessUnauthorized: IOException("Reconnect the direct opening book in Account / PC.")
 internal class LichessPhone(private val prefs: SharedPreferences) {
     companion object {
         const val REDIRECT = "com.instinctazero.android://oauth/lichess"
@@ -62,28 +70,33 @@ internal class LichessPhone(private val prefs: SharedPreferences) {
         prefs.edit().apply { for(k in listOf("token","owner","verifier","state","expires","expected")) remove("phone.oauth."+k) }.commit()
         gateUntil=0
     }
+    @Synchronized fun forgetRejected(header:String?) {
+        val token=prefs.getString("phone.oauth.token",null) ?: return
+        if(header=="Bearer "+token)prefs.edit().remove("phone.oauth.token").apply()
+    }
     fun authorize(owner: String): Uri {
         require(owner.isNotBlank())
         val verifier=random();val state=random()
         check(prefs.edit().putString("phone.oauth.verifier",verifier).putString("phone.oauth.state",state)
             .putString("phone.oauth.expected",owner).putLong("phone.oauth.expires",System.currentTimeMillis()+600000).commit())
         return Uri.parse("https://lichess.org/oauth").buildUpon().appendQueryParameter("client_id",CLIENT)
-            .appendQueryParameter("response_type","code").appendQueryParameter("redirect_uri",REDIRECT)
+            .appendQueryParameter("username",owner).appendQueryParameter("response_type","code").appendQueryParameter("redirect_uri",REDIRECT)
             .appendQueryParameter("state",state).appendQueryParameter("code_challenge_method","S256")
             .appendQueryParameter("code_challenge",encoder.encodeToString(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray()))).build()
     }
     @Synchronized fun finish(uri: Uri, owner: String, read: (Request)->String) {
         require(uri.toString().substringBefore('?')==REDIRECT && owner.isNotBlank())
-        val state=prefs.getString("phone.oauth.state",null) ?: error("Sign-in expired")
-        require(state==uri.getQueryParameter("state") && prefs.getLong("phone.oauth.expires",0)>System.currentTimeMillis() &&
-            owner.equals(prefs.getString("phone.oauth.expected",""),true))
+        val state=prefs.getString("phone.oauth.state",null) ?: throw BookLoginFailure(BookLogin.EXPIRED)
+        if(state!=uri.getQueryParameter("state") || prefs.getLong("phone.oauth.expires",0)<=System.currentTimeMillis())throw BookLoginFailure(BookLogin.EXPIRED)
+        if(!owner.equals(prefs.getString("phone.oauth.expected",""),true))throw BookLoginFailure(BookLogin.ACCOUNT)
         val verifier=requireNotNull(prefs.getString("phone.oauth.verifier",null))
         check(prefs.edit().remove("phone.oauth.verifier").remove("phone.oauth.state").commit())
+        if(uri.getQueryParameter("error")=="access_denied")throw BookLoginFailure(BookLogin.CANCELLED)
         val form=FormBody.Builder().add("grant_type","authorization_code").add("client_id",CLIENT)
             .add("code_verifier",verifier).add("redirect_uri",REDIRECT).add("code",requireNotNull(uri.getQueryParameter("code"))).build()
         val token=JSONObject(read(Request.Builder().url("https://lichess.org/api/token").post(GatewayHttpPolicy.nonReplayable(form)).build())).getString("access_token")
         val account=JSONObject(read(Request.Builder().url("https://lichess.org/api/account").header("Authorization","Bearer "+token).build())).getString("id")
-        require(account.equals(owner,true))
+        if(!account.equals(owner,true))throw BookLoginFailure(BookLogin.ACCOUNT)
         check(prefs.edit().putString("phone.oauth.owner",owner).putString("phone.oauth.token",token).commit())
         gateUntil=0
     }

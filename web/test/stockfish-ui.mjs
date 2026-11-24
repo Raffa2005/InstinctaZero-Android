@@ -23,13 +23,13 @@ const http=createServer(async(req,res)=>{
 await new Promise(r=>http.listen(0,'127.0.0.1',r));
 const browser=await chromium.launch({executablePath:process.env.PHONE_PREVIEW_CHROMIUM,headless:true});
 try {
-  for(const model of ['lite','full']) {
+  for(const model of process.env.STOCKFISH_MODEL?[process.env.STOCKFISH_MODEL]:['lite','full']) {
     const page=await browser.newPage({viewport:{width:390,height:780},isMobile:true,hasTouch:true});
     page.on('pageerror',err=>console.error(err.message));
     await page.addInitScript(model=>{window.InstinctaZeroNative={
-      getUiSettings:()=>'{"leelaEnabled":false}',getRepertoireSettings:()=>'{}',getStudyState:()=>'{}',
+      getUiSettings:()=>'{"leelaEnabled":true}',getRepertoireSettings:()=>'{}',getStudyState:()=>'{}',
       stockfishOptions:()=>JSON.stringify({local:model,lite:true,full:true}),saveStudyState:raw=>{window.saved=JSON.parse(raw);return true;},
-      startAnalysis:()=>{throw Error('Unexpected PC analysis')},cancelAnalysis:()=>{}
+      startAnalysis:raw=>{window.lastSearch=JSON.parse(raw);return 'mock';},cancelAnalysis:()=>{}
     }},model);
     await page.goto('http://127.0.0.1:'+http.address().port+'/');
     await page.evaluate(()=>window.InstinctaZero.setAnalysisActive(true));
@@ -38,6 +38,15 @@ try {
     await page.locator('.pv[data-uci]').first().evaluate(el=>el.click());
     await page.waitForFunction(()=>window.saved?.cursor?.length===1 && document.querySelectorAll('.pv[data-uci]').length>=2).catch(async e=>{console.error((await page.locator('body').innerText()).slice(0,1800));throw e;});
     assert.ok(await page.locator('.analysis-arrow').count()>0);
+    const phone=await page.locator('.engine-pane.phone header').boundingBox(),leela=await page.locator('.engine-pane.leela header').boundingBox();
+    assert.ok(phone.y < leela.y && leela.y+leela.height<780);
+    await page.locator('[data-action="settings"]').tap();
+    await page.locator('[data-section="Stockfish"]').tap();await page.locator('[data-fish="server"]').tap();
+    await page.locator('[data-sf-lines]').fill('3');await page.waitForFunction(()=>window.lastSearch?.sf_lines===3);
+    await page.locator('[data-section="Leela"]').tap();await page.locator('[data-leela-lines]').fill('4');
+    await page.waitForFunction(()=>window.lastSearch?.leela_lines===4 && window.lastSearch.sf_lines===3);
+    await page.locator('[data-tab="moves"]').tap();
+    assert.ok(await page.locator('#sf-eval').isVisible());
     await page.evaluate(()=>window.InstinctaZero.setAnalysisActive(false));
     await page.close();console.log(model+': real local MultiPV, arrows and navigation passed');
   }

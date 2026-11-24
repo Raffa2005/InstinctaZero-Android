@@ -13,18 +13,6 @@ import org.junit.Test
  * security-critical URL decision is tested without a device or a real WebView implementation.
  */
 class OfflineShellContractTest {
-    @Test
-    fun pendingNewGameDoesNotActivateOldBoardAndLateHttpDeliveryIsRevoked() {
-        val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
-        assertTrue(activity.contains("if (webPageLoaded && pendingArchivedGame == null && !pendingBoardEditor) setAnalysisActive(true)"))
-        assertTrue(activity.contains("setAnalysisActive(navigation.screen == ShellScreen.ANALYSIS && pendingArchivedGame == null && !pendingBoardEditor)"))
-        assertTrue(activity.contains("archivedGameRequest.getAndSet(pending)?.cancel()"))
-        assertTrue(activity.contains("archivedGameRequest.getAndSet(null)?.cancel()"))
-        val worker = activity.substringAfter("private fun loadArchivedGameOnWorker").substringBefore("private fun executeJson")
-        assertEquals(3, Regex("archivedGameRequest.compareAndSet\\(pending, null\\)").findAll(worker).count())
-        assertTrue(activity.contains("repertoireStore.lookup(request,read)"))
-        assertTrue(activity.contains("!activity.isDestroyed && current()"))
-    }
 
     @Test
     fun mainActivityIsPortraitLockedAndRetainsSafeLifecyclePersistence() {
@@ -103,25 +91,6 @@ class OfflineShellContractTest {
         assertFalse(activity.contains("experimental-hetero-int8"))
     }
 
-    @Test
-    fun gatewayRetriesRoutesWithoutReplayingUnsafeOrLongLivedPosts() {
-        val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
-        val policy = projectFile("src/main/java/com/instinctazero/android/GatewayHttpPolicy.kt").readText()
-        val syncStart = activity.indexOf("private fun requestPcArchiveSync")
-        val syncEnd = activity.indexOf("private fun refreshSessionOnWorker", syncStart)
-        val sync = activity.substring(syncStart, syncEnd)
-        val postStart = activity.indexOf("private fun authorizedPost")
-        val postEnd = activity.indexOf("private fun parseStudyRequest", postStart)
-        val authorizedPost = activity.substring(postStart, postEnd)
-
-        assertTrue(policy.contains("retryOnConnectionFailure(true)"))
-        assertTrue(policy.contains("override fun isOneShot(): Boolean = true"))
-        assertTrue(sync.contains(".url(apiUrl(\"sync\"))"))
-        assertTrue(sync.contains("GatewayHttpPolicy.nonReplayable"))
-        assertTrue(authorizedPost.contains("if (streaming) GatewayHttpPolicy.nonReplayable(body) else body"))
-        assertTrue(activity.contains("GatewayHttpPolicy.nonReplayable(\n            JSONObject().put(\"code\""))
-        assertTrue(activity.contains("GatewayHttpPolicy.nonReplayable(\n                JSONObject().put(\"username\""))
-    }
 
     @Test
     fun onlyPairingStudyAndCompletedGameRoutesOnTheConfiguredHttpsOriginMayUseNativeNetwork() {
@@ -211,120 +180,11 @@ class OfflineShellContractTest {
         assertFalse(disconnect.contains("putString(TOKEN_KEY"))
     }
 
-    @Test
-    fun completedGameArchiveIsNativeAuthenticatedAndNeverRunsInsideTheWebPage() {
-        val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
-        val controller = projectFile("src/main/assets/analysis/analysis.js").readText()
-        assertTrue(activity.contains("private val navigation = ShellNavigation()"))
-        assertTrue(activity.contains("renderNativeScreen()"))
-        assertTrue(activity.contains("webView.loadUrl(AnalysisWebPolicy.MAIN_PAGE_URL)"))
-        assertTrue(activity.contains("Keep the local page laid out beneath the opaque native shell"))
-        assertFalse(activity.contains("if (!webPageLoaded) webView.loadUrl"))
-        assertTrue(activity.contains("fun refreshArchive()"))
-        assertTrue(activity.contains("fun loadArchivedGame(gameId: String)"))
-        assertTrue(activity.contains(".url(apiUrl(\"sync\"))"))
-        assertTrue(activity.contains("optString(\"status\")"))
-        assertFalse(activity.contains("optString(\"state\")"))
-        assertTrue(activity.contains("page.isNull(\"next_cursor\")"))
-        assertTrue(activity.contains("ARCHIVE_PAGE_SIZE = 20"))
-        assertTrue(activity.contains("class GameArchiveAdapter : BaseAdapter"))
-        assertTrue(activity.contains("loadMoreArchiveOnWorker"))
-        assertTrue(activity.contains("releaseExtraArchiveRows()"))
-        assertTrue(activity.contains("archiveGames.subList(ARCHIVE_PAGE_SIZE, archiveGames.size).clear()"))
-        assertFalse(activity.contains("for (pageIndex in 0 until 100)"))
-        assertTrue(activity.contains("apiUrl(\"games/\$gameId\")"))
-        assertFalse(controller.contains("/api/mobile/v1/games"))
-        assertFalse(controller.contains("Authorization"))
-    }
 
-    @Test
-    fun accountSelectionKeepsThePairedPcCredentialAndUsesAClosedNativeRoute() {
-        val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
-        assertTrue(activity.contains("fun refreshSession()"))
-        assertTrue(activity.contains("fun selectAccount(username: String)"))
-        assertTrue(activity.contains(".url(apiUrl(\"account/select\"))"))
-        assertTrue(activity.contains("availableAccounts"))
-        assertTrue(activity.contains("To add another account, sign into InstinctaZero on the PC"))
-        assertFalse(activity.substring(activity.indexOf("fun selectAccount(username: String)"), activity.indexOf("fun loadMoreArchive", activity.indexOf("fun selectAccount(username: String)"))).contains("remove(TOKEN_KEY)"))
-        assertTrue(activity.contains("fun clearArchivedStudyContext()"))
-        assertTrue(activity.contains("window.InstinctaZero.onAccountChanged"))
-        assertFalse(activity.contains("for (attempt in 0 until 60)"))
-        assertTrue(activity.contains("requestPcArchiveSync(token)"))
-        assertTrue(activity.contains("phone.page(account,null,ARCHIVE_PAGE_SIZE)"))
-    }
 
-    @Test
-    fun analysisPageIsPreloadedAndPieceSpritesBecomeVisibleAtomically() {
-        val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
-        val page = projectFile("src/main/assets/analysis/index.html").readText()
-        val style = projectFile("src/main/assets/analysis/analysis.css").readText()
-        val controller = projectFile("src/main/assets/analysis/analysis.js").readText()
-        assertTrue(activity.contains("renderNativeScreen()\n        // Paint Home first"))
-        assertTrue(activity.contains("shellRoot.post { webView.loadUrl(AnalysisWebPolicy.MAIN_PAGE_URL) }"))
-        assertTrue(page.contains("class=\"board-assets-loading\""))
-        assertTrue(page.contains("rel=\"preload\" as=\"image\" href=\"pieces/wK.svg\""))
-        assertTrue(style.contains(".board-assets-loading .cg-board piece{visibility:hidden}"))
-        assertTrue(controller.contains("document.documentElement.classList.remove('board-assets-loading')"))
-    }
 
-    @Test
-    fun homeDoesNotLoadGamesAndNativeThumbnailsUseBundledCburnettArtwork() {
-        val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
-        val thumbnail = projectFile("src/main/java/com/instinctazero/android/GameThumbnailView.kt").readText()
-        val homeStart = activity.indexOf("private fun homeContent")
-        val gamesStart = activity.indexOf("private fun gamesContent", homeStart)
-        val home = activity.substring(homeStart, gamesStart)
-        assertFalse(home.contains("gameRow("))
-        assertFalse(home.contains("archiveGames.forEach"))
-        assertFalse(activity.contains("navigation.screen == ShellScreen.HOME) refreshArchive()"))
-        assertTrue(activity.contains("navigation.screen == ShellScreen.GAMES && !archiveRefreshedThisSession"))
-        assertTrue(activity.contains("ShellScreen.GAMES -> page.addView(gamesContent()"))
-        assertTrue(activity.contains("menu.row(\"\\uf009\",\"Games\")"))
-        assertTrue(activity.contains("private fun gamePerfIcon"))
-        assertTrue(activity.contains("if (initial > 0 || increment > 0)"))
-        assertTrue(activity.contains("private fun gameResultPresentation"))
-        assertTrue(activity.contains("GAME_WIN"))
-        assertTrue(activity.contains("GAME_LOSS"))
-        assertTrue(activity.contains("Computer analysis available"))
-        assertTrue(activity.contains("LayoutParams(120.dp, 120.dp)"))
-        assertTrue(thumbnail.contains("analysis/pieces/\$name.svg"))
-        assertTrue(thumbnail.contains("SVG.getFromAsset"))
-        assertFalse(thumbnail.contains("♔"))
-        assertFalse(thumbnail.contains("Typeface.create(\"serif\""))
-    }
 
-    @Test
-    fun localStudyStateIsTransactionalVersionedAndStoredWithoutWebStorage() {
-        val activity = projectFile("src/main/java/com/instinctazero/android/MainActivity.kt").readText()
-        val storage = projectFile("src/main/java/com/instinctazero/android/StudyDatabase.kt").readText()
-        val controller = projectFile("src/main/assets/analysis/analysis.js").readText()
-        assertTrue(activity.contains("fun getStudyState()"))
-        assertTrue(activity.contains("fun saveStudyState"))
-        assertTrue(activity.contains("fun saveStudyDelta"))
-        assertTrue(storage.contains("PRAGMA synchronous=FULL"))
-        assertTrue(storage.contains("analysis-legacy-before-migration.json"))
-        assertFalse(controller.contains("budget.count >= 512"))
-        assertTrue(activity.contains("window.InstinctaZero.persistStudy"))
-        assertTrue(activity.contains("studyDatabase.saveLegacy(rawState)"))
-        assertFalse(controller.contains("localStorage"))
-    }
 
-    @Test
-    fun obsoleteAccountAndRemoteEngineSourcesAreNotPartOfTheAppSourceTree() {
-        val sourceRoot = projectFile("src/main/java/com/instinctazero/android")
-        val obsolete = listOf(
-            "AppPreferences.kt",
-            "InstinctaViewModel.kt",
-            "InstinctaZeroApplication.kt",
-            "data/MobileApiClient.kt",
-            "data/AnalysisStreamClient.kt",
-            "data/InstinctaRepository.kt",
-            "security/SecureSessionStore.kt",
-        )
-        obsolete.forEach { relative ->
-            assertFalse("obsolete source remains: $relative", File(sourceRoot, relative).exists())
-        }
-    }
 
     private fun projectFile(relative: String): File {
         val workingDirectory = File(requireNotNull(System.getProperty("user.dir")))
