@@ -38,13 +38,36 @@ class WorkspaceMenuTest {
             val home=menu.home(false,"Not paired · tap to connect",{clicked.add("analysis")},{clicked.add("games")},
                 {clicked.add("library")},{clicked.add("repertoire")},{clicked.add("profile")},{clicked.add("editor")})
             snapshot(home,"home",width,height)
-            val rows=views(home).filter { it.isClickable }
+            // Destination rows are the large touch targets; theme swatches are smaller.
+            val rows=views(home).filter { it.isClickable && it.height>=48 }
             assertEquals(6,rows.size)
-            for(row in rows) { assertTrue(row.height>=48);row.performClick() }
+            for(row in rows) row.performClick()
             assertEquals(listOf("analysis","editor","games","library","repertoire","profile"),clicked)
             val text=views(home).filterIsInstance<TextView>().map { it.text.toString() }
-            assertTrue(text.containsAll(listOf("ANALYSIS","REPERTOIRES","CONNECTION")))
+            assertTrue(text.containsAll(listOf("InstinctaZero","APPEARANCE","ANALYSIS","EXPLORE","REPERTOIRES","CONNECTION")))
         }
+    }
+    @Test fun themeSwatchesPersistTheChoiceAndNotifyTheShell() {
+        val context=RuntimeEnvironment.getApplication(); val menu=WorkspaceMenu(context)
+        UiTheme.select(context,UiTheme.BROWN)
+        val chosen=mutableListOf<UiTheme>()
+        val home=menu.home(false,"Not paired",{},{},{},{},{},{},null,onTheme={ chosen.add(it) })
+        home.measure(View.MeasureSpec.makeMeasureSpec(360,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(584,View.MeasureSpec.EXACTLY))
+        home.layout(0,0,360,584)
+        val ocean=views(home).first { it.contentDescription=="Ocean theme" }
+        ocean.performClick()
+        assertEquals(listOf(UiTheme.BLUE),chosen)
+        assertEquals(UiTheme.BLUE,UiTheme.current(context))
+        UiTheme.select(context,UiTheme.BROWN)
+    }
+    @Test fun everyThemeRendersACompleteMenu() {
+        val context=RuntimeEnvironment.getApplication()
+        for(option in UiTheme.entries) {
+            UiTheme.select(context,option)
+            val home=WorkspaceMenu(context).home(true,"Connected",{},{},{},{},{},{})
+            snapshot(home,"home-"+option.key,390,724)
+        }
+        UiTheme.select(context,UiTheme.BROWN)
     }
     @Test fun nativeLibraryCreatesNamesChoosesColourAndOpensTheRightBook() {
         val context=RuntimeEnvironment.getApplication();val state=RepertoireLibraryState()

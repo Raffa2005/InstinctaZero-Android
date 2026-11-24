@@ -1,0 +1,61 @@
+/* Theme palettes. analysis.js sets html[data-theme] and persists the choice
+   through the native UI settings ("appearance"), which also themes the native shell. */
+:root,html[data-theme="brown"]{
+  --accent:#d0b87c;--accent-hi:#f0ddac;--accent-dim:#a29160;--accent-ink:#26231b;
+  --accent-soft:rgba(208,184,124,.16);--accent-bg:#4a4331;--accent-press:#57503a;
+  --panel:#36342f;--panel-alt:#2b2a26;--current:#3b93da;
+}
+html[data-theme="blue"]{
+  --accent:#8fb4e2;--accent-hi:#bcd6f2;--accent-dim:#5f7ea6;--accent-ink:#1c2431;
+  --accent-soft:rgba(143,180,226,.16);--accent-bg:#33445c;--accent-press:#3d5170;
+  --panel:#333842;--panel-alt:#292d35;--current:#4d9cec;
+}
+html[data-theme="green"]{
+  --accent:#a6c98d;--accent-hi:#cfe6b8;--accent-dim:#7a9a63;--accent-ink:#202a1c;
+  --accent-soft:rgba(166,201,141,.16);--accent-bg:#3c4a35;--accent-press:#48593f;
+  --panel:#333a34;--panel-alt:#292e29;--current:#3b93da;
+}
+html[data-theme="grey"]{
+  --accent:#c2c9d6;--accent-hi:#dde2ea;--accent-dim:#8a919e;--accent-ink:#232529;
+  --accent-soft:rgba(194,201,214,.15);--accent-bg:#42464e;--accent-press:#4d525b;
+  --panel:#37383b;--panel-alt:#2b2c2f;--current:#3b93da;
+}
+/* Accent-driven overrides. These intentionally win over analysis.css/repertoire.css. */
+.analysis,.panel{background:var(--panel)}
+.tabs button.selected{color:#eee;border-bottom-color:var(--accent)}
+.actions button.return-mainline{color:var(--accent);background:var(--accent-soft);border-top-color:var(--accent)}
+.promotion-picker{border-color:var(--accent)}
+button:focus-visible{outline-color:var(--accent)}
+.range-row input[type=range]{accent-color:var(--accent)}
+.touch-switch.on i{background:var(--accent-dim)}
+.settings-segments button[aria-pressed=true],.fish-source button[aria-pressed=true]{color:var(--accent-hi);background:var(--accent-bg)}
+.source-row button.selected,.backend-row button.selected,.filter-chip.selected{background:var(--accent-bg);color:var(--accent-hi)}
+.arrow-mode-row button[aria-pressed=true]{background:var(--accent-bg);color:var(--accent-hi)}
+.move.current{background:var(--current);color:#fff}
+.fish-settings{background:var(--panel-alt);color:var(--accent-hi);border-bottom-color:var(--accent-bg)}
+.rep-button[data-fish][aria-pressed=true]{background:var(--accent-bg);color:var(--accent-hi);border-color:var(--accent-dim)}
+.engine-pane header,#sf-eval{background:var(--panel-alt);color:var(--accent-hi)}
+.rep-section-label{color:var(--accent-dim)}
+.rep-card.checked{border-color:var(--accent-dim);background:var(--accent-soft)}
+.rep-check{color:var(--accent)}
+.rep-card.checked .rep-check{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.rep-emblem{color:var(--accent)}
+.rep-welcome .rep-button{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.rep-filters .selected{border-color:var(--accent);color:var(--accent-hi);background:var(--accent-soft)}
+.rep-comment{border-left-color:var(--accent-dim)}
+.rep-comment-toolbar [data-rep-action=save-comment]{background:var(--accent-press);border-color:var(--accent-dim);color:var(--accent-hi)}
+.rep-comment-editor textarea{outline-color:var(--accent)}
+.rep-current-note>.fa,.rep-current-note>span:last-child,.rep-move .rep-comment-toggle{color:var(--accent)}
+.rep-end{color:var(--accent-hi)}
+.rep-extend>.rep-button{border-color:var(--accent-dim);color:var(--accent-hi)}
+.rep-undo-setting{border-color:var(--accent-dim);color:var(--accent-hi)}
+.panel-buttons [data-promote-variation]{color:var(--accent-hi);background:var(--accent-soft);border-color:var(--accent-dim)}
+/* Theme picker inside Board settings. */
+.theme-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:6px 0 2px}
+.theme-row button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:54px;padding:8px 2px 6px;border:1px solid #56564e;border-radius:9px;background:#454642;color:#ddd;font:11px Noto,sans-serif;touch-action:manipulation}
+.theme-row button .dot{width:18px;height:18px;border-radius:50%;box-shadow:inset 0 0 0 2px rgba(0,0,0,.28)}
+.theme-row button[aria-pressed=true]{border-color:var(--accent);color:var(--accent-hi);background:var(--accent-soft)}
+.dot-brown{background:linear-gradient(135deg,#413828 50%,#d0b87c 50%)}
+.dot-blue{background:linear-gradient(135deg,#2c3d55 50%,#8fb4e2 50%)}
+.dot-green{background:linear-gradient(135deg,#31442f 50%,#a6c98d 50%)}
+.dot-grey{background:linear-gradient(135deg,#3a3d44 50%,#c2c9d6 50%)}

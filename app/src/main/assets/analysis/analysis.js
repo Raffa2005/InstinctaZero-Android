@@ -17,8 +17,10 @@
   const NODE_OPTIONS = [100, 200, 400, 700, 1000, 2000, 4000, 7000, 10000, 20000, 40000, 70000, 100000];
   const BOOK_SPEEDS = ['bullet','blitz','rapid','classical','correspondence'];
   const BOOK_RATINGS = [1600,1800,2000,2200,2500];
+  const THEMES = { brown:'Ember', blue:'Ocean', green:'Pine', grey:'Slate' };
   let settingsSection='Board';
-  const settings = { leelaLines:0, sfLines:2, sfDepth:16, smartInput: true, nodes: 1000, arrowCount: 8, arrowMode:'best', enabled: true, showArrows: true, backend:'cpu', bookSource:'lichess', bookSpeeds:[], bookRatings:[] };
+  const settings = { leelaLines:0, sfLines:2, sfDepth:16, smartInput: true, nodes: 1000, arrowCount: 8, arrowMode:'best', enabled: true, showArrows: true, backend:'cpu', bookSource:'lichess', bookSpeeds:[], bookRatings:[], appearance:'brown' };
+  function applyTheme() { document.documentElement.dataset.theme = THEMES[settings.appearance] ? settings.appearance : 'brown'; }
   let tab = 'engine', panelView = null, promotionPicker = null, nodeId = 0, restoring = false, activeNavigationStop = null, analysisActive = false, bookSettingsDirty = false, persistTimer = null, variationTarget = null;
   let studyContext = { gameId:null, initialFen:START_FEN, title:'Local analysis', subtitle:'Starting position' };
   const root = { id: 0, fen: START_FEN, san: null, move: null, number: 1, color: 'w', parent: null, children: [], selectedChild: null };
@@ -182,8 +184,8 @@
   }
   function clampInteger(value, minimum, maximum, fallback) { const parsed = Number.parseInt(String(value == null ? '' : value), 10); return Number.isFinite(parsed) ? Math.max(minimum, Math.min(maximum, parsed)) : fallback; }
   function orderedSelection(values, allowed) { const selected = new Set(Array.isArray(values) ? values.map(String) : []); return allowed.filter(value => selected.has(String(value))); }
-  function loadUiSettings() { fishOptions(); if (!native() || !native().getUiSettings) return; try { const saved = JSON.parse(native().getUiSettings() || '{}'); settings.leelaLines=clampInteger(saved.leelaLines,0,8,0);settings.sfLines=clampInteger(saved.sfLines,1,8,2);settings.sfDepth=clampInteger(saved.sfDepth,8,24,16); if(typeof saved.smartInput === 'boolean')settings.smartInput=saved.smartInput; settings.nodes = NODE_OPTIONS.includes(Number(saved.nodes)) ? Number(saved.nodes) : settings.nodes; settings.arrowCount = clampInteger(saved.arrowCount, 1, 8, settings.arrowCount); if (saved.arrowMode === 'best' || saved.arrowMode === 'maneuver') settings.arrowMode = saved.arrowMode; if (typeof saved.leelaEnabled === 'boolean') settings.enabled = saved.leelaEnabled; if (typeof saved.arrowsEnabled === 'boolean') settings.showArrows = saved.arrowsEnabled; if (saved.engineBackend === 'cpu' || saved.engineBackend === 'sycl') settings.backend = saved.engineBackend; if (saved.bookSource === 'masters' || saved.bookSource === 'lichess') settings.bookSource = saved.bookSource; settings.bookSpeeds = orderedSelection(saved.bookSpeeds, BOOK_SPEEDS); settings.bookRatings = orderedSelection(saved.bookRatings, BOOK_RATINGS); } catch (_) {} }
-  function saveUiSettings() { if (!native() || !native().saveUiSettings) return; native().saveUiSettings(JSON.stringify({ leelaLines:settings.leelaLines,sfLines:settings.sfLines,sfDepth:settings.sfDepth,smartInput:settings.smartInput, nodes: settings.nodes, arrowCount: settings.arrowCount, arrowMode:settings.arrowMode, leelaEnabled: settings.enabled, arrowsEnabled: settings.showArrows, engineBackend:settings.backend, appearance: 'brown', bookSource:settings.bookSource, bookSpeeds:settings.bookSpeeds, bookRatings:settings.bookRatings })); }
+  function loadUiSettings() { fishOptions(); if (!native() || !native().getUiSettings) return; try { const saved = JSON.parse(native().getUiSettings() || '{}'); settings.leelaLines=clampInteger(saved.leelaLines,0,8,0);settings.sfLines=clampInteger(saved.sfLines,1,8,2);settings.sfDepth=clampInteger(saved.sfDepth,8,24,16); if(typeof saved.smartInput === 'boolean')settings.smartInput=saved.smartInput; settings.nodes = NODE_OPTIONS.includes(Number(saved.nodes)) ? Number(saved.nodes) : settings.nodes; settings.arrowCount = clampInteger(saved.arrowCount, 1, 8, settings.arrowCount); if (saved.arrowMode === 'best' || saved.arrowMode === 'maneuver') settings.arrowMode = saved.arrowMode; if (typeof saved.leelaEnabled === 'boolean') settings.enabled = saved.leelaEnabled; if (typeof saved.arrowsEnabled === 'boolean') settings.showArrows = saved.arrowsEnabled; if (saved.engineBackend === 'cpu' || saved.engineBackend === 'sycl') settings.backend = saved.engineBackend; if (saved.bookSource === 'masters' || saved.bookSource === 'lichess') settings.bookSource = saved.bookSource; settings.bookSpeeds = orderedSelection(saved.bookSpeeds, BOOK_SPEEDS); settings.bookRatings = orderedSelection(saved.bookRatings, BOOK_RATINGS); if (typeof saved.appearance === 'string' && THEMES[saved.appearance]) settings.appearance = saved.appearance; } catch (_) {} applyTheme(); }
+  function saveUiSettings() { if (!native() || !native().saveUiSettings) return; native().saveUiSettings(JSON.stringify({ leelaLines:settings.leelaLines,sfLines:settings.sfLines,sfDepth:settings.sfDepth,smartInput:settings.smartInput, nodes: settings.nodes, arrowCount: settings.arrowCount, arrowMode:settings.arrowMode, leelaEnabled: settings.enabled, arrowsEnabled: settings.showArrows, engineBackend:settings.backend, appearance: settings.appearance, bookSource:settings.bookSource, bookSpeeds:settings.bookSpeeds, bookRatings:settings.bookRatings })); }
   function studyRequest() { const request = { history: history(), nodes: settings.nodes, backend:settings.backend }; if(settings.leelaLines)request.leela_lines=settings.leelaLines; if (fish.server) Object.assign(request,{engines:settings.enabled?'both':'stockfish',sf_lines:settings.sfLines,sf_depth:settings.sfDepth}); if (studyContext.gameId) request.game_id = studyContext.gameId; else if(studyContext.editedPosition)request.initial_fen = studyContext.initialFen; return request; }
   function explorerRequest() { const request = { history: history(), source:settings.bookSource }; if (studyContext.gameId) request.game_id = studyContext.gameId; else if(studyContext.editedPosition)request.initial_fen = studyContext.initialFen; if (settings.bookSource === 'lichess') { if (settings.bookSpeeds.length) request.speeds = settings.bookSpeeds.slice(); if (settings.bookRatings.length) request.ratings = settings.bookRatings.slice(); } return request; }
   function moveUci(node) { return node && node.move ? node.move.from + node.move.to + (node.move.promotion || '') : ''; }
@@ -426,7 +428,8 @@
           '<small role="status">'+safe(fish.download || 'Lite 1.9 MB · Full 99 MB')+'</small>';
       }else controls=row('Arrows','arrow-count',1,8,settings.arrowCount,settings.arrowCount)+
         '<div class="arrow-mode-row" role="group" aria-label="Move arrows">'+['best','maneuver'].map(m=>'<button data-arrow-mode="'+m+'" aria-pressed="'+(settings.arrowMode===m)+'">'+(m==='best'?'Best moves':'Best + maneuver')+'</button>').join('')+'</div>'+
-        '<div class="switch-row">'+switchButton('arrows','Arrows',settings.showArrows)+switchButton('smartInput','One tap',settings.smartInput)+'</div>';
+        '<div class="switch-row">'+switchButton('arrows','Arrows',settings.showArrows)+switchButton('smartInput','One tap',settings.smartInput)+'</div>'+
+        '<div class="filter-title">Theme</div><div class="theme-row" role="group" aria-label="Color theme">'+Object.keys(THEMES).map(key=>'<button data-theme-choice="'+key+'" aria-pressed="'+(settings.appearance===key)+'"><i class="dot dot-'+key+'" aria-hidden="true"></i>'+THEMES[key]+'</button>').join('')+'</div>';
       return '<div class="panel-view compact-settings">'+selector+controls+'</div>';
     }
     if (panelView === 'bookSettings') return '<div class="panel-view book-settings">' +
@@ -459,6 +462,7 @@
     if (panelView === 'repertoireSettings') { if (repertoirePanel) repertoirePanel.bind(panel); return; }
     if (panelView === 'settings') {
       panel.querySelectorAll('[data-section]').forEach(b=>b.onclick=()=>{settingsSection=b.dataset.section;renderPanel();});
+      panel.querySelectorAll('[data-theme-choice]').forEach(button=>button.onclick=()=>{const choice=button.dataset.themeChoice;if(!THEMES[choice]||choice===settings.appearance)return;settings.appearance=choice;applyTheme();saveUiSettings();panel.querySelectorAll('[data-theme-choice]').forEach(item=>item.setAttribute('aria-pressed',item.dataset.themeChoice===choice));});
       for(const [key,field] of [['sf-lines','sfLines'],['sf-depth','sfDepth'],['leela-lines','leelaLines']]){
         const slider=panel.querySelector('[data-'+key+']');if(!slider)continue;
         slider.oninput=()=>panel.querySelector('[data-'+key+'-readout]').textContent=Number(slider.value)||'All';
@@ -648,6 +652,7 @@
     renderPanel();
   };
   window.InstinctaZero.openBoardEditor = openBoardEditor;
+  window.InstinctaZero.syncTheme = function () { try { const saved = JSON.parse(native()?.getUiSettings?.() || '{}'); if (typeof saved.appearance === 'string' && THEMES[saved.appearance]) settings.appearance = saved.appearance; } catch (_) {} applyTheme(); };
   function rememberEngineInput(data) { inputEvidence.remember(chess.fen(),settings.backend,legalMoves(),data); }
   window.InstinctaZero.onNativeAnalysis = function (id, payloadJson) {
     if(id!==engine.requestId)return;let payload;
@@ -755,5 +760,5 @@
     settings:() => openPanelView('repertoireSettings'), closeSettings:closePanelView
   }) : null;
   window.InstinctaZero.openRepertoires = id => { window.InstinctaZero.setAnalysisActive(true); if(gameLoading) { gameLoading.tab = 'repertoire';gameLoading.repertoireId = id;return; } if(repertoirePanel)repertoirePanel.openLibrary(id); };
-  loadUiSettings(); loadStudyState(); document.querySelectorAll('.tabs [data-tab]').forEach(item => item.classList.toggle('selected', item.dataset.tab === tab)); renderPanel(); refreshBoardBounds();
+  loadUiSettings(); applyTheme(); loadStudyState(); document.querySelectorAll('.tabs [data-tab]').forEach(item => item.classList.toggle('selected', item.dataset.tab === tab)); renderPanel(); refreshBoardBounds();
 }());

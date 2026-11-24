@@ -348,6 +348,10 @@ class MainActivity : ComponentActivity() {
         archiveLoading = false
         nativeLayer.visibility = View.GONE
         webView.visibility = if(privacyRefreshPending) View.INVISIBLE else View.VISIBLE
+        if (webPageLoaded) webView.evaluateJavascript(
+            "window.InstinctaZero&&window.InstinctaZero.syncTheme&&window.InstinctaZero.syncTheme();void 0;",
+            null,
+        )
         if (webPageLoaded && pendingArchivedGame == null && !pendingBoardEditor) setAnalysisActive(true)
     }
 
@@ -548,7 +552,7 @@ class MainActivity : ComponentActivity() {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         setPadding(4.dp, 0, 10.dp, 0)
-        setBackgroundColor(HEADER_BACKGROUND)
+        setBackgroundColor(UiTheme.current(this@MainActivity).header)
         val childScreen = navigation.screen in listOf(ShellScreen.PROFILE,ShellScreen.GAMES,ShellScreen.REPERTOIRES)
         val leading = shellButton(if (childScreen) "‹" else "☰", 25f).apply {
             contentDescription = if (childScreen) "Back to home" else "Open menu"
@@ -602,7 +606,8 @@ class MainActivity : ComponentActivity() {
         val paired = nativeBridge.isPaired()
         val menu = WorkspaceMenu(this)
         return menu.home(paired,connectionSummary(),::showAnalysisScreen,
-            { if(paired)showGamesScreen() else showProfileScreen() },::showRepertoireLibrary,{showRepertoires()},::showProfileScreen,::showBoardEditor,privacyControl())
+            { if(paired)showGamesScreen() else showProfileScreen() },::showRepertoireLibrary,{showRepertoires()},::showProfileScreen,::showBoardEditor,privacyControl(),
+            { renderNativeScreen() })
     }
 
     private fun gamesContent(): View {
@@ -1156,7 +1161,6 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private val SHELL_BACKGROUND = 0xff2b2b2b.toInt()
-        private val HEADER_BACKGROUND = 0xff222222.toInt()
         private val TEXT_MUTED = 0xffaaaaaa.toInt()
         private val ERROR_TEXT = 0xffff9e80.toInt()
         private val GAME_WIN = 0xff7fa650.toInt()
